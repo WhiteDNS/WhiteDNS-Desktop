@@ -199,6 +199,8 @@ const maxValidatorWorkers = 2048;
 const errorToastTTLMS = 6000;
 const dashboardNativeSelectThreshold = 500;
 const whiteDnsTelegramUrl = "https://t.me/whitedns";
+const whiteVpnDesktopReleasesUrl = "https://github.com/WhiteDNS/WhiteVPN-Desktop/releases";
+const whiteVpnNoticeDismissedKey = "whitedns.desktop.vpnMovedNotice.dismissed";
 const importTypeOptions: Array<[ImportType, string]> = [
   ["masterdns", "MasterDNS"],
   ["stormdns", "StormDNS"],
@@ -1724,6 +1726,24 @@ function DashboardPage({
     proxyCountryLookup,
     proxyCountryLookupRunning
   );
+  const [vpnNoticeDismissed, setVpnNoticeDismissed] = useState(() => {
+    try {
+      return window.localStorage?.getItem(whiteVpnNoticeDismissedKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const showVpnMovedNotice = !vpnNoticeDismissed;
+
+  function dismissVpnMovedNotice() {
+    setVpnNoticeDismissed(true);
+    try {
+      window.localStorage?.setItem(whiteVpnNoticeDismissedKey, "1");
+    } catch {
+      // A blocked storage quota only means the notice comes back next launch.
+    }
+  }
+
   const dashboardStatus = parallelRunning ? "parallel-testing" : parallelFailed ? "failed" : masterRuntimeActive ? runtime.status : "disconnected";
   const dashboardTitle = parallelRunning
     ? "Testing"
@@ -2073,6 +2093,28 @@ function DashboardPage({
           </div>
         </CardContent>
       </Card>
+
+      {showVpnMovedNotice && (
+        <Alert>
+          <Power />
+          <AlertTitle>VPN and V2Ray moved to WhiteVPN Desktop</AlertTitle>
+          <AlertDescription>
+            They ship as their own app now. Your saved profiles are still here: export a Full Backup
+            and import it in WhiteVPN Desktop, or let it pick them up on first launch.
+          </AlertDescription>
+          <AlertAction>
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" size="sm" onClick={() => openExternalUrl(whiteVpnDesktopReleasesUrl)}>
+                <ExternalLink />
+                Get WhiteVPN
+              </Button>
+              <Button variant="ghost" size="sm" onClick={dismissVpnMovedNotice}>
+                Dismiss
+              </Button>
+            </div>
+          </AlertAction>
+        </Alert>
+      )}
 
       {(missingConnection || missingResolvers) && (
         <Alert className="border-amber-200 bg-amber-50 text-amber-950">

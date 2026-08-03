@@ -46,6 +46,9 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci --prefix desktop/frontend
 
+      - name: Build frontend assets
+        run: npm run build --prefix desktop/frontend
+
       - name: Install Wails CLI
         working-directory: desktop
         run: |

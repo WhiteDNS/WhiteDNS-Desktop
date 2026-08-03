@@ -46,7 +46,7 @@ Linux release jobs also publish native distro packages and an amd64 AppImage. Li
 
 For newer RPM-based distributions that provide WebKitGTK 4.1 instead of 4.0, use the `linux-amd64-webkit41.rpm` asset. The older WebKitGTK 4.0 Linux assets remain for older distributions.
 
-Pass the release version with `VERSION=1.0.0`, or use the GNU-make-safe flag form `make all -- --version 1.0.0`. Release staging writes platform folders under `build/releases/all/` and versioned compressed assets such as `WhiteDNS-Desktop-1.1.0-macos-arm64.zip`.
+Pass the release version with `VERSION=1.0.0`, or use the GNU-make-safe flag form `make all -- --version 1.0.0`. Release staging writes platform folders under `build/releases/all/` and versioned compressed assets such as `WhiteDNS-Desktop-1.1.1-macos-arm64.zip`.
 
 For Ubuntu 24.04+ Linux builds, pass `LINUX_GO_TAGS=webkit2_41` and install `libwebkit2gtk-4.1-dev`. Ubuntu 22.04 builds can use the default WebKitGTK 4.0 dependency. To build native Linux packages locally, install `dpkg-deb` and `rpmbuild`, then run `make package-linux-distros`. To include an amd64 AppImage, also include `appimage` in `LINUX_PACKAGE_FORMATS`; the packaging script downloads linuxdeploy unless `LINUXDEPLOY_BIN` points to an executable local copy.
 

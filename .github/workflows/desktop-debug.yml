@@ -172,12 +172,20 @@ jobs:
           docker run --rm -v "$PWD/$package_dir:/packages:ro" archlinux:base \
             pacman -Qip "/packages/$package_name"
 
+      - name: Upload Arch Linux package
+        if: matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v6
+        with:
+          name: WhiteDNS-Desktop-WhiteDns-debug-archlinux-x64
+          path: desktop/build/releases/debug/whitedns-desktop-*.pkg.tar.zst
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Upload Linux packages
         uses: actions/upload-artifact@v6
         with:
           name: WhiteDNS-Desktop-WhiteDns-debug-linux-${{ matrix.label }}
           path: |
             desktop/build/releases/debug/WhiteDNS-Desktop-*
-            desktop/build/releases/debug/whitedns-desktop-*.pkg.tar.zst
           if-no-files-found: error
           retention-days: 14

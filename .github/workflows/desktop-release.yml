@@ -192,7 +192,6 @@ jobs:
                 grep -Fxq 'xdata = pkgtype=pkg' <<<"$pkginfo"
                 grep -Fxq 'depend = gtk3' <<<"$pkginfo"
                 grep -Fxq 'depend = webkit2gtk-4.1' <<<"$pkginfo"
-                paths="${paths}"$'\n'"$arch_package"
               fi
               if [[ ",$package_formats," == *",appimage,"* ]]; then
                 appimage="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.AppImage"
@@ -207,6 +206,14 @@ jobs:
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           printf '%s\n' "$paths" | xargs ls -lh
+
+      - name: Upload Arch Linux package
+        if: matrix.kind == 'linux' && matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v6
+        with:
+          name: whitedns-desktop-archlinux-x64
+          path: desktop/build/releases/whitedns-desktop-*.pkg.tar.zst
+          if-no-files-found: error
 
       - name: Upload package
         uses: actions/upload-artifact@v6

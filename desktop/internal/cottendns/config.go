@@ -61,12 +61,16 @@ var runtimeFallbacks = []struct {
 	// A full RX channel drops inbound packets outright and logs "RX queue
 	// overloaded", which then costs a retransmit for every drop. The engine's
 	// 2048 is sized for a phone; a desktop pulling 1080p video fills it in about
-	// a minute, and 480p in several. Wider queues and more workers to drain them
-	// cost memory and a little CPU, both of which a desktop has.
+	// a minute, and 480p in several.
+	//
+	// Only the receive side is widened. Raising TX_CHANNEL_SIZE deepens the send
+	// queue in front of the ARQ, inflating the RTT samples it derives its RTO
+	// from, which buys spurious retransmits. Raising the worker counts was worse
+	// still: every processor serialises on fragmentstore's single global mutex,
+	// so more of them contend rather than drain, and RX_TX_WORKERS additionally
+	// opens one UDP socket each, doubling the NAT mappings a home router has to
+	// hold. Both were tried in 1.1.2 and reported as slower.
 	{"RX_CHANNEL_SIZE", 8192},
-	{"TX_CHANNEL_SIZE", 8192},
-	{"RX_TX_WORKERS", 8},
-	{"TUNNEL_PROCESS_WORKERS", 8},
 }
 
 type OptionChoice struct {

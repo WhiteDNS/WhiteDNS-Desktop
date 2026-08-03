@@ -29,6 +29,37 @@ var survivalTemplate string
 //go:embed client_config.tcp-survival.toml
 var tcpSurvivalTemplate string
 
+// DefaultConfigPreset is the preset a CottenDNS profile runs under when the
+// user has not picked one. The engine's own "default" preset probes each MTU
+// candidate once and rejects it on any loss at all (MTU_PROBE_SAMPLES = 1,
+// MTU_MAX_LOSS = 0), so a single dropped probe pins a resolver to a small MTU
+// for the whole session and every query then carries less payload for the same
+// overhead. "speed" samples four times against a 25% budget and lets
+// duplication adapt to measured loss instead of staying pinned high.
+const DefaultConfigPreset = "speed"
+
+// runtimeFallbacks are written into a runnable client config when the user has
+// not set them. They are engine defaults the Android client already overrides,
+// kept here so both clients accept the same resolvers and shape queries the
+// same way. A settings export never emits them, so an untouched key stays
+// untouched.
+var runtimeFallbacks = []struct {
+	key   string
+	value any
+}{
+	// The speed preset rotates in HTTPS queries. Filtered networks drop non-TXT
+	// records, which surfaces as loss and retransmits, so TXT-only stays the
+	// default until the user asks for the rotation.
+	{"QUERY_TYPES", []string{"TXT"}},
+	// MIN_*_MTU is a rejection threshold, not a floor: a resolver that cannot
+	// sustain it is dropped from the pool outright. The engine defaults of
+	// 100/1000 discard resolvers the Android client keeps at 40/300, which costs
+	// desktop the parallel capacity those resolvers carry. The maxima stay at
+	// the engine's higher ceilings.
+	{"MIN_UPLOAD_MTU", 40},
+	{"MIN_DOWNLOAD_MTU", 300},
+}
+
 type OptionChoice struct {
 	Value any    `json:"value"`
 	Label string `json:"label"`
@@ -143,7 +174,7 @@ func EffectiveOptions(overrides map[string]any) map[string]any {
 	loadSchema()
 	normalized := NormalizeOverrides(overrides)
 	out := cloneMap(defaults)
-	presetName := stringValue(normalized["CONFIG_PRESET"], "default")
+	presetName := stringValue(normalized["CONFIG_PRESET"], DefaultConfigPreset)
 	if preset, ok := presets[presetName]; ok {
 		for key, value := range preset {
 			out[key] = value
@@ -206,6 +237,18 @@ func renderTOML(connection model.ConnectionProfile, overrides map[string]any, in
 	line("# WHITEDNS_IMPORT_TYPE = \"cottendns\"")
 	if value, ok := normalized["CONFIG_PRESET"]; ok {
 		line("CONFIG_PRESET = %s", formatTOMLValue(value))
+	} else if includeConnection {
+		// Only a runnable client config states the fallback preset. A settings
+		// export stays sparse so the unset keys keep round tripping as unset
+		// rather than hardening into user overrides.
+		line("CONFIG_PRESET = %s", formatTOMLValue(DefaultConfigPreset))
+	}
+	if includeConnection {
+		for _, fallback := range runtimeFallbacks {
+			if _, ok := normalized[fallback.key]; !ok {
+				line("%s = %s", fallback.key, formatTOMLValue(fallback.value))
+			}
+		}
 	}
 	if includeConnection {
 		domains := model.ConnectionDomains(connection)

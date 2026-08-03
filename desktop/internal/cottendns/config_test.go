@@ -118,3 +118,45 @@ func TestNormalizeOverridesRejectsInvalidCottenDNSPorts(t *testing.T) {
 		t.Fatalf("out-of-range CottenDNS local DNS port was retained: %#v", normalized)
 	}
 }
+
+// A profile the user never customised must still run under the speed preset.
+// The engine's own "default" probes each MTU candidate once and rejects it on
+// any loss, which pins resolvers to small MTUs and caps throughput for the
+// whole session. TXT-only is kept because speed otherwise rotates in HTTPS
+// queries that filtered networks drop.
+func TestUncustomisedProfileRunsUnderTheSpeedPreset(t *testing.T) {
+	values := EffectiveOptions(map[string]any{})
+	if values["MTU_PROBE_SAMPLES"] != 4 || values["MTU_MAX_LOSS"] != 0.25 {
+		t.Fatalf("expected the speed MTU probe budget, got samples=%v max_loss=%v",
+			values["MTU_PROBE_SAMPLES"], values["MTU_MAX_LOSS"])
+	}
+	if values["ADAPTIVE_DUPLICATION"] != true {
+		t.Fatalf("duplication must be free to decay on a clean link: %v", values["ADAPTIVE_DUPLICATION"])
+	}
+
+	raw := RenderClientTOML(model.ConnectionProfile{}, map[string]any{})
+	if !strings.Contains(raw, `CONFIG_PRESET = "speed"`) {
+		t.Fatalf("runtime config did not fall back to the speed preset:\n%s", raw)
+	}
+	for _, want := range []string{
+		`QUERY_TYPES = ["TXT"]`,
+		"MIN_UPLOAD_MTU = 40",
+		"MIN_DOWNLOAD_MTU = 300",
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("runtime config missing %q:\n%s", want, raw)
+		}
+	}
+
+	// An explicit choice still wins, including going back to the engine default.
+	raw = RenderClientTOML(model.ConnectionProfile{}, map[string]any{"CONFIG_PRESET": "survival"})
+	if !strings.Contains(raw, `CONFIG_PRESET = "survival"`) {
+		t.Fatalf("explicit preset must win over the fallback:\n%s", raw)
+	}
+
+	// A settings export stays sparse so unset keys keep round tripping as unset.
+	if settingsTOML := RenderSettingsTOML(map[string]any{}); strings.Contains(settingsTOML, "CONFIG_PRESET") ||
+		strings.Contains(settingsTOML, "QUERY_TYPES") {
+		t.Fatalf("settings export must not harden the fallback into an override:\n%s", settingsTOML)
+	}
+}

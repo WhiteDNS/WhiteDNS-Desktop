@@ -7,7 +7,7 @@ version="${VERSION:-${APP_VERSION:-1.0.0-beta6}}"
 source_dir="${PACKAGE_SOURCE_DIR:-build/bin}"
 output_dir="${PACKAGE_OUTPUT_DIR:-build/releases}"
 arch="${LINUX_ARCH:-$(go env GOARCH)}"
-webkit="${LINUX_WEBKIT:-4.0}"
+webkit="${LINUX_WEBKIT:-4.1}"
 formats="${LINUX_PACKAGE_FORMATS-deb,rpm}"
 asset_suffix="${LINUX_ASSET_SUFFIX:-linux-$arch}"
 description="${LINUX_PACKAGE_DESCRIPTION:-WhiteDNS desktop client}"
@@ -20,10 +20,12 @@ case "$arch" in
   amd64)
     deb_arch="amd64"
     rpm_arch="x86_64"
+    archlinux_arch="x86_64"
     ;;
   arm64)
     deb_arch="arm64"
     rpm_arch="aarch64"
+    archlinux_arch="aarch64"
     ;;
   *)
     printf 'Unsupported Linux package architecture: %s\n' "$arch" >&2
@@ -36,7 +38,8 @@ case "$webkit" in
     deb_webkit_dep="libwebkit2gtk-4.1-0"
     ;;
   *)
-    deb_webkit_dep="libwebkit2gtk-4.0-37"
+    printf 'Unsupported WebKitGTK ABI: %s; WhiteDNS Linux builds require 4.1\n' "$webkit" >&2
+    exit 1
     ;;
 esac
 
@@ -148,9 +151,9 @@ Priority: optional
 Architecture: $deb_arch
 Maintainer: $maintainer
 Installed-Size: $installed_size
-Depends: ca-certificates, libgtk-3-0, $deb_webkit_dep
+Depends: ca-certificates, libgtk-3-0t64 | libgtk-3-0, $deb_webkit_dep
 Description: $description
- Managed desktop client for WhiteDNS and StormDNS.
+ Managed desktop client for MasterDNS, StormDNS, and CottenDNS.
 EOF
 
   deb_path="$output_dir/$asset_base.deb"
@@ -185,9 +188,11 @@ Release: $rpm_release%{?dist}
 Summary: $description
 License: $license
 Requires: ca-certificates
+Requires: gtk3
+Requires: webkit2gtk4.1
 
 %description
-Managed desktop client for WhiteDNS and StormDNS.
+Managed desktop client for MasterDNS, StormDNS, and CottenDNS.
 
 %prep
 
@@ -216,6 +221,88 @@ EOF
   fi
   cp "$rpm_path" "$output_dir/$asset_base.rpm"
   printf 'Created RPM package %s\n' "$output_dir/$asset_base.rpm"
+fi
+
+if format_enabled arch; then
+  if ! command -v bsdtar >/dev/null 2>&1; then
+    printf 'bsdtar is required to build Arch Linux packages\n' >&2
+    exit 1
+  fi
+  if ! command -v zstd >/dev/null 2>&1; then
+    printf 'zstd is required to build Arch Linux packages\n' >&2
+    exit 1
+  fi
+  if ! command -v gzip >/dev/null 2>&1 || ! command -v sha256sum >/dev/null 2>&1; then
+    printf 'gzip and sha256sum are required to build Arch Linux package metadata\n' >&2
+    exit 1
+  fi
+
+  arch_root="$tmp_dir/arch"
+  arch_version="$(printf '%s' "$version" | sed 's/[^A-Za-z0-9._+]/_/g')"
+  arch_build_date="${SOURCE_DATE_EPOCH:-$(date +%s)}"
+  arch_installed_size="$((installed_size * 1024))"
+  mkdir -p "$arch_root"
+  cp -R "$payload_root"/. "$arch_root"/
+  cat > "$tmp_dir/PKGBUILD" <<EOF
+pkgname=$package_name
+pkgver=$arch_version
+pkgrel=1
+pkgdesc='$description'
+arch=('$archlinux_arch')
+url='https://github.com/WhiteDNS/WhiteDNS-Desktop'
+license=('$license')
+depends=('ca-certificates' 'gtk3' 'webkit2gtk-4.1')
+package() { :; }
+EOF
+  arch_pkgbuild_sha256="$(sha256sum "$tmp_dir/PKGBUILD" | awk '{print $1}')"
+  cat > "$arch_root/.PKGINFO" <<EOF
+pkgname = $package_name
+pkgbase = $package_name
+xdata = pkgtype=pkg
+pkgver = $arch_version-1
+pkgdesc = $description
+url = https://github.com/WhiteDNS/WhiteDNS-Desktop
+builddate = $arch_build_date
+packager = $maintainer
+size = $arch_installed_size
+arch = $archlinux_arch
+license = $license
+depend = ca-certificates
+depend = gtk3
+depend = webkit2gtk-4.1
+EOF
+
+  cat > "$arch_root/.BUILDINFO" <<EOF
+format = 2
+pkgname = $package_name
+pkgbase = $package_name
+pkgver = $arch_version-1
+pkgarch = $archlinux_arch
+pkgbuild_sha256sum = $arch_pkgbuild_sha256
+packager = $maintainer
+builddate = $arch_build_date
+builddir = /build
+startdir = /build
+buildtool = whitedns-ci
+buildtoolver = 1-1-$archlinux_arch
+buildenv = !distcc
+options = !debug
+EOF
+
+  (
+    cd "$arch_root"
+    bsdtar --uid 0 --gid 0 --uname root --gname root --format=mtree --options='!all,use-set,type,uid,gid,mode,time,size,sha256,link' -cf - .BUILDINFO .PKGINFO opt usr > "$tmp_dir/MTREE"
+    gzip -c -n "$tmp_dir/MTREE" > .MTREE
+  )
+
+  arch_path="$output_dir/$package_name-$arch_version-1-$archlinux_arch.pkg.tar.zst"
+  arch_path_abs="$(cd "$output_dir" && pwd)/$(basename "$arch_path")"
+  (
+    cd "$arch_root"
+    bsdtar --uid 0 --gid 0 --uname root --gname root -cf "$tmp_dir/arch.pkg.tar" .BUILDINFO .MTREE .PKGINFO opt usr
+    zstd -q -f -T0 -19 "$tmp_dir/arch.pkg.tar" -o "$arch_path_abs"
+  )
+  printf 'Created Arch Linux package %s\n' "$arch_path"
 fi
 
 if format_enabled appimage; then

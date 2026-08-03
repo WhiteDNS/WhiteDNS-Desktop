@@ -1,0 +1,10 @@
+# CottenDNS paired preset: survival
+# Use with server_config.survival.toml for restrictive, lossy UDP networks.
+
+CONFIG_PRESET = "survival"
+
+# Your delegated tunnel domain(s), e.g. ["d.example.com"].
+DOMAINS = ["REPLACE_WITH_YOUR_DELEGATED_DOMAIN"]
+
+# Paste the key generated on the server side.
+ENCRYPTION_KEY = ""

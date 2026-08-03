@@ -1,0 +1,18 @@
+# CottenDNS paired preset: speed
+# Use with client_config.speed.toml.
+#
+# Client resource policy: deliberately absent. Every MAX_ALLOWED_CLIENT_* /
+# MIN_ALLOWED_CLIENT_* key is a ceiling that can only take capacity away from a
+# client, so the fastest configuration is to state none at all -- which is what
+# omitting them does (they default to 0 = "no limit", and the server then sends
+# no policy block whatsoever). Do not add them to this preset; if a server needs
+# protecting, set them on that deployment and accept the throughput trade.
+# See the "Client resource policy" section of server_config.toml.simple.
+
+CONFIG_PRESET = "speed"
+
+# Your delegated tunnel domain(s), e.g. ["d.example.com"].
+DOMAIN = ["REPLACE_WITH_YOUR_DELEGATED_DOMAIN"]
+
+# Keep this file beside the server binary, or override with an absolute path.
+ENCRYPTION_KEY_FILE = "encrypt_key.txt"

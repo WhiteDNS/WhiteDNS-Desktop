@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -112,54 +113,65 @@ func TestManagerStartsFakeStormDNSAndStopsCleanly(t *testing.T) {
 	}
 }
 
-func TestManagerStartsXrayOnlyAndStopsCleanly(t *testing.T) {
+func TestManagerUsesCottenDNSBinaryAndExactRuntimeConfigPath(t *testing.T) {
 	tempDir := t.TempDir()
+	cottenHelper := buildFakeMasterDNSHelper(t, tempDir)
 	xray := buildFakeXrayHelper(t, tempDir)
+	enginePort := freePort(t)
 	publicPort := freePort(t)
+	runtimeDir := filepath.Join(tempDir, "runtime")
 
-	var states []string
 	manager := NewManager(
 		Options{
-			RuntimeDir:     filepath.Join(tempDir, "runtime"),
-			XrayBinaryPath: xray,
-			StartTimeout:   5 * time.Second,
-			StopTimeout:    2 * time.Second,
+			RuntimeDir:          runtimeDir,
+			CottenDNSBinaryPath: cottenHelper,
+			XrayBinaryPath:      xray,
+			StartTimeout:        5 * time.Second,
+			StopTimeout:         2 * time.Second,
 		},
-		Callbacks{
-			OnState: func(status string, _ string) { states = append(states, status) },
-		},
+		Callbacks{},
 	)
-
-	cfg := XrayLaunchConfig{
-		ProfileID:        "v2ray-1",
-		Name:             "V2Ray",
-		XrayConfig:       fmt.Sprintf(`{"inbounds":[{"listen":"127.0.0.1","port":%d}]}`, publicPort),
+	cfg := storm.LaunchConfig{
+		Engine: model.ImportTypeCottenDNS,
+		Settings: model.SettingsProfile{
+			ListenIP:   "127.0.0.1",
+			ListenPort: publicPort,
+		},
+		MasterDNSSettings: model.SettingsProfile{
+			ListenIP:   "127.0.0.1",
+			ListenPort: enginePort,
+		},
+		CoreEnabled:      true,
+		CoreConfig:       fmt.Sprintf(`{"inbounds":[{"listen":"127.0.0.1","port":%d}]}`, publicPort),
 		CoreProtocol:     "socks",
 		PublicListenIP:   "127.0.0.1",
 		PublicListenPort: publicPort,
+		ClientTOML:       fmt.Sprintf("LISTEN_IP = \"127.0.0.1\"\nLISTEN_PORT = %d\nFAST_CONNECT = true\n", enginePort),
+		Resolvers:        "1.1.1.1\n",
 	}
-	if err := manager.StartXray(context.Background(), cfg); err != nil {
+	if err := manager.Start(context.Background(), cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !manager.IsRunning() {
-		t.Fatal("expected manager to be running")
-	}
+	defer manager.Stop()
+
 	manager.mu.Lock()
 	active := manager.active
-	hasMasterDNS := active.cmd != nil
-	hasXray := active.xrayCmd != nil && active.xrayCmd.Process != nil
 	manager.mu.Unlock()
-	if hasMasterDNS {
-		t.Fatal("V2Ray runtime should not start MasterDNS")
+	if active == nil || active.engine != model.ImportTypeCottenDNS {
+		t.Fatalf("CottenDNS was not the active engine: %#v", active)
 	}
-	if !hasXray {
-		t.Fatal("expected xray process")
+	if !filepath.IsAbs(active.configFile) || filepath.Dir(active.configFile) != runtimeDir {
+		t.Fatalf("CottenDNS config path is not the absolute app runtime path: %q", active.configFile)
 	}
-	if err := manager.Stop(); err != nil {
+	raw, err := os.ReadFile(active.configFile)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(states) == 0 || states[len(states)-1] != model.RuntimeDisconnected {
-		t.Fatalf("expected final disconnected state, got %v", states)
+	if !strings.Contains(string(raw), fmt.Sprintf("LISTEN_PORT = %d", enginePort)) || !strings.Contains(string(raw), "FAST_CONNECT = true") {
+		t.Fatalf("CottenDNS runtime config did not retain saved settings:\n%s", raw)
+	}
+	if active.mtuScanControlFile != "" {
+		t.Fatalf("CottenDNS must not use the MasterDNS MTU control path: %q", active.mtuScanControlFile)
 	}
 }
 
@@ -550,12 +562,17 @@ func TestManagerRuntimeConfigForcesAndPurgesMTUResolverStateFile(t *testing.T) {
 	configFile := manager.active.configFile
 	stateFile := manager.active.mtuResolverStateFile
 	manager.mu.Unlock()
+	if !strings.Contains(filepath.Base(stateFile), ".masterdns.mtu-resolvers.log") {
+		t.Fatalf("expected engine-specific MTU state path, got %q", stateFile)
+	}
 	rawConfig, err := os.ReadFile(configFile)
 	if err != nil {
 		t.Fatal(err)
 	}
 	configText := string(rawConfig)
-	if !strings.Contains(configText, `SAVE_MTU_SERVERS_TO_FILE = true`) || !strings.Contains(configText, stateFile) {
+	// The path is TOML-escaped in the rendered config, which matters on Windows.
+	escapedStateFile := strings.ReplaceAll(stateFile, `\`, `\\`)
+	if !strings.Contains(configText, `SAVE_MTU_SERVERS_TO_FILE = true`) || !strings.Contains(configText, escapedStateFile) {
 		t.Fatalf("runtime config did not force app-owned MTU resolver state file %q:\n%s", stateFile, configText)
 	}
 	if err := os.WriteFile(stateFile, []byte("WHITEDNS_MTU_STATE event=valid resolver=1.1.1.1\n"), 0o600); err != nil {
@@ -566,6 +583,27 @@ func TestManagerRuntimeConfigForcesAndPurgesMTUResolverStateFile(t *testing.T) {
 	}
 	if _, err := os.Stat(stateFile); !os.IsNotExist(err) {
 		t.Fatalf("expected MTU resolver state file to be purged, err=%v", err)
+	}
+}
+
+func TestEngineValidResolverCachesAreSharedAndSeparated(t *testing.T) {
+	manager := NewManager(Options{RuntimeDir: t.TempDir()}, Callbacks{})
+	manager.persistValidResolvers(model.ImportTypeMasterDNS, model.ResolverRuntimeState{ValidResolvers: []string{"1.1.1.1", "9.9.9.9"}})
+	manager.persistValidResolvers(model.ImportTypeCottenDNS, model.ResolverRuntimeState{ValidResolvers: []string{"9.9.9.9", "8.8.8.8"}})
+
+	masterPath := manager.engineValidResolverPath(model.ImportTypeMasterDNS)
+	cottenPath := manager.engineValidResolverPath(model.ImportTypeCottenDNS)
+	if masterPath == cottenPath {
+		t.Fatalf("engine resolver caches must use separate paths: %q", masterPath)
+	}
+	got := manager.readSharedValidResolvers()
+	want := []string{"1.1.1.1", "9.9.9.9", "8.8.8.8"}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("expected both engines to share valid resolvers, got %#v want %#v", got, want)
+	}
+	merged := mergeResolverText("1.0.0.1\n1.1.1.1", got)
+	if !strings.Contains(merged, "8.8.8.8") || strings.Count(merged, "1.1.1.1") != 1 {
+		t.Fatalf("resolver merge did not preserve and de-duplicate peers:\n%s", merged)
 	}
 }
 
@@ -648,6 +686,9 @@ func TestManagerFindsPrebuiltClientInClientsDir(t *testing.T) {
 }
 
 func TestManagerFindsPrebuiltClientFromEnvDir(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("executable permission bits do not exist on Windows")
+	}
 	tempDir := t.TempDir()
 	clientsDir := filepath.Join(tempDir, "external-clients")
 	if err := os.MkdirAll(clientsDir, 0o755); err != nil {
@@ -981,6 +1022,7 @@ func TestCleanupStaleLaunchFilesPurgesRuntimeFiles(t *testing.T) {
 }
 
 func TestStopXrayWaitsForGracefulExit(t *testing.T) {
+	skipIfNoGracefulSignal(t)
 	tempDir := t.TempDir()
 	helper := buildFakeGracefulStopHelper(t, tempDir)
 	readyFile := filepath.Join(tempDir, "ready")
@@ -1017,7 +1059,18 @@ func TestStopXrayWaitsForGracefulExit(t *testing.T) {
 	}
 }
 
+// skipIfNoGracefulSignal skips tests that assert a child process is asked to
+// exit before it is killed. Windows has no such signal, so the manager force
+// kills there; see the ponytail comment on stopXray.
+func skipIfNoGracefulSignal(t *testing.T) {
+	t.Helper()
+	if goruntime.GOOS == "windows" {
+		t.Skip("Windows has no graceful process signal; the manager force kills instead")
+	}
+}
+
 func TestCleanupStaleLaunchFilesWaitsBeforeForceKill(t *testing.T) {
+	skipIfNoGracefulSignal(t)
 	tempDir := t.TempDir()
 	helper := buildFakeGracefulStopHelper(t, tempDir)
 	readyFile := filepath.Join(tempDir, "ready")
@@ -1077,7 +1130,7 @@ func TestWaitForSystemProxyFailsAndCleanupRestores(t *testing.T) {
 func buildFakeMasterDNSHelper(t *testing.T, dir string) string {
 	t.Helper()
 	source := filepath.Join(dir, "fake_masterdns.go")
-	binary := filepath.Join(dir, "fake-masterdns")
+	binary := filepath.Join(dir, testExecutableName("fake-masterdns"))
 	if err := os.WriteFile(source, []byte(fakeMasterDNSSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1091,7 +1144,7 @@ func buildFakeMasterDNSHelper(t *testing.T, dir string) string {
 func buildFakeXrayHelper(t *testing.T, dir string) string {
 	t.Helper()
 	source := filepath.Join(dir, "fake_xray.go")
-	binary := filepath.Join(dir, "fake-xray")
+	binary := filepath.Join(dir, testExecutableName("fake-xray"))
 	if err := os.WriteFile(source, []byte(fakeXraySource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1105,7 +1158,7 @@ func buildFakeXrayHelper(t *testing.T, dir string) string {
 func buildFakeGracefulStopHelper(t *testing.T, dir string) string {
 	t.Helper()
 	source := filepath.Join(dir, "fake_graceful_stop.go")
-	binary := filepath.Join(dir, "fake-graceful-stop")
+	binary := filepath.Join(dir, testExecutableName("fake-graceful-stop"))
 	if err := os.WriteFile(source, []byte(fakeGracefulStopSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1114,6 +1167,13 @@ func buildFakeGracefulStopHelper(t *testing.T, dir string) string {
 		t.Fatalf("failed to build fake graceful stop helper: %v\n%s", err, output)
 	}
 	return binary
+}
+
+func testExecutableName(name string) string {
+	if os.PathSeparator == '\\' {
+		return name + ".exe"
+	}
+	return name
 }
 
 func waitForFile(t *testing.T, path string) {

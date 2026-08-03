@@ -12,7 +12,7 @@ import (
 
 const stormDNSProfileSchema = "whitedns.profile"
 
-var stormDNSProfileURLPattern = regexp.MustCompile(`(?i)(stormdns|masterdns)://([A-Za-z0-9+/_=-]+)`)
+var stormDNSProfileURLPattern = regexp.MustCompile(`(?i)(cottendns|stormdns|masterdns)://([A-Za-z0-9+/_=-]+)`)
 
 type stormDNSProfilePayload struct {
 	Schema     string `json:"schema"`
@@ -25,17 +25,18 @@ type stormDNSProfilePayload struct {
 }
 
 type stormDNSProfileServer struct {
-	Domain                string `json:"domain"`
-	EncryptionKey         string `json:"encryption_key"`
-	EncryptionKeyCamel    string `json:"encryptionKey,omitempty"`
-	EncryptionMethod      *int   `json:"encryption_method"`
-	EncryptionMethodCamel *int   `json:"encryptionMethod,omitempty"`
+	Domain                string   `json:"domain"`
+	Domains               []string `json:"domains,omitempty"`
+	EncryptionKey         string   `json:"encryption_key"`
+	EncryptionKeyCamel    string   `json:"encryptionKey,omitempty"`
+	EncryptionMethod      *int     `json:"encryption_method"`
+	EncryptionMethodCamel *int     `json:"encryptionMethod,omitempty"`
 }
 
 func ParseConnectionProfileImports(rawText, resolverProfileID string, importType string) ([]model.ConnectionProfile, error) {
 	matches := stormDNSProfileURLPattern.FindAllStringSubmatch(rawText, -1)
 	if len(matches) == 0 {
-		return nil, fmt.Errorf("no MasterDNS/StormDNS profiles found")
+		return nil, fmt.Errorf("no MasterDNS, StormDNS, or CottenDNS profiles found")
 	}
 
 	profiles := make([]model.ConnectionProfile, 0, len(matches))
@@ -51,10 +52,10 @@ func ParseConnectionProfileImports(rawText, resolverProfileID string, importType
 
 func ExportConnectionProfile(profile model.ConnectionProfile) (string, error) {
 	name := strings.TrimSpace(profile.Name)
-	domain := strings.TrimSpace(strings.TrimSuffix(profile.Domain, "."))
+	domains := model.ConnectionDomains(profile)
 	key := strings.TrimSpace(profile.EncryptionKey)
-	if domain == "" {
-		return "", fmt.Errorf("MasterDNS/StormDNS domain is required")
+	if len(domains) == 0 {
+		return "", fmt.Errorf("at least one DNS tunnel domain is required")
 	}
 	if key == "" {
 		return "", fmt.Errorf("MasterDNS/StormDNS encryption key is required")
@@ -64,7 +65,7 @@ func ExportConnectionProfile(profile model.ConnectionProfile) (string, error) {
 		return "", fmt.Errorf("unsupported encryption method")
 	}
 	if name == "" {
-		name = domain
+		name = domains[0]
 	}
 
 	payload := stormDNSProfilePayload{
@@ -73,7 +74,8 @@ func ExportConnectionProfile(profile model.ConnectionProfile) (string, error) {
 		ImportType: model.NormalizeImportType(profile.ImportType),
 	}
 	payload.Profile.Name = name
-	payload.Profile.Server.Domain = domain
+	payload.Profile.Server.Domain = domains[0]
+	payload.Profile.Server.Domains = domains
 	payload.Profile.Server.EncryptionKey = key
 	payload.Profile.Server.EncryptionMethod = &method
 
@@ -103,7 +105,7 @@ func ExportConnectionProfiles(connectionProfiles []model.ConnectionProfile) (str
 }
 
 func IsExportableConnectionProfile(profile model.ConnectionProfile) bool {
-	return strings.TrimSpace(strings.TrimSuffix(profile.Domain, ".")) != "" && strings.TrimSpace(profile.EncryptionKey) != ""
+	return len(model.ConnectionDomains(profile)) > 0 && strings.TrimSpace(profile.EncryptionKey) != ""
 }
 
 func parseStormDNSProfile(encoded, resolverProfileID string, importType string) (model.ConnectionProfile, error) {
@@ -129,9 +131,9 @@ func parseStormDNSProfile(encoded, resolverProfileID string, importType string) 
 		importType = model.ImportTypeMasterDNS
 	}
 
-	domain := strings.TrimSpace(strings.TrimSuffix(payload.Profile.Server.Domain, "."))
-	if domain == "" {
-		return model.ConnectionProfile{}, fmt.Errorf("MasterDNS/StormDNS domain is required")
+	domains := model.NormalizeConnectionDomains(payload.Profile.Server.Domain, payload.Profile.Server.Domains)
+	if len(domains) == 0 {
+		return model.ConnectionProfile{}, fmt.Errorf("at least one DNS tunnel domain is required")
 	}
 
 	key := strings.TrimSpace(payload.Profile.Server.EncryptionKey)
@@ -154,13 +156,14 @@ func parseStormDNSProfile(encoded, resolverProfileID string, importType string) 
 
 	name := strings.TrimSpace(payload.Profile.Name)
 	if name == "" {
-		name = domain
+		name = domains[0]
 	}
 
 	return model.ConnectionProfile{
 		Name:              name,
 		ImportType:        model.NormalizeImportType(importType),
-		Domain:            domain,
+		Domain:            domains[0],
+		Domains:           domains,
 		EncryptionKey:     key,
 		EncryptionMethod:  method,
 		ResolverProfileID: strings.TrimSpace(resolverProfileID),

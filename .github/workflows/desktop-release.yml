@@ -46,21 +46,13 @@ jobs:
             platform: windows/arm64
             arch: arm64
           - artifact: whitedns-desktop-linux-amd64
-            os: ubuntu-22.04
-            kind: linux
-            platform: linux/amd64
-            arch: amd64
-            webkit: "4.0"
-            linux_tags: ""
-            package_formats: deb,rpm
-          - artifact: whitedns-desktop-linux-amd64-webkit41
             os: ubuntu-24.04
             kind: linux
             platform: linux/amd64
             arch: amd64
             webkit: "4.1"
             linux_tags: webkit2_41
-            package_formats: deb,rpm,appimage
+            package_formats: deb,rpm,arch,appimage
           - artifact: whitedns-desktop-linux-arm64
             os: ubuntu-24.04-arm
             kind: linux
@@ -99,7 +91,8 @@ jobs:
           cache: true
           cache-dependency-path: |
             desktop/go.sum
-            StormDNS/go.sum
+            MasterDnsVPN/go.sum
+            CottenDNS/go.sum
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -111,12 +104,9 @@ jobs:
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: |
-          sudo apt-get update
-          if [ "${{ matrix.webkit }}" = "4.1" ]; then
-            sudo apt-get install -y build-essential curl file pkg-config rpm libgtk-3-dev libwebkit2gtk-4.1-dev
-          else
-            sudo apt-get install -y build-essential curl file pkg-config rpm libgtk-3-dev libwebkit2gtk-4.0-dev
-          fi
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 update
+          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
+            build-essential curl file libarchive-tools pkg-config rpm zstd libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Install frontend dependencies
         run: npm ci --prefix desktop/frontend
@@ -155,16 +145,19 @@ jobs:
           asset_platform="${{ matrix.artifact }}"
           asset_platform="${asset_platform#whitedns-desktop-}"
           paths=""
+          release_paths=""
           case "${{ matrix.kind }}" in
             macos)
               archive="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.zip"
               (cd "$source_dir" && ditto -c -k --sequesterRsrc --keepParent "WhiteDNS Desktop.app" "../$(basename "$archive")")
               paths="$archive"
+              release_paths="$archive"
               ;;
             windows)
               archive="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.zip"
               (cd "$source_dir" && zip -qry "../$(basename "$archive")" .)
-              paths="$archive"
+              paths="$source_dir"
+              release_paths="$archive"
               ;;
             linux)
               archive="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.tar.gz"
@@ -182,34 +175,74 @@ jobs:
                 LINUX_ASSET_SUFFIX="$asset_platform" \
                 LINUX_PACKAGE_FORMATS="$package_formats" \
                 desktop/scripts/package-linux-dist.sh
-              paths="$archive"
+              release_paths="$archive"
               for package in desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.deb desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.rpm; do
-                paths="${paths}"$'\n'"$package"
+                release_paths="${release_paths}"$'\n'"$package"
               done
               rpm_package="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.rpm"
-              if rpm -qpR "$rpm_package" | grep -E '^webkit2gtk4\.[01]($|[[:space:]])'; then
-                echo "RPM contains a hard-coded WebKitGTK package dependency" >&2
+              if ! rpm -qpR "$rpm_package" | grep -Fxq 'webkit2gtk4.1'; then
+                echo "RPM is missing the WebKitGTK 4.1 runtime dependency" >&2
                 exit 1
+              fi
+              if [[ ",$package_formats," == *",arch,"* ]]; then
+                arch_package="$(find desktop/build/releases -maxdepth 1 -type f -name 'whitedns-desktop-*.pkg.tar.zst' -print -quit)"
+                test -n "$arch_package"
+                archive_entries="$(bsdtar -tf "$arch_package")"
+                grep -Fxq '.BUILDINFO' <<<"$archive_entries"
+                grep -Fxq '.MTREE' <<<"$archive_entries"
+                grep -Fxq '.PKGINFO' <<<"$archive_entries"
+                pkginfo="$(bsdtar -xOf "$arch_package" .PKGINFO)"
+                grep -Fxq 'xdata = pkgtype=pkg' <<<"$pkginfo"
+                grep -Fxq 'depend = gtk3' <<<"$pkginfo"
+                grep -Fxq 'depend = webkit2gtk-4.1' <<<"$pkginfo"
               fi
               if [[ ",$package_formats," == *",appimage,"* ]]; then
                 appimage="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.AppImage"
                 test -x "$appimage"
-                paths="${paths}"$'\n'"$appimage"
+                release_paths="${release_paths}"$'\n'"$appimage"
               fi
+              paths="$source_dir"
               ;;
           esac
           {
             echo "paths<<EOF"
             printf '%s\n' "$paths"
             echo "EOF"
+            echo "release_paths<<EOF"
+            printf '%s\n' "$release_paths"
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
           printf '%s\n' "$paths" | xargs ls -lh
+
+      - name: Upload Arch Linux package
+        if: matrix.kind == 'linux' && matrix.arch == 'amd64'
+        uses: actions/upload-artifact@v6
+        with:
+          name: whitedns-desktop-archlinux-x64
+          path: desktop/build/releases/whitedns-desktop-*.pkg.tar.zst
+          if-no-files-found: error
 
       - name: Upload package
         uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.artifact }}
           path: ${{ steps.archive.outputs.paths }}
+          if-no-files-found: error
+
+      - name: Upload Linux installers
+        if: matrix.kind == 'linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}-installers
+          path: ${{ steps.archive.outputs.release_paths }}
+          if-no-files-found: error
+
+      - name: Upload GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-${{ matrix.artifact }}
+          path: ${{ steps.archive.outputs.release_paths }}
           if-no-files-found: error
 
   publish:
@@ -221,8 +254,15 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v6
         with:
+          pattern: release-*
           path: release-assets
           merge-multiple: true
+
+      - name: Download Arch Linux package
+        uses: actions/download-artifact@v6
+        with:
+          name: whitedns-desktop-archlinux-x64
+          path: release-assets
 
       - name: List release assets
         run: find release-assets -maxdepth 1 -type f -print | sort

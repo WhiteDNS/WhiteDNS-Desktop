@@ -6,12 +6,31 @@ export interface ConnectionProfile {
   name: string;
   importType: ImportType;
   domain: string;
+  domains: string[];
   encryptionKey: string;
   encryptionMethod: number;
   resolverProfileId: string;
 }
 
-export type ImportType = "masterdns" | "stormdns";
+export type ImportType = "masterdns" | "stormdns" | "cottendns";
+
+export type CottenDNSOptionValue = string | number | boolean | string[];
+
+export interface CottenDNSOptionChoice {
+  value: CottenDNSOptionValue;
+  label: string;
+}
+
+export interface CottenDNSOptionDefinition {
+  key: string;
+  label: string;
+  group: string;
+  description: string;
+  kind: "boolean" | "integer" | "number" | "string" | "string-list" | "select";
+  defaultValue: CottenDNSOptionValue;
+  presetDefaults: Record<string, CottenDNSOptionValue>;
+  choices: CottenDNSOptionChoice[] | null;
+}
 
 export interface ResolverProfile {
   id: string;
@@ -225,6 +244,7 @@ export interface SettingsProfile {
   startupMode: string;
   pingWatchdogSeconds: number;
   logLevel: string;
+  cottenDnsOptions: Record<string, CottenDNSOptionValue>;
 }
 
 export interface ConnectionProgress {

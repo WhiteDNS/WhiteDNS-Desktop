@@ -85,7 +85,7 @@ for platform in $(printf '%s' "$platforms" | tr ',' ' '); do
         git \
         gnupg \
         libgtk-3-dev \
-        libwebkit2gtk-4.0-dev \
+        libwebkit2gtk-4.1-dev \
         pkg-config \
         rpm \
         unzip \
@@ -106,6 +106,8 @@ for platform in $(printf '%s' "$platforms" | tr ',' ' '); do
         LINUX_PLATFORMS="$TARGET_PLATFORM" \
         LINUX_CLIENT_ARCH="$TARGET_ARCH" \
         LINUX_ASSET_SUFFIX="$TARGET_NAME" \
+        LINUX_GO_TAGS="webkit2_41" \
+        LINUX_WEBKIT="4.1" \
         LINUX_PACKAGE_OUTPUT_DIR=build/releases/all \
         LINUX_PACKAGE_FORMATS="$LINUX_PACKAGE_FORMATS" \
         GO_BUILD_CACHE="/workspace/desktop/.cache/go-build-linux-$TARGET_ARCH" \

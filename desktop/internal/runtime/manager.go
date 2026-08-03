@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"whitedns-desktop/internal/model"
+	"whitedns-desktop/internal/resolver"
 	"whitedns-desktop/internal/storm"
 	"whitedns-desktop/internal/traffic"
 )
@@ -34,7 +35,9 @@ type Callbacks struct {
 type Options struct {
 	RuntimeDir               string
 	MasterDNSSource          string
+	CottenDNSSource          string
 	BinaryPath               string
+	CottenDNSBinaryPath      string
 	XrayBinaryPath           string
 	XrayCoresDir             string
 	ClientsDir               string
@@ -49,22 +52,6 @@ type Options struct {
 	SystemProxyPlatform      string
 	SystemProxyRunner        SystemProxyCommandRunner
 	SystemProxyVerifyTimeout time.Duration
-}
-
-type XrayLaunchConfig struct {
-	ProfileID        string
-	Name             string
-	XrayConfig       string
-	CoreProtocol     string
-	SetSystemProxy   bool
-	PublicListenIP   string
-	PublicListenPort int
-	DebugLogs        bool
-	TunEnabled       bool
-	TunInterfaceName string
-	TunMTU           int
-	TunIPv6          bool
-	TunServerHost    string
 }
 
 type Manager struct {
@@ -89,6 +76,7 @@ const (
 
 type activeProcess struct {
 	id                      string
+	engine                  string
 	debugLogs               bool
 	cmd                     *exec.Cmd
 	cancel                  context.CancelFunc
@@ -107,9 +95,6 @@ type activeProcess struct {
 	systemProxyGuard        systemProxyGuard
 	systemProxySnapshotFile string
 	systemProxyRestoreOnce  sync.Once
-	tunRouteGuard           tunRouteGuard
-	tunRouteSnapshotFile    string
-	tunRouteRestoreOnce     sync.Once
 	resolverStateCancel     context.CancelFunc
 	resolverStateDone       chan struct{}
 	resolverStateStopOnce   sync.Once
@@ -173,12 +158,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		masterSettings = cfg.Settings
 	}
 	debugLogs := masterDNSDebugLogsEnabled(masterSettings)
-	publicListenIP := cfg.PublicListenIP
-	publicListenPort := cfg.PublicListenPort
-	if publicListenPort == 0 {
-		publicListenIP = cfg.Settings.ListenIP
-		publicListenPort = cfg.Settings.ListenPort
-	}
+	publicListenIP, publicListenPort := publicListenTarget(cfg)
 	if strings.TrimSpace(cfg.CoreConfig) == "" {
 		return errors.New("xray config is required")
 	}
@@ -217,16 +197,19 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		m.log(fmt.Sprintf("Runtime cleanup warning: %v", err))
 	}
 
-	binaryPath, err := m.resolveBinary(ctx)
+	engine := normalizeDNSEngine(cfg.Engine)
+	engineName := dnsEngineDisplayName(engine)
+	binaryPath, err := m.resolveBinaryForEngine(ctx, engine)
 	if err != nil {
 		return err
 	}
-	m.debugLogf(debugLogs, "Debug Desktop resolved MasterDNS helper: path=%s runtime_dir=%s", binaryPath, m.options.RuntimeDir)
+	m.debugLogf(debugLogs, "Debug Desktop resolved %s helper: path=%s runtime_dir=%s", engineName, binaryPath, m.options.RuntimeDir)
 
 	launchID := fmt.Sprintf("%d", time.Now().UnixNano())
 	configFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".toml")
-	mtuResolverStateFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".mtu-resolvers.log")
+	mtuResolverStateFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+"."+engine+".mtu-resolvers.log")
 	resolversFile := strings.TrimSpace(cfg.ResolversPath)
+	resolverPayload := cfg.Resolvers
 	resolversOwned := false
 	if resolversFile == "" {
 		resolversFile = filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".resolvers")
@@ -234,23 +217,44 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	} else if info, err := os.Stat(resolversFile); err != nil || info.IsDir() {
 		return fmt.Errorf("resolver file is unavailable: %s", resolversFile)
 	}
-	mtuScanControlFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".mtu-scan-control")
-	clientTOML := storm.RenderRuntimeClientTOML(cfg.Connection, masterSettings, mtuResolverStateFile)
+	sharedResolvers := m.readSharedValidResolvers()
+	if len(sharedResolvers) > 0 {
+		if !resolversOwned {
+			raw, readErr := os.ReadFile(resolversFile)
+			if readErr != nil {
+				return fmt.Errorf("read resolver file: %w", readErr)
+			}
+			resolverPayload = string(raw)
+			resolversFile = filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".resolvers")
+			resolversOwned = true
+		}
+		resolverPayload = mergeResolverText(resolverPayload, sharedResolvers)
+	}
+	mtuScanControlFile := ""
+	if engine != model.ImportTypeCottenDNS {
+		mtuScanControlFile = filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+"."+engine+".mtu-scan-control")
+	}
+	clientTOML := cfg.ClientTOML
+	if engine != model.ImportTypeCottenDNS {
+		clientTOML = storm.RenderRuntimeClientTOML(cfg.Connection, masterSettings, mtuResolverStateFile)
+	}
 	if err := os.WriteFile(configFile, []byte(clientTOML), 0o600); err != nil {
 		return err
 	}
 	if resolversOwned {
-		if err := os.WriteFile(resolversFile, []byte(cfg.Resolvers), 0o600); err != nil {
+		if err := os.WriteFile(resolversFile, []byte(resolverPayload), 0o600); err != nil {
 			_ = os.Remove(configFile)
 			return err
 		}
 	}
-	if err := os.WriteFile(mtuScanControlFile, []byte("resume\n"), 0o600); err != nil {
-		_ = os.Remove(configFile)
-		if resolversOwned {
-			_ = os.Remove(resolversFile)
+	if mtuScanControlFile != "" {
+		if err := os.WriteFile(mtuScanControlFile, []byte("resume\n"), 0o600); err != nil {
+			_ = os.Remove(configFile)
+			if resolversOwned {
+				_ = os.Remove(resolversFile)
+			}
+			return err
 		}
-		return err
 	}
 	m.debugLogf(debugLogs,
 		"Debug Desktop wrote MasterDNS runtime files: config=%s resolvers=%s resolvers_owned=%t mtu_state=%s mtu_control=%s config_bytes=%d",
@@ -281,7 +285,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	}
 	cmd.Stderr = cmd.Stdout
 
-	m.state(model.RuntimeConnecting, "Starting MasterDNS")
+	m.state(model.RuntimeConnecting, "Starting "+engineName)
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = os.Remove(configFile)
@@ -299,6 +303,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 
 	active := &activeProcess{
 		id:                   launchID,
+		engine:               engine,
 		debugLogs:            debugLogs,
 		cmd:                  cmd,
 		cancel:               cancel,
@@ -315,7 +320,9 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	m.mu.Unlock()
 
 	m.startTrafficMonitor(active, cmd.Process.Pid)
-	m.startMTUResolverStateMonitor(active)
+	if engine != model.ImportTypeCottenDNS {
+		m.startMTUResolverStateMonitor(active)
+	}
 	go m.drainOutput(active, stdout)
 	go m.waitForExit(active)
 
@@ -337,151 +344,6 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		return err
 	}
 	m.debugLogf(debugLogs, "Debug Desktop public proxy port is ready: %s:%d", publicListenIP, publicListenPort)
-	m.state(model.RuntimeConnected, "Proxy is connected")
-	return nil
-}
-
-func (m *Manager) StartXray(ctx context.Context, cfg XrayLaunchConfig) error {
-	if err := m.Stop(); err != nil {
-		return err
-	}
-	if strings.TrimSpace(cfg.XrayConfig) == "" {
-		return errors.New("xray config is required")
-	}
-	if cfg.PublicListenPort <= 0 {
-		return errors.New("V2Ray local proxy port is required")
-	}
-	if err := os.MkdirAll(m.options.RuntimeDir, 0o755); err != nil {
-		return err
-	}
-	if err := cleanupStaleLaunchFiles(m.options.RuntimeDir, m.options.XrayStopTimeout, m.log, m.options.SystemProxyPlatform, m.options.SystemProxyRunner); err != nil {
-		m.log(fmt.Sprintf("Runtime cleanup warning: %v", err))
-	}
-
-	binaryPath, err := m.resolveXrayBinary(ctx)
-	if err != nil {
-		return err
-	}
-	launchID := fmt.Sprintf("%d", time.Now().UnixNano())
-	configFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".xray.json")
-	if err := os.WriteFile(configFile, []byte(cfg.XrayConfig), 0o600); err != nil {
-		return err
-	}
-	m.log(fmt.Sprintf("V2Ray xray config written: path=%s bytes=%d", configFile, len(cfg.XrayConfig)))
-	m.debugLogf(cfg.DebugLogs, "Debug Desktop wrote V2Ray xray config: path=%s bytes=%d", configFile, len(cfg.XrayConfig))
-	if cfg.TunEnabled {
-		m.log("V2Ray TUN mode enabled; skipping xray config preflight because native TUN validation creates an OS interface")
-	} else if err := m.testXrayConfig(ctx, binaryPath, configFile); err != nil {
-		_ = os.Remove(configFile)
-		return err
-	}
-
-	tunRouteGuard, err := m.prepareTunRouteGuard(ctx, cfg, binaryPath)
-	if err != nil {
-		_ = os.Remove(configFile)
-		return err
-	}
-	tunRouteSnapshotFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".tun-routes.json")
-	if err := writeTunRouteSnapshotFile(tunRouteSnapshotFile, tunRouteGuard); err != nil {
-		_ = os.Remove(configFile)
-		return err
-	}
-
-	systemProxyEnabled := cfg.SetSystemProxy && !cfg.TunEnabled
-	if cfg.SetSystemProxy && cfg.TunEnabled {
-		m.log("System proxy skipped because V2Ray TUN mode is enabled")
-	}
-	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, systemProxyEnabled, cfg.CoreProtocol, cfg.PublicListenIP, cfg.PublicListenPort)
-	if err != nil {
-		restoreTunRouteGuardWithLog(tunRouteGuard, m.log)
-		_ = os.Remove(tunRouteSnapshotFile)
-		_ = os.Remove(configFile)
-		return err
-	}
-	systemProxySnapshotFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".system-proxy.json")
-	if err := writeSystemProxySnapshotFile(systemProxySnapshotFile, systemProxyGuard); err != nil {
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		restoreTunRouteGuardWithLog(tunRouteGuard, m.log)
-		_ = os.Remove(tunRouteSnapshotFile)
-		_ = os.Remove(configFile)
-		return err
-	}
-	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(procCtx, binaryPath, "run", "-c", configFile)
-	hideConsoleWindow(cmd)
-	cmd.Dir = m.options.RuntimeDir
-	cmd.Env = xrayProcessEnv(binaryPath, m.xraySearchDirs())
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		restoreTunRouteGuardWithLog(tunRouteGuard, m.log)
-		_ = os.Remove(systemProxySnapshotFile)
-		_ = os.Remove(tunRouteSnapshotFile)
-		_ = os.Remove(configFile)
-		return err
-	}
-	cmd.Stderr = cmd.Stdout
-
-	active := &activeProcess{
-		id:                      launchID,
-		debugLogs:               cfg.DebugLogs,
-		cancel:                  cancel,
-		xrayCmd:                 cmd,
-		xrayCancel:              cancel,
-		xrayConfigFile:          configFile,
-		xrayDone:                make(chan struct{}),
-		systemProxyGuard:        systemProxyGuard,
-		systemProxySnapshotFile: systemProxySnapshotFile,
-		tunRouteGuard:           tunRouteGuard,
-		tunRouteSnapshotFile:    tunRouteSnapshotFile,
-		done:                    make(chan struct{}),
-	}
-	m.mu.Lock()
-	m.active = active
-	m.mu.Unlock()
-
-	m.state(model.RuntimeConnecting, "Starting proxy")
-	if err := cmd.Start(); err != nil {
-		cancel()
-		m.restoreSystemProxyGuard(active)
-		m.restoreTunRouteGuard(active)
-		_ = os.Remove(systemProxySnapshotFile)
-		_ = os.Remove(tunRouteSnapshotFile)
-		m.mu.Lock()
-		if m.active == active {
-			m.active = nil
-		}
-		m.mu.Unlock()
-		_ = os.Remove(configFile)
-		return fmt.Errorf("failed to start xray: %w", err)
-	}
-	pidFile := filepath.Join(m.options.RuntimeDir, ".wd-"+active.id+".xray.pid")
-	if err := writePIDFile(pidFile, cmd.Process.Pid); err != nil {
-		m.log(fmt.Sprintf("Runtime cleanup warning: failed to write xray pid file: %v", err))
-	}
-	active.xrayPIDFile = pidFile
-	m.log(fmt.Sprintf("V2Ray xray process started: pid=%d listen=%s:%d", cmd.Process.Pid, cfg.PublicListenIP, cfg.PublicListenPort))
-	m.debugLogf(cfg.DebugLogs, "Debug Desktop V2Ray xray process started: pid=%d pid_file=%s", cmd.Process.Pid, pidFile)
-
-	m.startTrafficMonitor(active, cmd.Process.Pid)
-	go m.drainOutput(active, stdout)
-	go m.waitForXrayExit(active)
-
-	if err := m.waitForPort(ctx, cfg.PublicListenIP, cfg.PublicListenPort, active); err != nil {
-		_ = m.Stop()
-		return err
-	}
-	if err := m.applyTunRouteGuard(ctx, active); err != nil {
-		_ = m.Stop()
-		return err
-	}
-	if err := m.waitForSystemProxy(ctx, active, cfg.PublicListenIP, cfg.PublicListenPort); err != nil {
-		_ = m.Stop()
-		return err
-	}
-	m.log(fmt.Sprintf("V2Ray local proxy port is ready: %s:%d", cfg.PublicListenIP, cfg.PublicListenPort))
-	m.debugLogf(cfg.DebugLogs, "Debug Desktop V2Ray public proxy port is ready: %s:%d", cfg.PublicListenIP, cfg.PublicListenPort)
 	m.state(model.RuntimeConnected, "Proxy is connected")
 	return nil
 }
@@ -524,6 +386,10 @@ func (m *Manager) SetResolverMTUScanPaused(paused bool) error {
 		m.mu.Unlock()
 		return errors.New("runtime is not running")
 	}
+	if active.engine == model.ImportTypeCottenDNS {
+		m.mu.Unlock()
+		return errors.New("CottenDNS does not expose runtime MTU scan pause control")
+	}
 	controlFile := active.mtuScanControlFile
 	m.mu.Unlock()
 	if strings.TrimSpace(controlFile) == "" {
@@ -550,6 +416,9 @@ func (m *Manager) SetResolverMTUScanPaused(paused bool) error {
 }
 
 func masterDNSLaunchEnv(cfg storm.LaunchConfig, mtuScanControlFile string) []string {
+	if normalizeDNSEngine(cfg.Engine) == model.ImportTypeCottenDNS {
+		return nil
+	}
 	env := []string{"WHITEDNS_MTU_SCAN_CONTROL_FILE=" + mtuScanControlFile}
 	if cfg.FullInitialMTUScan {
 		env = append(env, fullInitialMTUScanEnv+"=1")
@@ -565,18 +434,30 @@ func (m *Manager) ResolveClientBinary(ctx context.Context) (string, error) {
 }
 
 func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
-	if m.options.BinaryPath != "" {
-		if isExecutableFile(m.options.BinaryPath) {
-			return m.options.BinaryPath, nil
+	return m.resolveBinaryForEngine(ctx, model.ImportTypeMasterDNS)
+}
+
+func (m *Manager) resolveBinaryForEngine(ctx context.Context, engine string) (string, error) {
+	engine = normalizeDNSEngine(engine)
+	engineName := dnsEngineDisplayName(engine)
+	binaryOverride := m.options.BinaryPath
+	sourceDir := strings.TrimSpace(m.options.MasterDNSSource)
+	if engine == model.ImportTypeCottenDNS {
+		binaryOverride = m.options.CottenDNSBinaryPath
+		sourceDir = strings.TrimSpace(m.options.CottenDNSSource)
+	}
+	if binaryOverride != "" {
+		if isExecutableFile(binaryOverride) {
+			return binaryOverride, nil
 		}
-		return "", fmt.Errorf("MasterDNS helper not found: %s", m.options.BinaryPath)
+		return "", fmt.Errorf("%s helper not found: %s", engineName, binaryOverride)
 	}
 
-	name := helperPlatformName()
+	name := helperPlatformNameForEngine(engine)
 	checkedDirs := make([]string, 0)
 	for _, dir := range m.clientSearchDirs() {
 		checkedDirs = appendUnique(checkedDirs, dir)
-		if candidate, ok := findClientBinaryInDir(dir); ok {
+		if candidate, ok := findClientBinaryInDirForEngine(dir, engine); ok {
 			return candidate, nil
 		}
 	}
@@ -584,19 +465,19 @@ func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
 		for _, dirName := range []string{"clients", "bin"} {
 			dir := filepath.Join(base, dirName)
 			checkedDirs = appendUnique(checkedDirs, dir)
-			if candidate, ok := findClientBinaryInDir(dir); ok {
+			if candidate, ok := findClientBinaryInDirForEngine(dir, engine); ok {
 				return candidate, nil
 			}
 		}
 	}
-	if candidate, ok := m.extractEmbeddedClient(name); ok {
+	if candidate, ok := m.extractEmbeddedClientForEngine(name, engine); ok {
 		return candidate, nil
 	}
 
-	sourceDir := strings.TrimSpace(m.options.MasterDNSSource)
 	if sourceDir == "" {
 		return "", fmt.Errorf(
-			"MasterDNS client helper not found; expected %s in a clients/ folder. Checked: %s",
+			"%s client helper not found; expected %s in a clients/ folder. Checked: %s",
+			engineName,
 			name,
 			strings.Join(checkedDirs, ", "),
 		)
@@ -611,8 +492,8 @@ func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
 
 	buildCtx, cancel := context.WithTimeout(ctx, m.options.BuildTimeout)
 	defer cancel()
-	m.log("Building MasterDNS helper from source")
-	cmd := exec.CommandContext(buildCtx, "go", "build", "-o", out, "./cmd/client")
+	m.log("Building " + engineName + " helper from source")
+	cmd := exec.CommandContext(buildCtx, "go", "build", "-buildvcs=false", "-o", out, "./cmd/client")
 	hideConsoleWindow(cmd)
 	cmd.Dir = sourceDir
 	output, err := cmd.CombinedOutput()
@@ -641,10 +522,14 @@ func (m *Manager) clientSearchDirs() []string {
 }
 
 func (m *Manager) extractEmbeddedClient(name string) (string, bool) {
+	return m.extractEmbeddedClientForEngine(name, model.ImportTypeMasterDNS)
+}
+
+func (m *Manager) extractEmbeddedClientForEngine(name string, engine string) (string, bool) {
 	if m.options.EmbeddedClientsFS == nil || m.options.RuntimeDir == "" {
 		return "", false
 	}
-	for _, candidateName := range helperNameCandidates() {
+	for _, candidateName := range helperNameCandidatesForEngine(engine) {
 		raw, err := fs.ReadFile(m.options.EmbeddedClientsFS, filepath.ToSlash(filepath.Join("clients", candidateName)))
 		if err != nil || len(raw) == 0 {
 			continue
@@ -714,7 +599,8 @@ func (m *Manager) startXray(ctx context.Context, cfg storm.LaunchConfig, active 
 		return err
 	}
 
-	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, cfg.SetSystemProxy, cfg.CoreProtocol, cfg.PublicListenIP, cfg.PublicListenPort)
+	publicListenIP, publicListenPort := publicListenTarget(cfg)
+	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, cfg.SetSystemProxy, cfg.CoreProtocol, publicListenIP, publicListenPort)
 	if err != nil {
 		_ = os.Remove(configFile)
 		return err
@@ -1129,6 +1015,7 @@ func (m *Manager) updateMTUResolverState(active *activeProcess, state model.Reso
 	}
 	active.resolverStateMu.Unlock()
 	if m.isActive(active) {
+		m.persistValidResolvers(active.engine, emitState)
 		m.debugLogf(active.debugLogs,
 			"Debug Desktop emitting merged resolver state from MTU file: active=%d valid=%d details=%d",
 			emitState.ActiveCount,
@@ -1151,6 +1038,7 @@ func (m *Manager) recordResolverState(active *activeProcess, state model.Resolve
 		}
 	}
 	active.resolverStateMu.Unlock()
+	m.persistValidResolvers(active.engine, state)
 	m.debugLogf(active.debugLogs,
 		"Debug Desktop emitting resolver state from MasterDNS log: active=%d valid=%d rejected=%d pending=%d details=%d",
 		state.ActiveCount,
@@ -1160,6 +1048,61 @@ func (m *Manager) recordResolverState(active *activeProcess, state model.Resolve
 		len(state.ResolverDetails),
 	)
 	m.resolverState(state)
+}
+
+func (m *Manager) engineValidResolverPath(engine string) string {
+	if strings.TrimSpace(m.options.RuntimeDir) == "" {
+		return ""
+	}
+	return filepath.Join(m.options.RuntimeDir, ".whitedns-valid-resolvers-"+normalizeDNSEngine(engine)+".txt")
+}
+
+func (m *Manager) readSharedValidResolvers() []string {
+	var raw strings.Builder
+	for _, engine := range []string{model.ImportTypeMasterDNS, model.ImportTypeCottenDNS} {
+		path := m.engineValidResolverPath(engine)
+		if path == "" {
+			continue
+		}
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		raw.Write(content)
+		raw.WriteByte('\n')
+	}
+	validation := resolver.ValidateText(raw.String())
+	return validation.NormalizedResolvers
+}
+
+func (m *Manager) persistValidResolvers(engine string, state model.ResolverRuntimeState) {
+	path := m.engineValidResolverPath(engine)
+	if path == "" {
+		return
+	}
+	values := append([]string(nil), state.ValidResolvers...)
+	if len(values) == 0 {
+		for _, detail := range state.ResolverDetails {
+			if detail.Valid || detail.Active {
+				values = append(values, detail.Resolver)
+			}
+		}
+	}
+	validation := resolver.ValidateText(strings.Join(values, "\n"))
+	if len(validation.NormalizedResolvers) == 0 {
+		return
+	}
+	if err := os.WriteFile(path, []byte(validation.NormalizedText+"\n"), 0o600); err != nil {
+		m.debugLogf(true, "Resolver cache warning: failed to save %s valid resolvers: %v", dnsEngineDisplayName(engine), err)
+	}
+}
+
+func mergeResolverText(base string, shared []string) string {
+	parts := make([]string, 0, len(shared)+1)
+	parts = append(parts, base)
+	parts = append(parts, shared...)
+	validation := resolver.ValidateText(strings.Join(parts, "\n"))
+	return validation.NormalizedText
 }
 
 func (m *Manager) startTrafficMonitor(active *activeProcess, pid int) {
@@ -1406,12 +1349,13 @@ func (m *Manager) waitForExit(active *activeProcess) {
 	}
 	m.stopXray(active)
 	m.cleanup(active)
+	engineName := dnsEngineDisplayName(active.engine)
 	if err != nil {
-		m.runtimeError(fmt.Sprintf("MasterDNS stopped unexpectedly: %v", err))
-		m.state(model.RuntimeFailed, "MasterDNS stopped unexpectedly")
+		m.runtimeError(fmt.Sprintf("%s stopped unexpectedly: %v", engineName, err))
+		m.state(model.RuntimeFailed, engineName+" stopped unexpectedly")
 		return
 	}
-	m.state(model.RuntimeDisconnected, "MasterDNS stopped")
+	m.state(model.RuntimeDisconnected, engineName+" stopped")
 }
 
 func (m *Manager) waitForXrayExit(active *activeProcess) {
@@ -1451,7 +1395,6 @@ func (m *Manager) cleanup(active *activeProcess) {
 	m.stopMTUResolverStateMonitor(active)
 	m.stopTrafficMonitor(active)
 	m.restoreSystemProxyGuard(active)
-	m.restoreTunRouteGuard(active)
 	_ = os.Remove(active.configFile)
 	if active.resolversOwned {
 		_ = os.Remove(active.resolvers)
@@ -1462,7 +1405,6 @@ func (m *Manager) cleanup(active *activeProcess) {
 	_ = os.Remove(active.xrayConfigFile)
 	_ = os.Remove(active.xrayPIDFile)
 	_ = os.Remove(active.systemProxySnapshotFile)
-	_ = os.Remove(active.tunRouteSnapshotFile)
 }
 
 func (m *Manager) stopMTUResolverStateMonitor(active *activeProcess) {
@@ -1519,6 +1461,10 @@ func (m *Manager) stopXray(active *activeProcess) {
 	if active.xrayCmd == nil || active.xrayCmd.Process == nil || active.xrayDone == nil {
 		return
 	}
+	// ponytail: os.Interrupt always fails on Windows, so every child is force
+	// killed there instead of shutting down cleanly. Fixing it needs the child
+	// side to cooperate (a stop file or a shared console group); revisit if
+	// servers start seeing stale sessions from Windows clients.
 	m.log("Stopping xray gracefully")
 	if err := active.xrayCmd.Process.Signal(os.Interrupt); err != nil {
 		m.log(fmt.Sprintf("xray graceful stop failed, forcing termination: %v", err))
@@ -1649,10 +1595,14 @@ func isExecutableFile(path string) bool {
 }
 
 func findClientBinaryInDir(dir string) (string, bool) {
+	return findClientBinaryInDirForEngine(dir, model.ImportTypeMasterDNS)
+}
+
+func findClientBinaryInDirForEngine(dir string, engine string) (string, bool) {
 	if strings.TrimSpace(dir) == "" {
 		return "", false
 	}
-	for _, name := range helperNameCandidates() {
+	for _, name := range helperNameCandidatesForEngine(engine) {
 		candidate := filepath.Join(dir, name)
 		if isExecutableFile(candidate) {
 			return candidate, true
@@ -1671,7 +1621,11 @@ func findClientBinaryInDir(dir string) (string, bool) {
 		if !strings.Contains(lower, "client") {
 			continue
 		}
-		if !strings.Contains(lower, "masterdns") && !strings.Contains(lower, "masterdnsvpn") {
+		if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
+			if !strings.Contains(lower, "cottendns") {
+				continue
+			}
+		} else if !strings.Contains(lower, "masterdns") && !strings.Contains(lower, "masterdnsvpn") {
 			continue
 		}
 		candidate := filepath.Join(dir, entry.Name())
@@ -1713,7 +1667,15 @@ func findXrayBinaryInDir(dir string) (string, bool) {
 }
 
 func helperPlatformName() string {
-	name := "masterdns-client-" + goruntime.GOOS + "-" + goruntime.GOARCH
+	return helperPlatformNameForEngine(model.ImportTypeMasterDNS)
+}
+
+func helperPlatformNameForEngine(engine string) string {
+	prefix := "masterdns-client-"
+	if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
+		prefix = "cottendns-client-"
+	}
+	name := prefix + goruntime.GOOS + "-" + goruntime.GOARCH
 	if goruntime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -1729,7 +1691,12 @@ func xrayPlatformName() string {
 }
 
 func helperNameCandidates() []string {
-	platformName := helperPlatformName()
+	return helperNameCandidatesForEngine(model.ImportTypeMasterDNS)
+}
+
+func helperNameCandidatesForEngine(engine string) []string {
+	engine = normalizeDNSEngine(engine)
+	platformName := helperPlatformNameForEngine(engine)
 	exe := ""
 	if goruntime.GOOS == "windows" {
 		exe = ".exe"
@@ -1746,6 +1713,15 @@ func helperNameCandidates() []string {
 	if goruntime.GOARCH == "amd64" {
 		archLabel = "AMD64"
 	}
+	if engine == model.ImportTypeCottenDNS {
+		return []string{
+			platformName,
+			"cottendns-client" + exe,
+			"cottendns_client" + exe,
+			"CottenDns_Client" + exe,
+			"CottenDns_Client_" + platformLabel + "_" + archLabel + exe,
+		}
+	}
 	return []string{
 		platformName,
 		"masterdns-client" + exe,
@@ -1755,6 +1731,20 @@ func helperNameCandidates() []string {
 		"MasterDnsVPN_Client" + exe,
 		"MasterDnsVPN_Client_" + platformLabel + "_" + archLabel + exe,
 	}
+}
+
+func normalizeDNSEngine(engine string) string {
+	if model.NormalizeImportType(engine) == model.ImportTypeCottenDNS {
+		return model.ImportTypeCottenDNS
+	}
+	return model.ImportTypeMasterDNS
+}
+
+func dnsEngineDisplayName(engine string) string {
+	if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
+		return "CottenDNS"
+	}
+	return "MasterDNS"
 }
 
 func xrayNameCandidates() []string {
@@ -1818,6 +1808,13 @@ func appendBaseCandidates(values []string, candidates ...string) []string {
 	return values
 }
 
+func publicListenTarget(cfg storm.LaunchConfig) (string, int) {
+	if cfg.PublicListenPort == 0 {
+		return cfg.Settings.ListenIP, cfg.Settings.ListenPort
+	}
+	return cfg.PublicListenIP, cfg.PublicListenPort
+}
+
 func writePIDFile(path string, pid int) error {
 	if strings.TrimSpace(path) == "" || pid <= 0 {
 		return nil
@@ -1851,20 +1848,6 @@ func cleanupStaleLaunchFiles(runtimeDir string, stopTimeout time.Duration, log f
 			logRuntimeCleanup(log, fmt.Sprintf("Runtime cleanup warning: failed to restore stale system proxy snapshot %s: %v", path, err))
 		} else {
 			logRuntimeCleanup(log, "Runtime cleanup restored stale system proxy settings")
-		}
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), ".wd-") || !strings.HasSuffix(entry.Name(), ".tun-routes.json") {
-			continue
-		}
-		path := filepath.Join(runtimeDir, entry.Name())
-		restoreCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err := restoreTunRouteSnapshotFile(restoreCtx, path, platform, runner)
-		cancel()
-		if err != nil {
-			logRuntimeCleanup(log, fmt.Sprintf("Runtime cleanup warning: failed to restore stale TUN routes %s: %v", path, err))
-		} else {
-			logRuntimeCleanup(log, "Runtime cleanup restored stale TUN routes")
 		}
 	}
 	for _, entry := range entries {

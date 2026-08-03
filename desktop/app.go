@@ -15,6 +15,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"whitedns-desktop/internal/appdata"
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/firewall"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/profiles"
@@ -53,9 +54,6 @@ type App struct {
 	parallelState              model.ParallelTestState
 	parallelCancel             context.CancelFunc
 	parallelRunID              int64
-	v2rayTestMu                sync.Mutex
-	v2rayTestCancel            context.CancelFunc
-	v2rayTestRunID             int64
 	validatorMu                sync.Mutex
 	validatorState             model.ValidatorState
 	validatorCancel            context.CancelFunc
@@ -145,6 +143,7 @@ func runtimeManagerOptions(runtimeDir string) runtimemgr.Options {
 	return runtimemgr.Options{
 		RuntimeDir:        runtimeDir,
 		MasterDNSSource:   findMasterDNSSourceDir(),
+		CottenDNSSource:   findCottenDNSSourceDir(),
 		ClientsDir:        findClientsDir(),
 		XrayCoresDir:      findXrayCoresDir(),
 		EmbeddedClientsFS: clientAssets,
@@ -162,7 +161,6 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(ctx context.Context) {
 	_ = a.manager.Stop()
-	_ = a.CancelV2RayProfileTests()
 	_, _ = a.CancelParallelTest()
 	_, _ = a.CancelValidatorScan()
 	a.waitValidatorStopped(5 * time.Second)
@@ -195,7 +193,7 @@ func (a *App) SaveConnectionProfile(profile model.ConnectionProfile) (model.AppS
 		profile.Name = "Connection"
 	}
 	profile.ImportType = model.NormalizeImportType(profile.ImportType)
-	profile.Domain = strings.TrimSpace(strings.TrimSuffix(profile.Domain, "."))
+	profile = model.NormalizeConnectionProfileDomains(profile)
 	profile.EncryptionKey = strings.TrimSpace(profile.EncryptionKey)
 	if profile.EncryptionMethod < 0 || profile.EncryptionMethod > 5 {
 		profile.EncryptionMethod = 1
@@ -214,6 +212,7 @@ func (a *App) SaveConnectionProfile(profile model.ConnectionProfile) (model.AppS
 	}
 	if !a.connectionSelectionLockedLocked() {
 		a.state.SelectedConnectionProfileID = profile.ID
+		a.selectSettingsForEngineLocked(profile.ImportType)
 		if profile.ResolverProfileID != "" {
 			a.state.SelectedResolverProfileID = profile.ResolverProfileID
 		}
@@ -245,6 +244,7 @@ func (a *App) ImportConnectionProfiles(rawText string, importType string) (model
 	}
 	if !a.connectionSelectionLockedLocked() {
 		a.state.SelectedConnectionProfileID = imported[len(imported)-1].ID
+		a.selectSettingsForEngineLocked(imported[len(imported)-1].ImportType)
 	}
 
 	next, err := a.saveLocked()
@@ -368,8 +368,11 @@ func (a *App) SelectConnectionProfile(id string) (model.AppState, error) {
 	}
 	a.state.SelectedConnectionProfileID = id
 	for _, profile := range a.state.ConnectionProfiles {
-		if profile.ID == id && profile.ResolverProfileID != "" {
-			a.state.SelectedResolverProfileID = profile.ResolverProfileID
+		if profile.ID == id {
+			if profile.ResolverProfileID != "" {
+				a.state.SelectedResolverProfileID = profile.ResolverProfileID
+			}
+			a.selectSettingsForEngineLocked(profile.ImportType)
 			break
 		}
 	}
@@ -551,7 +554,7 @@ func (a *App) SaveSettingsProfile(profile model.SettingsProfile) (model.AppState
 	}
 	profile = profiles.NormalizeSettingsProfile(profile)
 	if profile.ID == model.DefaultSettingsProfileID {
-		return a.state, fmt.Errorf("default settings profile cannot be edited; create a new profile")
+		return a.state, fmt.Errorf("default settings profile cannot be edited; use the Master preset or create a new profile")
 	}
 	found := false
 	for idx := range a.state.SettingsProfiles {
@@ -565,6 +568,7 @@ func (a *App) SaveSettingsProfile(profile model.SettingsProfile) (model.AppState
 		a.state.SettingsProfiles = append(a.state.SettingsProfiles, profile)
 	}
 	a.state.SelectedSettingsProfileID = profile.ID
+	a.setSelectedConnectionEngineLocked(profile.ImportType)
 	return a.saveLocked()
 }
 
@@ -584,14 +588,15 @@ func (a *App) ImportSettingsProfileToml(rawText, suggestedName string, importTyp
 	profile.ID = uniqueImportedSettingsID(existingIDs, time.Now().UnixNano())
 	a.state.SettingsProfiles = append(a.state.SettingsProfiles, profile)
 	a.state.SelectedSettingsProfileID = profile.ID
+	a.setSelectedConnectionEngineLocked(profile.ImportType)
 	return a.saveLocked()
 }
 
 func (a *App) DeleteSettingsProfile(id string) (model.AppState, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if id == model.DefaultSettingsProfileID {
-		return a.state, fmt.Errorf("default setting profile cannot be deleted")
+	if id == model.DefaultSettingsProfileID || id == model.MasterDNSSettingsProfileID || id == model.DefaultCottenDNSSettingsID {
+		return a.state, fmt.Errorf("built-in setting profile cannot be deleted")
 	}
 	a.state.SettingsProfiles = slices.DeleteFunc(a.state.SettingsProfiles, func(profile model.SettingsProfile) bool {
 		return profile.ID == id
@@ -615,8 +620,59 @@ func (a *App) SelectSettingsProfile(id string) (model.AppState, error) {
 	if !slices.ContainsFunc(a.state.SettingsProfiles, func(profile model.SettingsProfile) bool { return profile.ID == id }) {
 		return a.state, fmt.Errorf("setting profile not found")
 	}
+	if a.connectionSelectionLockedLocked() {
+		return a.state, fmt.Errorf("settings profile cannot be changed while connected")
+	}
 	a.state.SelectedSettingsProfileID = id
+	for _, profile := range a.state.SettingsProfiles {
+		if profile.ID == id {
+			a.setSelectedConnectionEngineLocked(profile.ImportType)
+			break
+		}
+	}
 	return a.saveLocked()
+}
+
+func (a *App) selectSettingsForEngineLocked(engine string) {
+	engine = model.NormalizeImportType(engine)
+	for _, profile := range a.state.SettingsProfiles {
+		if profile.ID == a.state.SelectedSettingsProfileID && model.NormalizeImportType(profile.ImportType) == engine {
+			return
+		}
+	}
+	preferredID := model.MasterDNSSettingsProfileID
+	if engine == model.ImportTypeCottenDNS {
+		preferredID = model.DefaultCottenDNSSettingsID
+	}
+	for _, profile := range a.state.SettingsProfiles {
+		if profile.ID == preferredID {
+			a.state.SelectedSettingsProfileID = profile.ID
+			return
+		}
+	}
+	for _, profile := range a.state.SettingsProfiles {
+		if model.NormalizeImportType(profile.ImportType) == engine {
+			a.state.SelectedSettingsProfileID = profile.ID
+			return
+		}
+	}
+	if engine == model.ImportTypeCottenDNS {
+		profile := model.DefaultCottenDNSSettingsProfile()
+		a.state.SettingsProfiles = append(a.state.SettingsProfiles, profile)
+		a.state.SelectedSettingsProfileID = profile.ID
+		return
+	}
+	a.state.SelectedSettingsProfileID = model.MasterDNSSettingsProfileID
+}
+
+func (a *App) setSelectedConnectionEngineLocked(engine string) {
+	engine = model.NormalizeImportType(engine)
+	for idx := range a.state.ConnectionProfiles {
+		if a.state.ConnectionProfiles[idx].ID == a.state.SelectedConnectionProfileID {
+			a.state.ConnectionProfiles[idx].ImportType = engine
+			return
+		}
+	}
 }
 
 func (a *App) ReorderSettingsProfiles(ids []string) (model.AppState, error) {
@@ -634,6 +690,10 @@ func (a *App) ReorderSettingsProfiles(ids []string) (model.AppState, error) {
 
 func (a *App) GetDefaultSettingsProfile() model.SettingsProfile {
 	return profiles.NormalizeSettingsProfile(model.DefaultSettingsProfile())
+}
+
+func (a *App) GetCottenDNSOptionSchema() []cottendns.OptionDefinition {
+	return cottendns.Schema()
 }
 
 func (a *App) ValidateResolverText(rawText string) model.ResolverTextValidation {
@@ -715,9 +775,10 @@ func (a *App) startConnectionWithSettingsOptions(ctx context.Context, overrideSe
 		a.emit("runtime:state", next.Runtime)
 		return next, err
 	}
+	engineName := dnsEngineDisplayName(cfg.Engine)
 	state.Runtime.Status = model.RuntimeConnecting
 	state.Runtime.RuntimeType = model.RuntimeTypeMasterDNS
-	state.Runtime.Message = "Starting MasterDNS"
+	state.Runtime.Message = "Starting " + engineName
 	state.Runtime.ActiveConnectionID = cfg.Connection.ID
 	state.Runtime.ListenIP = cfg.PublicListenIP
 	state.Runtime.ListenPort = cfg.PublicListenPort
@@ -731,8 +792,8 @@ func (a *App) startConnectionWithSettingsOptions(ctx context.Context, overrideSe
 	state.Runtime.ResolverState = model.ResolverRuntimeState{}
 	state.Runtime.Stats = model.TrafficStats{}
 	state.Runtime.TrafficMonitorMessage = ""
-	state.Runtime.Logs = []string{"Starting MasterDNS"}
-	state.Runtime.MasterDNSLogs = appendRuntimeLog([]string{"Starting MasterDNS"}, state.Runtime.MasterDNSLogs...)
+	state.Runtime.Logs = []string{"Starting " + engineName}
+	state.Runtime.MasterDNSLogs = appendRuntimeLog([]string{"Starting " + engineName}, state.Runtime.MasterDNSLogs...)
 	a.state = state
 	next := a.state
 	a.mu.Unlock()
@@ -770,12 +831,9 @@ func (a *App) ClearRuntimeLogsForType(runtimeType string) model.AppState {
 	switch normalizeRuntimeType(runtimeType) {
 	case model.RuntimeTypeMasterDNS:
 		a.state.Runtime.MasterDNSLogs = []string{}
-	case model.RuntimeTypeV2Ray:
-		a.state.Runtime.V2RayLogs = []string{}
 	default:
 		a.state.Runtime.Logs = []string{}
 		a.state.Runtime.MasterDNSLogs = []string{}
-		a.state.Runtime.V2RayLogs = []string{}
 	}
 	runtimeState := a.state.Runtime
 	next := a.state
@@ -1126,8 +1184,6 @@ func (a *App) handleRuntimeError(message string) {
 	message = brandDisplayText(strings.TrimSpace(message))
 	if strings.TrimSpace(message) != "" {
 		a.mu.Lock()
-		runtimeType := a.activeRuntimeTypeLocked()
-		message = redactRuntimeEndpointConfig(runtimeType, message)
 		if a.state.Runtime.Status != model.RuntimeDisconnected {
 			a.state.Runtime.Message = message
 			runtimeState := a.state.Runtime
@@ -1172,36 +1228,13 @@ func sanitizeRuntimeLogLine(runtimeType string, line string) string {
 	if line == "" {
 		return ""
 	}
-	return redactRuntimeEndpointConfig(runtimeType, line)
-}
-
-func redactRuntimeEndpointConfig(runtimeType string, line string) string {
-	if normalizeRuntimeType(runtimeType) != model.RuntimeTypeV2Ray {
-		return line
-	}
-	line = runtimeLogURLPattern.ReplaceAllString(line, "[redacted-url]")
-	line = runtimeLogConfigField.ReplaceAllStringFunc(line, func(match string) string {
-		if idx := strings.IndexByte(match, '='); idx >= 0 {
-			return match[:idx+1] + "[redacted]"
-		}
-		return "[redacted]"
-	})
-	line = runtimeLogIPv6Endpoint.ReplaceAllString(line, "[redacted-endpoint]")
-	line = runtimeLogIPv4Endpoint.ReplaceAllString(line, "[redacted-endpoint]")
-	line = runtimeLogDomainEndpoint.ReplaceAllString(line, "[redacted-endpoint]")
-	line = runtimeLogConnectionArrow.ReplaceAllString(line, "-> [redacted-endpoint]")
-	line = runtimeLogDialDestination.ReplaceAllString(line, "to [redacted-endpoint]")
-	line = runtimeLogListenDestination.ReplaceAllString(line, "listen=[redacted-endpoint]")
 	return line
 }
 
 func (a *App) appendRuntimeLogLocked(runtimeType string, line string) {
 	a.state.Runtime.Logs = appendRuntimeLog([]string{line}, a.state.Runtime.Logs...)
-	switch normalizeRuntimeType(runtimeType) {
-	case model.RuntimeTypeMasterDNS:
+	if normalizeRuntimeType(runtimeType) == model.RuntimeTypeMasterDNS {
 		a.state.Runtime.MasterDNSLogs = appendRuntimeLog([]string{line}, a.state.Runtime.MasterDNSLogs...)
-	case model.RuntimeTypeV2Ray:
-		a.state.Runtime.V2RayLogs = appendRuntimeLog([]string{line}, a.state.Runtime.V2RayLogs...)
 	}
 }
 
@@ -1221,9 +1254,6 @@ func (a *App) activeRuntimeTypeLocked() string {
 	if activeConnectionID == "" {
 		return ""
 	}
-	if activeRuntimeIsV2Ray(a.state, activeConnectionID) {
-		return model.RuntimeTypeV2Ray
-	}
 	for _, profile := range a.state.ConnectionProfiles {
 		if profile.ID == activeConnectionID {
 			return model.RuntimeTypeMasterDNS
@@ -1236,8 +1266,6 @@ func normalizeRuntimeType(runtimeType string) string {
 	switch strings.ToLower(strings.TrimSpace(runtimeType)) {
 	case model.RuntimeTypeMasterDNS:
 		return model.RuntimeTypeMasterDNS
-	case model.RuntimeTypeV2Ray:
-		return model.RuntimeTypeV2Ray
 	default:
 		return ""
 	}
@@ -1293,20 +1321,39 @@ func appConfigDir() (string, error) {
 }
 
 func findMasterDNSSourceDir() string {
+	return findDNSSourceDir("MasterDnsVPN")
+}
+
+func dnsEngineDisplayName(engine string) string {
+	switch model.NormalizeImportType(engine) {
+	case model.ImportTypeStormDNS:
+		return "StormDNS"
+	case model.ImportTypeCottenDNS:
+		return "CottenDNS"
+	default:
+		return "MasterDNS"
+	}
+}
+
+func findCottenDNSSourceDir() string {
+	return findDNSSourceDir("CottenDNS")
+}
+
+func findDNSSourceDir(directoryName string) string {
 	candidates := make([]string, 0)
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates,
-			filepath.Join(cwd, "MasterDnsVPN"),
-			filepath.Join(cwd, "..", "MasterDnsVPN"),
-			filepath.Join(cwd, "..", "..", "MasterDnsVPN"),
+			filepath.Join(cwd, directoryName),
+			filepath.Join(cwd, "..", directoryName),
+			filepath.Join(cwd, "..", "..", directoryName),
 		)
 	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		candidates = append(candidates,
-			filepath.Join(dir, "MasterDnsVPN"),
-			filepath.Join(dir, "..", "MasterDnsVPN"),
-			filepath.Join(dir, "..", "..", "MasterDnsVPN"),
+			filepath.Join(dir, directoryName),
+			filepath.Join(dir, "..", directoryName),
+			filepath.Join(dir, "..", "..", directoryName),
 		)
 	}
 	for _, candidate := range candidates {

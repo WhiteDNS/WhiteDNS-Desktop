@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/profiles"
 	"whitedns-desktop/internal/resolver"
@@ -12,6 +13,7 @@ import (
 )
 
 type LaunchConfig struct {
+	Engine             string                  `json:"engine"`
 	Connection         model.ConnectionProfile `json:"connection"`
 	Resolver           model.ResolverProfile   `json:"resolver"`
 	Settings           model.SettingsProfile   `json:"settings"`
@@ -60,13 +62,19 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 	if !ok {
 		return LaunchConfig{}, fmt.Errorf("resolver profile is missing")
 	}
-	if strings.TrimSpace(connection.Domain) == "" {
-		return LaunchConfig{}, fmt.Errorf("MasterDNS/StormDNS domain is required")
+	if len(model.ConnectionDomains(connection)) == 0 {
+		return LaunchConfig{}, fmt.Errorf("at least one DNS tunnel domain is required")
 	}
 	if strings.TrimSpace(connection.EncryptionKey) == "" {
 		return LaunchConfig{}, fmt.Errorf("MasterDNS/StormDNS encryption key is required")
 	}
-	connection.ImportType = model.ImportTypeMasterDNS
+	requestedEngine := model.NormalizeImportType(connection.ImportType)
+	engine := requestedEngine
+	if requestedEngine != model.ImportTypeCottenDNS {
+		engine = model.ImportTypeMasterDNS
+	}
+	settings.ImportType = engine
+	connection.ImportType = engine
 	resolversText := ""
 	resolversPath := ""
 	if strings.EqualFold(strings.TrimSpace(resolverProfile.ResolverSource), "file") {
@@ -92,15 +100,19 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 		resolversText = resolverValidation.NormalizedText
 	}
 
-	settings.ImportType = model.ImportTypeMasterDNS
 	settings = profiles.NormalizeSettingsProfile(settings)
-	masterDNSSettings := xray.MasterDNSSettings(settings)
+	runtimeSettings := settings
+	if engine == model.ImportTypeCottenDNS {
+		runtimeSettings = cottendns.ApplyRuntimeSettings(settings)
+	}
+	masterDNSSettings := xray.MasterDNSSettings(runtimeSettings)
 	publicIP, publicPort := xray.PublicListen(settings)
-	coreConfig, err := xray.RenderConfig(settings)
+	coreConfig, err := xray.RenderConfig(runtimeSettings)
 	if err != nil {
 		return LaunchConfig{}, err
 	}
 	return LaunchConfig{
+		Engine:             engine,
 		Connection:         connection,
 		Resolver:           resolverProfile,
 		Settings:           settings,
@@ -112,10 +124,17 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 		SetSystemProxy:     settings.SingBoxSetSystemProxy,
 		PublicListenIP:     publicIP,
 		PublicListenPort:   publicPort,
-		ClientTOML:         RenderClientTOML(connection, masterDNSSettings),
+		ClientTOML:         renderLaunchClientTOML(connection, settings, masterDNSSettings, engine),
 		Resolvers:          resolversText,
 		ResolversPath:      resolversPath,
 	}, nil
+}
+
+func renderLaunchClientTOML(connection model.ConnectionProfile, settings model.SettingsProfile, runtimeSettings model.SettingsProfile, engine string) string {
+	if engine == model.ImportTypeCottenDNS {
+		return cottendns.RenderClientTOML(connection, cottendns.OptionValues(settings.CottenDNSOptions))
+	}
+	return RenderClientTOML(connection, runtimeSettings)
 }
 
 func SelectedConnection(state model.AppState) (model.ConnectionProfile, bool) {
@@ -152,6 +171,9 @@ func SelectedSettings(state model.AppState) (model.SettingsProfile, bool) {
 
 func RenderClientTOML(connection model.ConnectionProfile, settings model.SettingsProfile) string {
 	settings = profiles.NormalizeSettingsProfile(settings)
+	if model.NormalizeImportType(settings.ImportType) == model.ImportTypeCottenDNS {
+		return cottendns.RenderClientTOML(connection, cottendns.OptionValues(settings.CottenDNSOptions))
+	}
 	if model.NormalizeImportType(settings.ImportType) == model.ImportTypeStormDNS {
 		return renderStormDNSClientTOML(connection, settings, true)
 	}
@@ -160,6 +182,9 @@ func RenderClientTOML(connection model.ConnectionProfile, settings model.Setting
 
 func RenderRuntimeClientTOML(connection model.ConnectionProfile, settings model.SettingsProfile, mtuResolverStateFile string) string {
 	settings = profiles.NormalizeSettingsProfile(settings)
+	if model.NormalizeImportType(settings.ImportType) == model.ImportTypeCottenDNS {
+		return cottendns.RenderClientTOML(connection, cottendns.OptionValues(settings.CottenDNSOptions))
+	}
 	if strings.TrimSpace(mtuResolverStateFile) != "" {
 		settings.SaveMTUServersToFile = true
 		settings.MTUServersFileName = mtuResolverStateFile
@@ -174,6 +199,9 @@ func RenderRuntimeClientTOML(connection model.ConnectionProfile, settings model.
 
 func RenderExportClientTOML(settings model.SettingsProfile) string {
 	settings = profiles.NormalizeSettingsProfile(settings)
+	if model.NormalizeImportType(settings.ImportType) == model.ImportTypeCottenDNS {
+		return cottendns.RenderSettingsTOML(cottendns.OptionValues(settings.CottenDNSOptions))
+	}
 	if model.NormalizeImportType(settings.ImportType) == model.ImportTypeStormDNS {
 		return renderStormDNSClientTOML(model.ConnectionProfile{}, xray.MasterDNSSettings(settings), false)
 	}
@@ -190,13 +218,13 @@ func renderStormDNSClientTOML(connection model.ConnectionProfile, settings model
 	}
 	linef("# WHITEDNS_IMPORT_TYPE = \"%s\"", model.ImportTypeStormDNS)
 	if includeConnection {
-		domain := strings.TrimSpace(strings.TrimSuffix(connection.Domain, "."))
+		domains := model.ConnectionDomains(connection)
 		key := strings.TrimSpace(connection.EncryptionKey)
 		method := connection.EncryptionMethod
 		if method < 0 || method > 5 {
 			method = 1
 		}
-		linef("DOMAINS = [\"%s\"]", escape(domain))
+		linef("DOMAINS = [%s]", renderConnectionDomains(domains))
 		linef("DATA_ENCRYPTION_METHOD = %d", method)
 		linef("ENCRYPTION_KEY = \"%s\"", escape(key))
 	}
@@ -267,13 +295,13 @@ func renderMasterDNSClientTOML(connection model.ConnectionProfile, settings mode
 	}
 	linef("# WHITEDNS_IMPORT_TYPE = \"%s\"", model.ImportTypeMasterDNS)
 	if includeConnection {
-		domain := strings.TrimSpace(strings.TrimSuffix(connection.Domain, "."))
+		domains := model.ConnectionDomains(connection)
 		key := strings.TrimSpace(connection.EncryptionKey)
 		method := connection.EncryptionMethod
 		if method < 0 || method > 5 {
 			method = 1
 		}
-		linef("DOMAINS = [\"%s\"]", escape(domain))
+		linef("DOMAINS = [%s]", renderConnectionDomains(domains))
 		linef("DATA_ENCRYPTION_METHOD = %d", method)
 		linef("ENCRYPTION_KEY = \"%s\"", escape(key))
 	}
@@ -369,6 +397,14 @@ func renderMasterDNSClientTOML(connection model.ConnectionProfile, settings mode
 
 func escape(value string) string {
 	return strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(value)
+}
+
+func renderConnectionDomains(domains []string) string {
+	quoted := make([]string, 0, len(domains))
+	for _, domain := range domains {
+		quoted = append(quoted, `"`+escape(domain)+`"`)
+	}
+	return strings.Join(quoted, ", ")
 }
 
 func masterDNSClientDuplicationCount(value int) int {

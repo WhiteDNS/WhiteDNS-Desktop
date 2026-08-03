@@ -111,6 +111,36 @@ func TestExportConnectionProfileRoundTripsAsMasterDNSURL(t *testing.T) {
 	}
 }
 
+func TestConnectionProfileImportExportPreservesMultipleDomains(t *testing.T) {
+	profile := modelConnectionProfile("Multi", "one.example.com", "secret", 2)
+	profile.Domains = []string{"one.example.com", "two.example.com.", "ONE.EXAMPLE.COM"}
+	link, err := ExportConnectionProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	imported, err := ParseConnectionProfileImports(link, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(imported) != 1 || len(imported[0].Domains) != 2 {
+		t.Fatalf("expected one multi-domain profile, got %#v", imported)
+	}
+	if imported[0].Domain != "one.example.com" || imported[0].Domains[1] != "two.example.com" {
+		t.Fatalf("unexpected normalized domains: %#v", imported[0])
+	}
+}
+
+func TestParseConnectionProfileImportsAcceptsCottenDNSScheme(t *testing.T) {
+	link := strings.TrimPrefix(encodedStormDNSProfile(t, "Cotten", "cotten.example.com", "key", 1), "stormdns://")
+	profiles, err := ParseConnectionProfileImports("cottendns://"+link, "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(profiles) != 1 || profiles[0].ImportType != model.ImportTypeCottenDNS {
+		t.Fatalf("expected CottenDNS import, got %#v", profiles)
+	}
+}
+
 func TestExportConnectionProfilesSkipsIncompleteProfiles(t *testing.T) {
 	raw, err := ExportConnectionProfiles([]model.ConnectionProfile{
 		modelConnectionProfile("Incomplete", "", "", 1),

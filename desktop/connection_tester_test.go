@@ -39,3 +39,16 @@ func TestConnectionTestResolversFromStateMergesMTUDetails(t *testing.T) {
 		t.Fatalf("expected merged MTU details, got %#v", resolvers[0])
 	}
 }
+
+func TestConnectionProfileTestSettingsKeepsSelectedEngine(t *testing.T) {
+	settings := model.DefaultCottenDNSSettingsProfile()
+	resolved := model.ConnectionTestResolver{Endpoint: "1.1.1.1", UploadMTU: 80, DownloadMTU: 900}
+	got := connectionProfileTestSettings(settings, model.ImportTypeCottenDNS, true, resolved)
+	if got.ImportType != model.ImportTypeCottenDNS || got.CottenDNSOptions == nil {
+		t.Fatalf("connection test switched away from CottenDNS: %#v", got)
+	}
+	options := *got.CottenDNSOptions
+	if options["MIN_UPLOAD_MTU"] != 80 || options["MAX_DOWNLOAD_MTU"] != 900 {
+		t.Fatalf("trusted resolver MTUs were not applied to CottenDNS: %#v", options)
+	}
+}

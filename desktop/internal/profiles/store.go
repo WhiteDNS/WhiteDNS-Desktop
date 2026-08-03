@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/resolver"
 )
@@ -341,7 +342,7 @@ func normalizeConnections(profiles []model.ConnectionProfile) []model.Connection
 			profile.Name = fmt.Sprintf("Connection %d", len(out)+1)
 		}
 		profile.ImportType = model.NormalizeImportType(profile.ImportType)
-		profile.Domain = strings.TrimSpace(strings.TrimSuffix(profile.Domain, "."))
+		profile = model.NormalizeConnectionProfileDomains(profile)
 		profile.EncryptionKey = strings.TrimSpace(profile.EncryptionKey)
 		if profile.EncryptionMethod < 0 || profile.EncryptionMethod > 5 {
 			profile.EncryptionMethod = 1
@@ -402,9 +403,11 @@ func normalizeResolvers(profiles []model.ResolverProfile) []model.ResolverProfil
 }
 
 func normalizeSettingsProfiles(profiles []model.SettingsProfile) []model.SettingsProfile {
-	out := make([]model.SettingsProfile, 0, len(profiles)+1)
+	out := make([]model.SettingsProfile, 0, len(profiles)+3)
 	seen := map[string]struct{}{}
 	defaultSeen := false
+	masterPresetSeen := false
+	cottenDefaultSeen := false
 
 	for _, profile := range profiles {
 		profile = normalizeSettingsProfile(profile)
@@ -420,13 +423,22 @@ func normalizeSettingsProfiles(profiles []model.SettingsProfile) []model.Setting
 			out = append(out, model.DefaultSettingsProfile())
 			continue
 		}
+		if profile.ID == model.MasterDNSSettingsProfileID {
+			masterPresetSeen = true
+		}
+		if profile.ID == model.DefaultCottenDNSSettingsID {
+			cottenDefaultSeen = true
+		}
 		out = append(out, profile)
 	}
 	if !defaultSeen {
-		return append([]model.SettingsProfile{model.DefaultSettingsProfile()}, out...)
+		out = append([]model.SettingsProfile{model.DefaultSettingsProfile()}, out...)
 	}
-	if len(out) == 0 {
-		return []model.SettingsProfile{model.DefaultSettingsProfile()}
+	if !masterPresetSeen {
+		out = append(out, model.MasterPresetSettingsProfile())
+	}
+	if !cottenDefaultSeen {
+		out = append(out, model.DefaultCottenDNSSettingsProfile())
 	}
 	return out
 }
@@ -816,6 +828,10 @@ func normalizeSettingsProfile(profile model.SettingsProfile) model.SettingsProfi
 		profile.Name = "Settings"
 	}
 	profile.ImportType = model.NormalizeImportType(profile.ImportType)
+	if profile.ImportType == model.ImportTypeCottenDNS {
+		options := cottendns.NormalizeOverrides(cottendns.OptionValues(profile.CottenDNSOptions))
+		profile.CottenDNSOptions = &options
+	}
 	if strings.TrimSpace(profile.ListenIP) == "" {
 		profile.ListenIP = defaults.ListenIP
 	}

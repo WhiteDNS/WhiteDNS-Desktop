@@ -1428,8 +1428,8 @@ func (a *App) scannerConnection(id string) (model.ConnectionProfile, error) {
 		if profile.ID != id {
 			continue
 		}
-		if strings.TrimSpace(profile.Domain) == "" {
-			return model.ConnectionProfile{}, fmt.Errorf("connection profile needs a MasterDNS/StormDNS domain")
+		if len(model.ConnectionDomains(profile)) == 0 {
+			return model.ConnectionProfile{}, fmt.Errorf("connection profile needs at least one MasterDNS domain")
 		}
 		if strings.TrimSpace(profile.EncryptionKey) == "" {
 			return model.ConnectionProfile{}, fmt.Errorf("connection profile needs an encryption key")

@@ -21,8 +21,8 @@ func (a *App) TestConnectionProfile(profile model.ConnectionProfile, trustedReso
 		ProfileID: strings.TrimSpace(profile.ID),
 		Message:   "Not tested",
 	}
-	if strings.TrimSpace(profile.Domain) == "" {
-		result.Message = "Domain is required"
+	if len(model.ConnectionDomains(profile)) == 0 {
+		result.Message = "At least one domain is required"
 		return result, nil
 	}
 	if strings.TrimSpace(profile.EncryptionKey) == "" {
@@ -49,7 +49,7 @@ func (a *App) TestConnectionProfile(profile model.ConnectionProfile, trustedReso
 		settings = model.DefaultSettingsProfile()
 	}
 	trusted, trustedOK := firstUsableConnectionTestResolver(trustedResolvers)
-	settings = connectionProfileTestSettings(settings, trustedOK, trusted)
+	settings = connectionProfileTestSettings(settings, profile.ImportType, trustedOK, trusted)
 	testState := stateWithConnectionTestProfile(baseState, profile)
 
 	var mu sync.Mutex
@@ -139,8 +139,8 @@ func connectionTestErrorMessage(err error, runtimeError string) string {
 	return parallelRuntimeError(err, runtimeError).Error()
 }
 
-func connectionProfileTestSettings(settings model.SettingsProfile, trusted bool, resolver model.ConnectionTestResolver) model.SettingsProfile {
-	settings.ImportType = model.ImportTypeMasterDNS
+func connectionProfileTestSettings(settings model.SettingsProfile, engine string, trusted bool, resolver model.ConnectionTestResolver) model.SettingsProfile {
+	settings.ImportType = model.NormalizeImportType(engine)
 	settings = profiles.NormalizeSettingsProfile(settings)
 	settings.ConnectionStartupMode = model.ConnectionStartupModeStandard
 	settings.UploadDuplication = 1
@@ -155,6 +155,19 @@ func connectionProfileTestSettings(settings model.SettingsProfile, trusted bool,
 		settings.MaxUploadMTU = resolver.UploadMTU
 		settings.MinDownloadMTU = resolver.DownloadMTU
 		settings.MaxDownloadMTU = resolver.DownloadMTU
+		if settings.ImportType == model.ImportTypeCottenDNS {
+			options := map[string]any{}
+			if settings.CottenDNSOptions != nil {
+				for key, value := range *settings.CottenDNSOptions {
+					options[key] = value
+				}
+			}
+			options["MIN_UPLOAD_MTU"] = resolver.UploadMTU
+			options["MAX_UPLOAD_MTU"] = resolver.UploadMTU
+			options["MIN_DOWNLOAD_MTU"] = resolver.DownloadMTU
+			options["MAX_DOWNLOAD_MTU"] = resolver.DownloadMTU
+			settings.CottenDNSOptions = &options
+		}
 	}
 	return profiles.NormalizeSettingsProfile(settings)
 }
@@ -170,7 +183,7 @@ func stateWithConnectionTestProfile(state model.AppState, profile model.Connecti
 		profile.Name = "Connection"
 	}
 	profile.ImportType = model.NormalizeImportType(profile.ImportType)
-	profile.Domain = strings.TrimSpace(strings.TrimSuffix(profile.Domain, "."))
+	profile = model.NormalizeConnectionProfileDomains(profile)
 	profile.EncryptionKey = strings.TrimSpace(profile.EncryptionKey)
 	if profile.ResolverProfileID == "" {
 		profile.ResolverProfileID = state.SelectedResolverProfileID

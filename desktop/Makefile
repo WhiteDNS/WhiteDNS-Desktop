@@ -9,6 +9,7 @@ export VERSION := $(APP_VERSION)
 RELEASE_ASSET_PREFIX ?= WhiteDNS-Desktop
 ROOT_DIR := ..
 MASTERDNS_DIR := $(ROOT_DIR)/MasterDnsVPN
+COTTENDNS_DIR := $(ROOT_DIR)/CottenDNS
 WAILS ?= wails
 GO_BUILD_CACHE ?= $(CURDIR)/.cache/go-build
 GO_ENV_FILE ?= $(CURDIR)/.cache/go-env
@@ -25,7 +26,7 @@ MACOS_GO_LDFLAGS ?= $(RELEASE_LDFLAGS)
 MACOS_DEPLOYMENT_TARGET_AMD64 ?= 10.13
 MACOS_DEPLOYMENT_TARGET_ARM64 ?= 11.0
 MACOS_BUNDLE_MIN_VERSION ?= $(if $(filter arm64,$(MACOS_CLIENT_ARCH)),$(MACOS_DEPLOYMENT_TARGET_ARM64),$(MACOS_DEPLOYMENT_TARGET_AMD64))
-LINUX_GO_TAGS ?=
+LINUX_GO_TAGS ?= webkit2_41
 ifneq ($(strip $(LINUX_GO_TAGS)),)
 LINUX_WAILS_TAG_FLAGS := -tags "$(LINUX_GO_TAGS)"
 else
@@ -71,7 +72,7 @@ $(error --version requires a value; use `make all -- --version 1.0.0-beta6`)
 endif
 endif
 
-.PHONY: help deps frontend-deps tidy dev build build-mac build-windows build-linux build-all all check-linux-builder frontend-build backend-build prepare-package prepare-macos-go-env prepare-embedded-client prepare-embedded-macos-clients prepare-embedded-core prepare-embedded-platform prepare-embedded-platforms prepare-embedded-macos-cores macos-app-bundle validate-version package package-mac package-windows package-linux package-linux-distros package-linux-all-docker package-linux-fedora-rpm-docker package-all stage-artifacts archive-artifacts package-helper package-assets test test-backend test-frontend test-masterdns test-stormdns masterdns-client masterdns-client-target stormdns-client stormdns-client-target stormdns-client-darwin-amd64 stormdns-client-darwin-arm64 stormdns-client-windows-amd64 stormdns-client-linux-amd64 xray-core xray-core-all xray-core-target singbox-core singbox-core-all singbox-core-target clean --version
+.PHONY: help deps frontend-deps tidy dev build build-mac build-windows build-linux build-all all check-linux-builder frontend-build backend-build prepare-package prepare-macos-go-env prepare-embedded-client prepare-embedded-macos-clients prepare-embedded-core prepare-embedded-platform prepare-embedded-platforms prepare-embedded-macos-cores macos-app-bundle validate-version package package-mac package-windows package-linux package-linux-distros package-linux-all-docker package-linux-fedora-rpm-docker package-all stage-artifacts archive-artifacts package-helper package-assets test test-backend test-frontend test-masterdns test-stormdns test-cottendns dns-clients masterdns-client masterdns-client-target cottendns-client cottendns-client-target stormdns-client stormdns-client-target stormdns-client-darwin-amd64 stormdns-client-darwin-arm64 stormdns-client-windows-amd64 stormdns-client-linux-amd64 xray-core xray-core-all xray-core-target singbox-core singbox-core-all singbox-core-target clean --version
 ifneq ($(VERSION_FROM_ARGS),)
 .PHONY: $(VERSION_FROM_ARGS)
 endif
@@ -99,6 +100,7 @@ help:
 		'  make package-linux UPX=1    Build Linux package with UPX compression' \
 		'  make test             Run desktop Go tests and frontend TypeScript build' \
 		'  make masterdns-client Build local MasterDNS helper into clients/' \
+		'  make cottendns-client Build local CottenDNS helper into clients/' \
 		'  make xray-core        Install matching Xray core into cores/' \
 		'  make xray-core-all    Cache macOS, Windows, and Linux Xray cores' \
 		'  make clean            Remove build output and helper binaries'
@@ -111,10 +113,10 @@ frontend-deps:
 tidy:
 	go mod tidy
 
-dev: masterdns-client xray-core
+dev: dns-clients xray-core
 	wails dev
 
-build: masterdns-client xray-core frontend-build backend-build
+build: dns-clients xray-core frontend-build backend-build
 
 build-mac: package-mac
 
@@ -224,6 +226,7 @@ prepare-embedded-client:
 	mkdir -p clients
 	@: > clients/.keep
 	$(MAKE) masterdns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
+	$(MAKE) cottendns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
 
 prepare-embedded-macos-clients:
 	$(MAKE) prepare-embedded-client TARGET_GOOS=darwin TARGET_GOARCH="$(MACOS_CLIENT_ARCH)"
@@ -260,6 +263,7 @@ prepare-embedded-platform:
 		exit 1; \
 	fi
 	$(MAKE) masterdns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
+	$(MAKE) cottendns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
 	$(MAKE) xray-core-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
 	@set -e; \
 	core="xray-$(TARGET_GOOS)-$(TARGET_GOARCH)"; \
@@ -464,7 +468,7 @@ archive-artifacts: validate-version
 	( cd "$$stage_parent" && zip -qry "$$archive_name" "$$stage_name" ); \
 	printf 'Created compressed artifact %s\n' "$$stage_parent/$$archive_name"
 
-package-helper: masterdns-client xray-core package-assets
+package-helper: dns-clients xray-core package-assets
 
 package-assets:
 	@printf 'Runtime helpers and proxy cores are embedded in the app binary\n'
@@ -481,6 +485,11 @@ test-masterdns:
 	cd $(MASTERDNS_DIR) && go test ./...
 
 test-stormdns: test-masterdns
+
+test-cottendns:
+	cd $(COTTENDNS_DIR) && go test ./...
+
+dns-clients: masterdns-client cottendns-client
 
 masterdns-client: stormdns-client
 
@@ -512,6 +521,22 @@ stormdns-client-target:
 	if [ "$(TARGET_GOOS)" = "windows" ]; then helper="$$helper.exe"; fi; \
 	mkdir -p clients "$(GO_BUILD_CACHE)"; \
 	(cd "$(MASTERDNS_DIR)" && GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -trimpath -ldflags "$(HELPER_GO_LDFLAGS)" -o "../desktop/clients/$$helper" ./cmd/client); \
+	chmod 755 "clients/$$helper"; \
+	printf 'Built %s\n' "clients/$$helper"
+
+cottendns-client:
+	$(MAKE) cottendns-client-target TARGET_GOOS=$(GOOS_VALUE) TARGET_GOARCH=$(GOARCH_VALUE)
+
+cottendns-client-target:
+	@set -e; \
+	if [ -z "$(TARGET_GOOS)" ] || [ -z "$(TARGET_GOARCH)" ]; then \
+		printf 'TARGET_GOOS and TARGET_GOARCH are required\n' >&2; \
+		exit 1; \
+	fi; \
+	helper="cottendns-client-$(TARGET_GOOS)-$(TARGET_GOARCH)"; \
+	if [ "$(TARGET_GOOS)" = "windows" ]; then helper="$$helper.exe"; fi; \
+	mkdir -p clients "$(GO_BUILD_CACHE)"; \
+	(cd "$(COTTENDNS_DIR)" && GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -buildvcs=false -trimpath -ldflags "$(HELPER_GO_LDFLAGS)" -o "../desktop/clients/$$helper" ./cmd/client); \
 	chmod 755 "clients/$$helper"; \
 	printf 'Built %s\n' "clients/$$helper"
 

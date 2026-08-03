@@ -18,7 +18,7 @@ func RenderConnectionUpgradeScannerClientTOML(connection model.ConnectionProfile
 }
 
 func renderScannerClientTOML(connection model.ConnectionProfile, listenPort int, apiPort int, scanParallel int, uploadMTU int, downloadMTU int) string {
-	domain := strings.TrimSpace(strings.TrimSuffix(connection.Domain, "."))
+	domains := model.ConnectionDomains(connection)
 	key := strings.TrimSpace(connection.EncryptionKey)
 	method := connection.EncryptionMethod
 	if method < 0 || method > 5 {
@@ -50,7 +50,7 @@ func renderScannerClientTOML(connection model.ConnectionProfile, listenPort int,
 	}
 
 	linef("# WHITEDNS_IMPORT_TYPE = \"masterdns\"")
-	linef("DOMAINS = [\"%s\"]", escape(domain))
+	linef("DOMAINS = [%s]", renderConnectionDomains(domains))
 	linef("DATA_ENCRYPTION_METHOD = %d", method)
 	linef("ENCRYPTION_KEY = \"%s\"", escape(key))
 	linef("PROTOCOL_TYPE = \"SOCKS5\"")

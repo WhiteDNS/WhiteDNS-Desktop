@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/profiles"
 )
@@ -24,6 +25,14 @@ func ParseSettingsProfileTOML(rawText, suggestedName string, importType string) 
 	profile.ID = ""
 	profile.Name = cleanImportedSettingsName(suggestedName)
 	profile.ImportType = detectSettingsImportType(rawText, importType)
+	if profile.ImportType == model.ImportTypeCottenDNS {
+		options, parseErr := cottendns.ParseOptions(rawText)
+		if parseErr != nil {
+			return model.SettingsProfile{}, parseErr
+		}
+		profile.CottenDNSOptions = &options
+		return profiles.NormalizeSettingsProfile(profile), nil
+	}
 
 	applied := 0
 	setString := func(key string, apply func(string)) error {

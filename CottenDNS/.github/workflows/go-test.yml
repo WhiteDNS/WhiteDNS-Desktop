@@ -1,0 +1,157 @@
+name: Go Test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Run Tests
+        run: go test ./...
+
+  e2e:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      # End-to-end smoke test: builds the real client/server binaries and runs
+      # a payload through the live tunnel, asserting byte-for-byte delivery.
+      # Gated behind the `e2e` build tag so it stays out of the unit-test job.
+      - name: Run E2E tunnel test
+        run: go test -tags e2e -timeout 180s ./test/e2e/
+
+  race:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run race-sensitive transport tests
+        run: go test -race -timeout 180s ./internal/arq ./internal/client ./internal/udpserver
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: go vet
+        run: go vet ./...
+
+      # Non-blocking for now: surfaces staticcheck findings without failing the
+      # build. Promote to a required check (remove continue-on-error) once a
+      # clean run is confirmed in CI.
+      - name: staticcheck
+        continue-on-error: true
+        run: go run honnef.co/go/tools/cmd/staticcheck@latest ./...
+
+  android-engine:
+    runs-on: ubuntu-latest
+
+    # Android-source contract: this repo is consumed as a pinned source snapshot by the
+    # WhiteDNS Android app, which builds the native engine itself from this
+    # source — no Android artifact is released here. Cross-compile all four
+    # ABIs through scripts/build-android-client.sh on every push so main can never
+    # silently stop being a valid Android engine source. Uses the NDK preinstalled
+    # on the runner rather than downloading a pinned one — this validates the build
+    # path, not a specific NDK release.
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build all four Android ABIs
+        run: |
+          set -euo pipefail
+          : "${ANDROID_NDK_LATEST_HOME:?No Android NDK found on the runner}"
+          OUTPUT_DIR="$(mktemp -d)/jniLibs"
+          NDK_ROOT="${ANDROID_NDK_LATEST_HOME}" \
+            NDK_HOST=linux-x86_64 \
+            OUTPUT_DIR="${OUTPUT_DIR}" \
+            bash scripts/build-android-client.sh all
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            so="${OUTPUT_DIR}/${abi}/libcottendns_client.so"
+            test -f "${so}" || { echo "::error::missing ${abi} engine binary"; exit 1; }
+            echo "built ${abi}: $(stat -c%s "${so}") bytes"
+          done
+          echo "All four Android ABIs cross-compiled from main."
+
+  deployment-contract:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Validate installer and Compose syntax
+        run: |
+          bash -n server_linux_install.sh
+          sh -n server_docker_install.sh
+          sh -n docker-entrypoint.sh
+          COTTENDNS_DOMAIN=ci.example.com docker compose config --quiet
+
+      - name: Verify legacy one-command upgrade contract
+        run: COTTENDNS_INSTALLER_SELF_TEST=1 bash server_linux_install.sh
+
+      - name: Build server image
+        run: docker build --build-arg BUILD_VERSION=ci -t cottendns-server:ci .
+
+      - name: Verify non-root port binding and container health
+        run: |
+          docker run -d --name cottendns-ci \
+            -e COTTENDNS_DOMAIN=ci.example.com \
+            -e COTTENDNS_METRICS_ADDRESS=0.0.0.0:9090 \
+            -p 19090:9090 \
+            cottendns-server:ci
+          for attempt in $(seq 1 30); do
+            if curl -fsS --max-time 2 http://127.0.0.1:19090/healthz >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs cottendns-ci
+          exit 1
+
+      - name: Clean up deployment smoke test
+        if: always()
+        run: docker rm -f cottendns-ci >/dev/null 2>&1 || true

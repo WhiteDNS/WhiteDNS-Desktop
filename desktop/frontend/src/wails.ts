@@ -1,6 +1,7 @@
 import type {
   AppState,
   CloudflarePingResult,
+  CottenDNSOptionDefinition,
   ConnectionImportResult,
   ConnectionProfile,
   ConnectionTestResolver,
@@ -58,6 +59,7 @@ type AppApi = {
   SelectSettingsProfile(id: string): Promise<AppState>;
   ReorderSettingsProfiles(ids: string[]): Promise<AppState>;
   GetDefaultSettingsProfile(): Promise<SettingsProfile>;
+  GetCottenDNSOptionSchema(): Promise<CottenDNSOptionDefinition[]>;
   ValidateResolverText(rawText: string): Promise<ResolverTextValidation>;
   StartConnection(): Promise<AppState>;
   StopConnection(): Promise<AppState>;
@@ -154,6 +156,7 @@ export const backend = {
   selectSettingsProfile: (id: string) => app().SelectSettingsProfile(id),
   reorderSettingsProfiles: (ids: string[]) => app().ReorderSettingsProfiles(ids),
   getDefaultSettingsProfile: () => app().GetDefaultSettingsProfile(),
+  getCottenDNSOptionSchema: () => app().GetCottenDNSOptionSchema(),
   validateResolverText: (rawText: string) => app().ValidateResolverText(rawText),
   startConnection: () => app().StartConnection(),
   stopConnection: () => app().StopConnection(),

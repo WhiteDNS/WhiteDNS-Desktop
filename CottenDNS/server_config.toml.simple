@@ -1,0 +1,555 @@
+# ==============================================================================
+# CottenDns Go Server Configuration (Sample)
+# This sample is written for the current Go server implementation.
+# Comments below describe the real Go code paths, not the legacy Python server.
+# ==============================================================================
+
+# Optional built-in profile. Keep "default" here, or use one of the bundled
+# paired preset files: server_config.speed.toml, server_config.survival.toml,
+# server_config.tcp-survival.toml.
+# CONFIG_PRESET = "default"
+
+# ------------------------------------------------------------------------------
+# 1) Tunnel Policy
+# What this section does:
+# - Defines which domains belong to this tunnel.
+# - Defines label policy and allowed compression negotiation.
+# ------------------------------------------------------------------------------
+
+# Tunnel domains handled by this server.
+# Must match client DOMAINS.
+DOMAIN = ["v.domain.com"]
+
+# How this server should handle new connections.
+# Allowed values:
+# "SOCKS5" = the client/program chooses the destination for each connection.
+#            Use this when you want the server to behave like a normal SOCKS proxy.
+# "TCP"    = the client does not choose the destination.
+#            The server sends every connection to one fixed target defined by
+#            FORWARD_IP and FORWARD_PORT below.
+PROTOCOL_TYPE = "SOCKS5"
+
+# Compression types the server allows the client to request.
+# Allowed values:
+# 0 = OFF
+# 1 = ZSTD
+# 2 = LZ4
+# 3 = ZLIB
+SUPPORTED_UPLOAD_COMPRESSION_TYPES = [0, 1, 2, 3]
+SUPPORTED_DOWNLOAD_COMPRESSION_TYPES = [0, 1, 2, 3]
+
+# ------------------------------------------------------------------------------
+# 2) UDP Listener & Front-Door Capacity
+# What this section does:
+# - Defines where the server listens for DNS tunnel traffic.
+# - Defines front-door queueing and worker limits before session handling.
+# ------------------------------------------------------------------------------
+
+# UDP bind endpoint.
+UDP_HOST = "0.0.0.0"
+UDP_PORT = 53
+
+# Also serve DNS-over-TCP on the same host:port. Many restrictive networks
+# filter or truncate UDP/53 but still allow TCP/53, so this lets clients fall
+# back to TCP without any change to the tunnel. Default on. TCP_MAX_CONNS caps
+# concurrent TCP connections (0 = built-in default).
+TCP_LISTENER_ENABLED = true
+TCP_MAX_CONNS = 2048
+
+# TCP/53 survival-path guardrails. These protect the fallback listener from
+# connection floods and slow clients while keeping legitimate persistent
+# DNS-over-TCP connections useful. TCP_MAX_QUERIES_PER_CONN = 0 means unlimited.
+TCP_MAX_CONNS_PER_IP = 128
+TCP_MAX_QUERIES_PER_CONN = 0
+
+# Encrypted-DNS listeners (optional). DoT (DNS-over-TLS, RFC 7858) and DoH
+# (DNS-over-HTTPS, RFC 8484) let the client disguise the tunnel as ordinary
+# encrypted DNS on networks that fingerprint plain UDP/TCP 53. They are NOT part
+# of the fallback chain: a client only uses them when it selects that transport,
+# and falls back to UDP/TCP 53 itself if they fail. Both share one TLS cert,
+# resolved as: TLS_CERT_FILE/TLS_KEY_FILE -> ACME/Let's Encrypt for DOMAIN ->
+# self-signed. Off by default (they need a reachable TLS port and, for ACME,
+# port 443 + DOMAIN pointing at this server).
+DOT_LISTENER_ENABLED = false
+DOT_LISTEN_HOST = "0.0.0.0"
+DOT_LISTEN_PORT = 853
+DOH_LISTENER_ENABLED = false
+DOH_LISTEN_HOST = "0.0.0.0"
+DOH_LISTEN_PORT = 443
+DOH_PATH = "/dns-query"
+
+# How DoH coexists on 443 with a panel (3x-ui, Hiddify, ...). Only one process
+# can bind 443, so pick the model that fits your setup:
+#
+#  A) DOH_TLS_ENABLED = false  — "behind the panel" (recommended, universal).
+#     The panel's own front (Xray fallback / nginx / Caddy) keeps 443, terminates
+#     TLS, and forwards the DoH route to CottenDNS on a LOCAL port. Set
+#     DOH_LISTEN_PORT to a local port (e.g. 8453) and set
+#     DOH_LISTEN_HOST=127.0.0.1. Keep UDP_HOST public for UDP/TCP 53. Because the panel's front handles the connection,
+#     EVERY inbound it supports keeps working untouched — VMess/VLESS/Trojan,
+#     xhttp/gRPC/raw/ws/tls, CDN-fronted, and WireGuard (which is UDP and never
+#     touches this TCP listener). CottenDNS serves cleartext HTTP/1.1 + h2c here.
+#
+#  B) DOH_TLS_ENABLED = true + DOH_SHARE_BACKEND set — "in front of the panel".
+#     CottenDNS owns 443, terminates TLS, serves DoH for the DOMAIN(s) above, and
+#     transparently splices every other connection (by TLS SNI) to the backend
+#     where the panel now listens (e.g. 127.0.0.1:8443). Use a DEDICATED DoH
+#     subdomain so the panel's own domains are never captured. Fail-safe: anything
+#     not clearly ours goes to the backend, so this never takes 443 from the panel.
+#
+# Per-IP/global connection limits (TCP_MAX_CONNS*) apply to DoH in both modes.
+#
+# DOH_COEXIST_MODE picks between them:
+#   "auto"   (default) resolves to model A — CottenDNS never binds the TLS port
+#            at all, so it cannot disturb anything and a panel can always install
+#            and take 443 cleanly, before or after CottenDNS. DoH is served on
+#            DOH_BEHIND_PORT; point the panel's front at it.
+#   "front"  model B — explicitly take the TLS port and SNI-share it. Owning 443
+#            is always a deliberate choice, never a default, because once we hold
+#            it a panel installed later would fail to bind.
+#   "behind" model A, stated explicitly.
+DOH_COEXIST_MODE = "auto"
+DOH_BEHIND_PORT = 8453
+
+DOH_TLS_ENABLED = true
+DOH_SHARE_BACKEND = ""
+# Enable only when the backend is configured to accept PROXY protocol v1. It
+# preserves the real source/destination address across CottenDNS's TCP splice.
+DOH_SHARE_PROXY_PROTOCOL = false
+
+# How many of TCP_MAX_CONNS the DoT/DoH listeners may hold at once. The remainder
+# stays permanently reserved for plain DNS-over-TCP/53, so flooding the optional
+# encrypted listeners can never starve the survival fallback. 0 = three quarters.
+ENCRYPTED_MAX_CONNS = 0
+
+# Dedicated DoH flood budgets. These are intentionally independent of the UDP
+# worker queue: 256 x the normal 4096-byte packet ceiling is small, and the
+# aggregate byte gate remains capped at 64 MiB if packet sizing changes.
+DOH_MAX_INFLIGHT = 256
+DOH_MAX_INFLIGHT_BYTES = 67108864
+DOH_REQUESTS_PER_SECOND_PER_IP = 4096
+DOH_REQUEST_BURST_PER_IP = 8192
+# Only peers in this list may supply X-Forwarded-For/X-Real-IP. When DoH is
+# behind a local reverse proxy, use loopback; otherwise leave empty.
+DOH_TRUSTED_PROXY_CIDRS = []
+
+# TLS material for DoT/DoH. Leave the cert files empty to let ACME obtain a real
+# certificate for DOMAIN automatically (best disguise); if ACME cannot run, a
+# self-signed cert is generated so the listener still starts (the client then
+# pins its fingerprint or skips verification — the tunnel payload is AEAD-
+# encrypted regardless, so this never exposes traffic).
+TLS_CERT_FILE = ""
+TLS_KEY_FILE = ""
+ACME_ENABLED = true
+ACME_CACHE_DIR = "acme-cache"
+ACME_EMAIL = ""
+TCP_READ_IDLE_TIMEOUT_SECONDS = 30.0
+TCP_WRITE_TIMEOUT_SECONDS = 15.0
+
+# Number of UDP reader goroutines.
+# If <= 0, code falls back to an auto default.
+UDP_READERS = 7
+
+# Number of DNS request workers that process incoming packets.
+# If <= 0, code falls back to an auto default.
+DNS_REQUEST_WORKERS = 7
+
+# Maximum queued requests waiting behind request workers.
+# If the queue is full, packets are dropped and rate-limited overload logs appear.
+# With the current client sample using larger RX buffering, keeping this at 8192
+# helps the server absorb short bursts without dropping front-door requests too early.
+MAX_CONCURRENT_REQUESTS = 16384
+
+# Hard memory ceiling for transient queued UDP receive buffers. This does not
+# limit session lifetime, stream count, ARQ windows, or long-lived connections.
+# With the 4 KiB packet buffer below, 64 MiB retains the full 16,384-request
+# burst capacity without allowing a public UDP/53 flood to consume ~1 GiB.
+MAX_INGRESS_QUEUE_BYTES = 67108864
+
+# UDP socket read/write buffer size in bytes.
+SOCKET_BUFFER_SIZE = 8388608
+
+# Maximum packet buffer size allocated by the server packet pool.
+# Cotten uploads ride in DNS QNAMEs (maximum 255-byte wire name); 4 KiB leaves
+# ample room for DNS headers and EDNS while keeping every queue slot bounded.
+# Older configs containing 65535 are safely clamped to 4096 at startup.
+MAX_PACKET_SIZE = 4096
+
+# Minimum interval between overload/drop logs.
+DROP_LOG_INTERVAL_SECONDS = 2.0
+
+# ------------------------------------------------------------------------------
+# 3) Deferred Session Runtime
+# What this section does:
+# - Controls the per-session deferred workers used for setup/DNS/ordered tasks.
+# - Controls initial queue capacities used inside session runtime structures.
+# ------------------------------------------------------------------------------
+
+# Worker count for deferred per-session processing.
+# These workers serialize heavy or ordering-sensitive tasks behind session keys.
+DEFERRED_SESSION_WORKERS = 4
+
+# Queue limit for deferred per-session work.
+# Keep this a bit higher than the client-side setup pressure so bursty SYN/SOCKS/DNS
+# setup traffic is less likely to be dropped during short spikes.
+DEFERRED_SESSION_QUEUE_LIMIT = 4096
+
+# Initial queue / store capacities.
+SESSION_ORPHAN_QUEUE_INITIAL_CAPACITY = 128
+STREAM_QUEUE_INITIAL_CAPACITY = 256
+DNS_FRAGMENT_STORE_CAPACITY = 512
+SOCKS5_FRAGMENT_STORE_CAPACITY = 1024
+
+# Maximum number of concurrent data streams the server will keep open per
+# session. Bounds memory under attacker-driven stream creation. The virtual
+# control stream (stream 0) is always allowed and never counted against this
+# cap. Range: 16..65535. Default: 4096.
+MAX_STREAMS_PER_SESSION = 4096
+
+# Maximum number of concurrent live tunnel sessions. The session-ID space is
+# 16-bit (65535), but keeping that many sessions alive is far more memory/CPU
+# load than a single node should carry and makes session-init floods cheap for
+# an attacker. This caps live sessions the same way TCP_MAX_CONNS caps TCP
+# connections; new session-init requests past the cap are refused until a slot
+# frees. Range: 1..65535. Default: 2048.
+MAX_ACTIVE_SESSIONS = 2048
+
+# ---------------------------------------------------------------------------
+# Client resource policy
+# ---------------------------------------------------------------------------
+# Ceilings (and two floors) the server states to clients in SESSION_ACCEPT, so a
+# client configured too aggressively clamps itself instead of taking a
+# disproportionate share of a shared server.
+#
+# Every key below defaults to 0, meaning "state no limit". While all of them are
+# 0 the server sends no policy at all and SESSION_ACCEPT is byte-for-byte what
+# it has always been, so leaving this section alone changes nothing.
+#
+# The wire format matches the MasterDNS/StormDNS family, so compatible clients
+# honour these limits too. Download MTU is additionally enforced server-side;
+# upload MTU is enforced by compatible clients after SESSION_ACCEPT.
+#
+# FOR MAXIMUM CLIENT SPEED, LEAVE EVERY KEY IN THIS SECTION AT 0.
+#
+# These are resource ceilings, not tuning knobs: each one can only take capacity
+# away from a client that wanted more. There is no value here that makes a
+# client faster. Reach for them when a server is genuinely under pressure and
+# you are willing to trade some client throughput for it -- not as part of a
+# performance setup.
+#
+# If you do need them, these are the ones that actually reduce server load:
+#
+#   MIN_ALLOWED_CLIENT_PING_AGGRESSIVE_INTERVAL_SECONDS
+#       The only direct control over how fast a client polls, so the only one
+#       that really bounds query rate. Costs latency in exchange.
+#   MAX_ALLOWED_CLIENT_DOWNLOAD_MTU
+#       Bounds every response the server builds, and is enforced server-side.
+#   MAX_ALLOWED_CLIENT_ARQ_WINDOW_SIZE
+#       Bounds unacknowledged data tracked per stream (memory).
+#   MAX_ALLOWED_CLIENT_PACKET_DUPLICATION_COUNT
+#       Duplication multiplies query volume outright.
+#
+# One trap worth knowing: MAX_ALLOWED_CLIENT_PACKETS_PER_BATCH does NOT reduce
+# query volume, it increases it. Batching packs several control blocks (ACKs and
+# similar) into one query, so a lower ceiling means MORE queries carrying the
+# same acknowledgements -- slower for the client and more requests for the
+# server. It bounds the size and per-query work of a single packed unit, nothing
+# else. Leave it at 0 unless you have measured a per-query cost problem.
+
+# Largest upload/download MTU a client may use. 0 disables the ceiling.
+# Upload range: 10..255. Download range: 10..4096. The download MTU sizes every
+# response the server builds, so it has the most direct effect on server cost.
+MAX_ALLOWED_CLIENT_UPLOAD_MTU = 0
+MAX_ALLOWED_CLIENT_DOWNLOAD_MTU = 0
+
+# Largest ARQ window a client may use. The window bounds how much
+# unacknowledged data the server tracks per stream. 0 disables the ceiling.
+MAX_ALLOWED_CLIENT_ARQ_WINDOW_SIZE = 0
+MAX_ALLOWED_CLIENT_ARQ_DATA_NACK_MAX_GAP = 0
+
+# Largest packed-block batch a client may ask the server to assemble.
+MAX_ALLOWED_CLIENT_PACKETS_PER_BATCH = 0
+
+# Largest packet-duplication factors a client may use (0..15 each). Duplication
+# multiplies the query volume the server receives.
+MAX_ALLOWED_CLIENT_PACKET_DUPLICATION_COUNT = 0
+MAX_ALLOWED_CLIENT_SETUP_PACKET_DUPLICATION_COUNT = 0
+
+# Largest number of client-side RX/TX workers.
+MAX_ALLOWED_CLIENT_RX_TX_WORKERS = 0
+
+# Fastest aggressive ping interval a client may use, in seconds. This is the
+# most direct control over the query rate a single client can generate.
+# Wire range is 0.05..1.00; 0 disables the floor.
+MIN_ALLOWED_CLIENT_PING_AGGRESSIVE_INTERVAL_SECONDS = 0.0
+
+# Smallest compression threshold a client may use, in bytes. A floor stops a
+# client asking the server to compress every tiny packet. 0 disables it.
+MIN_ALLOWED_CLIENT_COMPRESSION_MIN_SIZE = 0
+
+# Smallest initial ARQ RTO a client may use, in seconds. A floor stops a client
+# retransmitting far too eagerly. Wire range is 0.05..1.00; 0 disables it.
+MIN_ALLOWED_CLIENT_ARQ_INITIAL_RTO_SECONDS = 0.0
+
+# Hard upper bound (in bytes) on the size of an upstream DNS response that
+# the server will fragment and tunnel back to the client. Responses larger
+# than this are dropped before fragmentation, preventing attacker-shaped
+# queries from forcing the server to allocate up to 256 fragments per
+# response. Range: 512..65535. Default: 32768.
+MAX_DNS_RESPONSE_BYTES = 32768
+
+# ------------------------------------------------------------------------------
+# 4) Session Lifecycle & Invalid-Cookie Handling
+# What this section does:
+# - Controls how long sessions live.
+# - Controls cleanup cadence.
+# - Controls recently-closed stream tracking.
+# - Controls invalid-cookie detection before ERROR_DROP behavior.
+# ------------------------------------------------------------------------------
+
+# Sliding window used by the invalid-cookie tracker.
+INVALID_COOKIE_WINDOW_SECONDS = 2.0
+
+# How many invalid-cookie hits inside the window are tolerated before the
+# server escalates the response behavior for that session.
+INVALID_COOKIE_ERROR_THRESHOLD = 10
+
+# Session inactivity timeout.
+SESSION_TIMEOUT_SECONDS = 300.0
+
+# How often the background cleanup loop runs.
+SESSION_CLEANUP_INTERVAL_SECONDS = 30.0
+
+# How long closed-session metadata is kept after cleanup.
+CLOSED_SESSION_RETENTION_SECONDS = 600.0
+
+# How long an accepted SESSION_INIT signature can be reused before the server
+# stops treating it as reusable init state.
+SESSION_INIT_REUSE_TTL_SECONDS = 600.0
+
+# How long a closed stream remains in the "recently closed" table.
+# Used to reject late SYNs / duplicates without reviving dead streams.
+RECENTLY_CLOSED_STREAM_TTL_SECONDS = 600.0
+
+# Maximum number of recently-closed stream records kept per session.
+RECENTLY_CLOSED_STREAM_CAP = 2000
+
+# How long terminal streams remain before terminal-stream sweep removes them.
+TERMINAL_STREAM_RETENTION_SECONDS = 45.0
+
+# ------------------------------------------------------------------------------
+# 5) DNS Tunnel Upstream
+# What this section does:
+# - Controls upstream DNS resolution used for DNS-over-tunnel requests.
+# - Controls fragment assembly and tunnel DNS cache behavior.
+# ------------------------------------------------------------------------------
+
+# Upstream resolvers used when the client sends DNS_QUERY_REQ through the tunnel.
+DNS_UPSTREAM_SERVERS = ["1.1.1.1:53", "1.0.0.1:53"]
+
+# Timeout for each upstream DNS exchange attempt.
+DNS_UPSTREAM_TIMEOUT = 4.0
+
+# Wait timeout for followers sharing an inflight DNS resolution.
+# This is used when multiple identical queries arrive while one upstream lookup
+# is already in progress.
+DNS_INFLIGHT_WAIT_TIMEOUT_SECONDS = 15.0
+
+# Fragment assembly timeout for inbound DNS query fragments.
+DNS_FRAGMENT_ASSEMBLY_TIMEOUT = 300.0
+
+# In-memory tunnel DNS cache sizing.
+DNS_CACHE_MAX_RECORDS = 50000
+DNS_CACHE_TTL_SECONDS = 300.0
+
+# ------------------------------------------------------------------------------
+# 6) Upstream SOCKS / Forwarding
+# What this section does:
+# - Controls how the server opens outbound connections.
+# - In SOCKS5 mode, the destination normally comes from the client request.
+# - In TCP mode, all connections go to one fixed destination.
+# - You can also tell the server to use another SOCKS5 proxy as an upstream proxy.
+# ------------------------------------------------------------------------------
+
+# Timeout for outbound connect attempts made by the server.
+SOCKS_CONNECT_TIMEOUT = 120.0
+
+# If true, then in SOCKS5 mode the server does not connect to the final target directly.
+# Instead, it first connects to another SOCKS5 proxy at FORWARD_IP:FORWARD_PORT
+# and asks that proxy to open the destination connection.
+# If false, SOCKS5 mode connects directly to the destination requested by the client.
+# This option does NOT change TCP mode behavior.
+USE_EXTERNAL_SOCKS5 = false
+
+# Username/password for the upstream SOCKS5 proxy.
+# Used only when:
+# - PROTOCOL_TYPE = "SOCKS5"
+# - USE_EXTERNAL_SOCKS5 = true
+# - and that upstream proxy requires username/password authentication
+SOCKS5_AUTH = false
+SOCKS5_USER = "admin"
+# NOTE: change this before enabling SOCKS5_AUTH — this is only a cotton-coated
+# placeholder, not a secret. A weak/default credential here is a real exposure.
+SOCKS5_PASS = "C0tt0n-C@ndy-Cl0ud!"
+
+# FORWARD_IP / FORWARD_PORT mean different things depending on how the server is used:
+# - If PROTOCOL_TYPE = "TCP":
+#   This is the final fixed target.
+#   Every client connection will be forwarded to this one address and port.
+# - If PROTOCOL_TYPE = "SOCKS5" and USE_EXTERNAL_SOCKS5 = true:
+#   This is the address and port of the upstream SOCKS5 proxy.
+# - If PROTOCOL_TYPE = "SOCKS5" and USE_EXTERNAL_SOCKS5 = false:
+#   These values are not used for normal client SOCKS connections.
+FORWARD_IP = ""
+FORWARD_PORT = 0
+
+# ------------------------------------------------------------------------------
+# 7) Security
+# What this section does:
+# - Controls payload encryption method and where the server key is loaded from.
+# ------------------------------------------------------------------------------
+
+# Allowed values:
+# 0 = None
+# 1 = XOR
+# 2 = ChaCha20
+# 3 = AES-128-GCM
+# 4 = AES-192-GCM
+# 5 = AES-256-GCM
+# This is the method the server tries FIRST. With ENCRYPTION_AUTO_DETECT = true
+# (default) the server still accepts clients using any other method on the same
+# shared key, so it need not exactly match the client.
+# Default to authenticated AES-128-GCM. The server's safe auto-detection still
+# accepts clients using keyed methods 1-5, so each client may change encryption
+# without a server edit. Method 0 remains explicit because it has no keying.
+DATA_ENCRYPTION_METHOD = 3
+
+# Encryption-method auto-detection. When true (default), the server builds a
+# codec for every method from the shared key and detects which one each client
+# used by trying to decrypt (authenticated AES-GCM methods are tried first, so
+# they can never be mis-detected). This lets a client change DATA_ENCRYPTION_METHOD
+# without reconfiguring the server. Set false to accept only DATA_ENCRYPTION_METHOD
+# (slightly less CPU per packet, no auto-adaptation).
+ENCRYPTION_AUTO_DETECT = true
+
+# A2 supplementary delivery channel. When true, an A-type tunnel query (the
+# client must include "A" in its QUERY_TYPES) is answered with IPv4 A records
+# carrying the frame (index byte + 3 data bytes per record) instead of a CNAME.
+# This is an additional anti-fingerprinting channel alongside TXT/CNAME, not a
+# replacement: it holds up to ~766 bytes per response, and larger frames fall
+# back to CNAME/TXT automatically. IPv6/AAAA is intentionally not used because
+# the target networks block IPv6. Default false (off).
+A_RECORD_DATA_DELIVERY = false
+
+# Forward Error Correction on the download path (tier-2 packet-loss reducer).
+# When enabled the server encodes outgoing STREAM_DATA into Reed-Solomon blocks
+# of FEC_BLOCK_SIZE data shards + FEC_PARITY recovery shards and sends them as
+# FEC shard packets instead of raw data; the client reconstructs lost data
+# without a retransmit round-trip. ARQ still runs underneath as the backstop, so
+# this is safe to toggle. Default off (byte-identical to the classic data path).
+#
+# A block survives losing up to FEC_PARITY of its (FEC_BLOCK_SIZE + FEC_PARITY)
+# shards. Rule of thumb for a target loss rate L: pick FEC_PARITY so that
+# FEC_PARITY / (FEC_BLOCK_SIZE + FEC_PARITY) >= L. Examples:
+#   ~50% loss: FEC_BLOCK_SIZE = 4,  FEC_PARITY = 4   (8 shards, lose any 4)
+#   ~75% loss: FEC_BLOCK_SIZE = 4,  FEC_PARITY = 12  (16 shards, lose any 12)
+# FEC_BLOCK_SIZE + FEC_PARITY must be <= 256 (clamped automatically).
+FEC_DOWNLOAD_ENABLED = false
+FEC_BLOCK_SIZE = 4
+FEC_PARITY = 4
+
+# Loss-triggered (automatic) FEC. When FEC_AUTO_ENABLED is true (and
+# FEC_DOWNLOAD_ENABLED is not forcing FEC always-on), each download stream watches
+# its own retransmit rate and turns FEC on only once measured loss crosses
+# FEC_AUTO_LOSS_THRESHOLD, scaling parity to the loss (between FEC_PARITY and
+# FEC_AUTO_MAX_PARITY). Below the threshold there is zero FEC overhead, so this is
+# safe to leave on: links stay lean when healthy and self-protect under heavy
+# loss. FEC_AUTO_MAX_PARITY = 0 auto-sizes the cap to 4x FEC_BLOCK_SIZE.
+FEC_AUTO_ENABLED = true
+FEC_AUTO_LOSS_THRESHOLD = 0.3
+FEC_AUTO_MAX_PARITY = 0
+
+# Super-FEC: a last-ditch, loss-aware high-parity band for extreme download loss.
+# When FEC_SUPER_ENABLED and the measured loss lands in
+# [FEC_SUPER_LOSS_FLOOR, FEC_SUPER_LOSS_CEIL], the stream scales parity to the
+# MEASURED loss (76% loss buys less than 84% — not a flat slam), lifted above the
+# normal FEC_AUTO_MAX_PARITY ceiling up to FEC_SUPER_MAX_PARITY for a best-effort
+# rebuild. ABOVE the ceiling the link is treated as hopeless: the server stops
+# escalating and relaxes back to the base rate instead of burning CPU/bandwidth
+# building giant Reed-Solomon blocks that will not arrive anyway — the
+# unrecoverable block is left to ARQ. This protects server resources under
+# pathological loss. Defaults: floor 0.75, ceil 0.85.
+FEC_SUPER_ENABLED = true
+FEC_SUPER_LOSS_FLOOR = 0.75
+FEC_SUPER_LOSS_CEIL = 0.85
+# Caps per-block parity while inside the Super-FEC band. Inside the band, parity
+# is scaled to the MEASURED loss (loss-aware, not a flat maximum) and lifted above
+# the normal FEC_AUTO_MAX_PARITY ceiling up to this cap. 0 = auto (the Reed-Solomon
+# hard limit for the block). Lower it to bound the extra bandwidth that very high
+# parity spends.
+FEC_SUPER_MAX_PARITY = 0
+
+# Relative or absolute path to the encryption key file.
+ENCRYPTION_KEY_FILE = "encrypt_key.txt"
+
+# ------------------------------------------------------------------------------
+# 8) ARQ, Packing, and Setup-Control TTLs
+# What this section does:
+# - Controls reliability parameters for stream ARQ.
+# - Controls control-block batching.
+# - Controls TTLs for setup/result/failure control packets generated by the server.
+# ------------------------------------------------------------------------------
+
+# Maximum packable control blocks emitted in one response.
+# Keep this aligned with the client sample unless you intentionally want larger
+# packed bursts from the server.
+MAX_PACKETS_PER_BATCH = 10
+
+# Duplicate the last packed control-block response this many dispatcher turns.
+# 1 = disabled.
+# Useful on lossy links so CLOSE/RST/SYN-ACK-style control blocks are repeated
+# without repopping queues.
+PACKET_BLOCK_CONTROL_DUPLICATION = 1
+
+# TTLs for control packets sent during stream setup/result paths.
+STREAM_SETUP_ACK_TTL_SECONDS = 400.0
+STREAM_RESULT_PACKET_TTL_SECONDS = 300.0
+STREAM_FAILURE_PACKET_TTL_SECONDS = 120.0
+
+# ARQ timing / retry profile.
+ARQ_WINDOW_SIZE = 1000
+ARQ_INITIAL_RTO_SECONDS = 0.6
+ARQ_MAX_RTO_SECONDS = 3.0
+ARQ_CONTROL_INITIAL_RTO_SECONDS = 0.5
+ARQ_CONTROL_MAX_RTO_SECONDS = 2.0
+ARQ_MAX_CONTROL_RETRIES = 120
+ARQ_INACTIVITY_TIMEOUT_SECONDS = 1800.0
+ARQ_DATA_PACKET_TTL_SECONDS = 2400.0
+ARQ_CONTROL_PACKET_TTL_SECONDS = 1200.0
+ARQ_MAX_DATA_RETRIES = 120
+
+# Maximum out-of-order gap ahead of rcvNxt that can trigger STREAM_DATA_NACK.
+# 0 disables NACK generation entirely.
+# Keep this small so only near-miss gaps cause early resend requests.
+ARQ_DATA_NACK_MAX_GAP = 64
+
+# Minimum seconds between repeated NACKs for the same missing sequence number.
+# Clamped to [0.1s, 30s].
+ARQ_DATA_NACK_INITIAL_DELAY_SECONDS = 0.4
+ARQ_DATA_NACK_REPEAT_SECONDS = 0.8
+
+ARQ_TERMINAL_DRAIN_TIMEOUT_SECONDS = 120.0
+ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS = 90.0
+
+# ------------------------------------------------------------------------------
+# 9) Logging
+# What this section does:
+# - Controls server logger verbosity.
+# ------------------------------------------------------------------------------
+
+# Typical values: DEBUG, INFO, WARN, ERROR
+LOG_LEVEL = "INFO"
+
+# ------------------------------------------------------------------------------
+
+CONFIG_VERSION = "14"

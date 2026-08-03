@@ -1,0 +1,85 @@
+name: WhiteDns Debug Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - WhiteDns
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+concurrency:
+  group: whitedns-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-debug:
+    name: Windows x64 debug app
+    runs-on: macos-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: "1.25.x"
+          cache: true
+          cache-dependency-path: |
+            desktop/go.sum
+            MasterDnsVPN/go.sum
+            CottenDNS/go.sum
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci --prefix desktop/frontend
+
+      - name: Install Wails CLI
+        working-directory: desktop
+        run: |
+          WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
+          go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
+
+      - name: Test desktop integration
+        working-directory: desktop
+        run: go test ./...
+
+      - name: Test CottenDNS engine
+        working-directory: CottenDNS
+        run: go test ./...
+
+      - name: Prepare embedded DNS engines and Xray
+        run: |
+          make -C desktop prepare-package
+          make -C desktop prepare-embedded-client TARGET_GOOS=windows TARGET_GOARCH=amd64
+          make -C desktop prepare-embedded-core TARGET_GOOS=windows TARGET_GOARCH=amd64
+
+      - name: Build Windows debug app
+        working-directory: desktop
+        run: wails build -clean -debug -platform windows/amd64
+
+      - name: Archive runnable app
+        run: |
+          test -f "desktop/build/bin/WhiteDNS Desktop.exe"
+          cd desktop/build/bin
+          zip -qry ../WhiteDNS-Desktop-WhiteDns-debug-windows-x64.zip .
+
+      - name: Upload runnable app
+        uses: actions/upload-artifact@v6
+        with:
+          name: WhiteDNS-Desktop-WhiteDns-debug-windows-x64
+          path: desktop/build/WhiteDNS-Desktop-WhiteDns-debug-windows-x64.zip
+          if-no-files-found: error
+          retention-days: 14

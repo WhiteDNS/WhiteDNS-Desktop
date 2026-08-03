@@ -12,7 +12,7 @@ $(error --version requires a value; use `make all -- --version 1.0.0-beta6`)
 endif
 endif
 
-.PHONY: help deps dev build build-mac build-windows build-linux build-all all package package-mac package-windows package-linux package-linux-distros package-linux-all-docker package-linux-fedora-rpm-docker package-all test test-desktop test-masterdns test-stormdns clean masterdns-client stormdns-client singbox-core singbox-core-all --version
+.PHONY: help deps dev build build-mac build-windows build-linux build-all all package package-mac package-windows package-linux package-linux-distros package-linux-all-docker package-linux-fedora-rpm-docker package-all test test-desktop test-masterdns test-stormdns test-cottendns clean masterdns-client cottendns-client stormdns-client singbox-core singbox-core-all --version
 ifneq ($(VERSION_FROM_ARGS),)
 .PHONY: $(VERSION_FROM_ARGS)
 endif
@@ -29,17 +29,19 @@ help:
 		'  make build-linux      Build/package the Linux desktop app' \
 		'  make build-all        Build release packages for the desktop matrix' \
 		'  make all              Build minified packages for the desktop release matrix' \
-		'  make package          Build package with the matching embedded MasterDNS helper' \
+		'  make package          Build package with matching embedded DNS helpers' \
 		'  make package-linux-distros  Build Linux .deb/.rpm packages on a Linux host' \
 		'  make package-linux-all-docker  Build Linux release packages through Docker' \
 		'  make package-linux-fedora-rpm-docker  Build Fedora 42+ compatible WebKitGTK 4.1 RPM' \
 		'  make package-all      Alias for build-all' \
 		'  make all VERSION=1.0.0-beta6         Build release assets with this version' \
 		'  make all -- --version 1.0.0-beta6    Alternate flag form' \
-		'  make test             Run desktop and MasterDNS Go tests' \
+		'  make test             Run desktop, MasterDNS, and CottenDNS tests' \
 		'  make test-desktop     Run desktop backend tests' \
 		'  make test-masterdns   Run MasterDNS tests' \
+		'  make test-cottendns   Run the vendored CottenDNS tests' \
 		'  make masterdns-client Build MasterDNS helper into desktop/clients/' \
+		'  make cottendns-client Build CottenDNS helper into desktop/clients/' \
 		'  make singbox-core     Install sing-box core into desktop/cores/' \
 		'  make singbox-core-all Cache macOS, Windows, and Linux sing-box cores' \
 		'  make clean            Remove generated desktop build output'
@@ -88,7 +90,7 @@ package-linux-fedora-rpm-docker:
 
 package-all: all
 
-test: test-desktop test-masterdns
+test: test-desktop test-masterdns test-cottendns
 
 test-desktop:
 	$(DESKTOP_MAKE) test
@@ -98,8 +100,14 @@ test-masterdns:
 
 test-stormdns: test-masterdns
 
+test-cottendns:
+	cd CottenDNS && go test ./...
+
 masterdns-client:
 	$(DESKTOP_MAKE) masterdns-client
+
+cottendns-client:
+	$(DESKTOP_MAKE) cottendns-client
 
 stormdns-client:
 	$(DESKTOP_MAKE) stormdns-client

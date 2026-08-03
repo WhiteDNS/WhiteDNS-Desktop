@@ -15,6 +15,7 @@ import (
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"whitedns-desktop/internal/appdata"
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/firewall"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/profiles"
@@ -142,6 +143,7 @@ func runtimeManagerOptions(runtimeDir string) runtimemgr.Options {
 	return runtimemgr.Options{
 		RuntimeDir:        runtimeDir,
 		MasterDNSSource:   findMasterDNSSourceDir(),
+		CottenDNSSource:   findCottenDNSSourceDir(),
 		ClientsDir:        findClientsDir(),
 		XrayCoresDir:      findXrayCoresDir(),
 		EmbeddedClientsFS: clientAssets,
@@ -632,6 +634,10 @@ func (a *App) GetDefaultSettingsProfile() model.SettingsProfile {
 	return profiles.NormalizeSettingsProfile(model.DefaultSettingsProfile())
 }
 
+func (a *App) GetCottenDNSOptionSchema() []cottendns.OptionDefinition {
+	return cottendns.Schema()
+}
+
 func (a *App) ValidateResolverText(rawText string) model.ResolverTextValidation {
 	return resolver.ValidateText(rawText)
 }
@@ -711,9 +717,10 @@ func (a *App) startConnectionWithSettingsOptions(ctx context.Context, overrideSe
 		a.emit("runtime:state", next.Runtime)
 		return next, err
 	}
+	engineName := dnsEngineDisplayName(cfg.Engine)
 	state.Runtime.Status = model.RuntimeConnecting
 	state.Runtime.RuntimeType = model.RuntimeTypeMasterDNS
-	state.Runtime.Message = "Starting MasterDNS"
+	state.Runtime.Message = "Starting " + engineName
 	state.Runtime.ActiveConnectionID = cfg.Connection.ID
 	state.Runtime.ListenIP = cfg.PublicListenIP
 	state.Runtime.ListenPort = cfg.PublicListenPort
@@ -727,8 +734,8 @@ func (a *App) startConnectionWithSettingsOptions(ctx context.Context, overrideSe
 	state.Runtime.ResolverState = model.ResolverRuntimeState{}
 	state.Runtime.Stats = model.TrafficStats{}
 	state.Runtime.TrafficMonitorMessage = ""
-	state.Runtime.Logs = []string{"Starting MasterDNS"}
-	state.Runtime.MasterDNSLogs = appendRuntimeLog([]string{"Starting MasterDNS"}, state.Runtime.MasterDNSLogs...)
+	state.Runtime.Logs = []string{"Starting " + engineName}
+	state.Runtime.MasterDNSLogs = appendRuntimeLog([]string{"Starting " + engineName}, state.Runtime.MasterDNSLogs...)
 	a.state = state
 	next := a.state
 	a.mu.Unlock()
@@ -1256,20 +1263,39 @@ func appConfigDir() (string, error) {
 }
 
 func findMasterDNSSourceDir() string {
+	return findDNSSourceDir("MasterDnsVPN")
+}
+
+func dnsEngineDisplayName(engine string) string {
+	switch model.NormalizeImportType(engine) {
+	case model.ImportTypeStormDNS:
+		return "StormDNS"
+	case model.ImportTypeCottenDNS:
+		return "CottenDNS"
+	default:
+		return "MasterDNS"
+	}
+}
+
+func findCottenDNSSourceDir() string {
+	return findDNSSourceDir("CottenDNS")
+}
+
+func findDNSSourceDir(directoryName string) string {
 	candidates := make([]string, 0)
 	if cwd, err := os.Getwd(); err == nil {
 		candidates = append(candidates,
-			filepath.Join(cwd, "MasterDnsVPN"),
-			filepath.Join(cwd, "..", "MasterDnsVPN"),
-			filepath.Join(cwd, "..", "..", "MasterDnsVPN"),
+			filepath.Join(cwd, directoryName),
+			filepath.Join(cwd, "..", directoryName),
+			filepath.Join(cwd, "..", "..", directoryName),
 		)
 	}
 	if exe, err := os.Executable(); err == nil {
 		dir := filepath.Dir(exe)
 		candidates = append(candidates,
-			filepath.Join(dir, "MasterDnsVPN"),
-			filepath.Join(dir, "..", "MasterDnsVPN"),
-			filepath.Join(dir, "..", "..", "MasterDnsVPN"),
+			filepath.Join(dir, directoryName),
+			filepath.Join(dir, "..", directoryName),
+			filepath.Join(dir, "..", "..", directoryName),
 		)
 	}
 	for _, candidate := range candidates {

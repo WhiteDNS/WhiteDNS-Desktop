@@ -1,0 +1,7 @@
+.git
+.github
+dist
+*.exe
+*.log
+client_config*.toml
+client_resolvers*

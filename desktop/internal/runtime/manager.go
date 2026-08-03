@@ -34,7 +34,9 @@ type Callbacks struct {
 type Options struct {
 	RuntimeDir               string
 	MasterDNSSource          string
+	CottenDNSSource          string
 	BinaryPath               string
+	CottenDNSBinaryPath      string
 	XrayBinaryPath           string
 	XrayCoresDir             string
 	ClientsDir               string
@@ -73,6 +75,7 @@ const (
 
 type activeProcess struct {
 	id                      string
+	engine                  string
 	debugLogs               bool
 	cmd                     *exec.Cmd
 	cancel                  context.CancelFunc
@@ -198,11 +201,13 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		m.log(fmt.Sprintf("Runtime cleanup warning: %v", err))
 	}
 
-	binaryPath, err := m.resolveBinary(ctx)
+	engine := normalizeDNSEngine(cfg.Engine)
+	engineName := dnsEngineDisplayName(engine)
+	binaryPath, err := m.resolveBinaryForEngine(ctx, engine)
 	if err != nil {
 		return err
 	}
-	m.debugLogf(debugLogs, "Debug Desktop resolved MasterDNS helper: path=%s runtime_dir=%s", binaryPath, m.options.RuntimeDir)
+	m.debugLogf(debugLogs, "Debug Desktop resolved %s helper: path=%s runtime_dir=%s", engineName, binaryPath, m.options.RuntimeDir)
 
 	launchID := fmt.Sprintf("%d", time.Now().UnixNano())
 	configFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".toml")
@@ -215,8 +220,14 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	} else if info, err := os.Stat(resolversFile); err != nil || info.IsDir() {
 		return fmt.Errorf("resolver file is unavailable: %s", resolversFile)
 	}
-	mtuScanControlFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".mtu-scan-control")
-	clientTOML := storm.RenderRuntimeClientTOML(cfg.Connection, masterSettings, mtuResolverStateFile)
+	mtuScanControlFile := ""
+	if engine != model.ImportTypeCottenDNS {
+		mtuScanControlFile = filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".mtu-scan-control")
+	}
+	clientTOML := cfg.ClientTOML
+	if engine != model.ImportTypeCottenDNS {
+		clientTOML = storm.RenderRuntimeClientTOML(cfg.Connection, masterSettings, mtuResolverStateFile)
+	}
 	if err := os.WriteFile(configFile, []byte(clientTOML), 0o600); err != nil {
 		return err
 	}
@@ -226,12 +237,14 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 			return err
 		}
 	}
-	if err := os.WriteFile(mtuScanControlFile, []byte("resume\n"), 0o600); err != nil {
-		_ = os.Remove(configFile)
-		if resolversOwned {
-			_ = os.Remove(resolversFile)
+	if mtuScanControlFile != "" {
+		if err := os.WriteFile(mtuScanControlFile, []byte("resume\n"), 0o600); err != nil {
+			_ = os.Remove(configFile)
+			if resolversOwned {
+				_ = os.Remove(resolversFile)
+			}
+			return err
 		}
-		return err
 	}
 	m.debugLogf(debugLogs,
 		"Debug Desktop wrote MasterDNS runtime files: config=%s resolvers=%s resolvers_owned=%t mtu_state=%s mtu_control=%s config_bytes=%d",
@@ -262,7 +275,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	}
 	cmd.Stderr = cmd.Stdout
 
-	m.state(model.RuntimeConnecting, "Starting MasterDNS")
+	m.state(model.RuntimeConnecting, "Starting "+engineName)
 	if err := cmd.Start(); err != nil {
 		cancel()
 		_ = os.Remove(configFile)
@@ -280,6 +293,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 
 	active := &activeProcess{
 		id:                   launchID,
+		engine:               engine,
 		debugLogs:            debugLogs,
 		cmd:                  cmd,
 		cancel:               cancel,
@@ -296,7 +310,9 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	m.mu.Unlock()
 
 	m.startTrafficMonitor(active, cmd.Process.Pid)
-	m.startMTUResolverStateMonitor(active)
+	if engine != model.ImportTypeCottenDNS {
+		m.startMTUResolverStateMonitor(active)
+	}
 	go m.drainOutput(active, stdout)
 	go m.waitForExit(active)
 
@@ -360,6 +376,10 @@ func (m *Manager) SetResolverMTUScanPaused(paused bool) error {
 		m.mu.Unlock()
 		return errors.New("runtime is not running")
 	}
+	if active.engine == model.ImportTypeCottenDNS {
+		m.mu.Unlock()
+		return errors.New("CottenDNS does not expose runtime MTU scan pause control")
+	}
 	controlFile := active.mtuScanControlFile
 	m.mu.Unlock()
 	if strings.TrimSpace(controlFile) == "" {
@@ -386,6 +406,9 @@ func (m *Manager) SetResolverMTUScanPaused(paused bool) error {
 }
 
 func masterDNSLaunchEnv(cfg storm.LaunchConfig, mtuScanControlFile string) []string {
+	if normalizeDNSEngine(cfg.Engine) == model.ImportTypeCottenDNS {
+		return nil
+	}
 	env := []string{"WHITEDNS_MTU_SCAN_CONTROL_FILE=" + mtuScanControlFile}
 	if cfg.FullInitialMTUScan {
 		env = append(env, fullInitialMTUScanEnv+"=1")
@@ -401,18 +424,30 @@ func (m *Manager) ResolveClientBinary(ctx context.Context) (string, error) {
 }
 
 func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
-	if m.options.BinaryPath != "" {
-		if isExecutableFile(m.options.BinaryPath) {
-			return m.options.BinaryPath, nil
+	return m.resolveBinaryForEngine(ctx, model.ImportTypeMasterDNS)
+}
+
+func (m *Manager) resolveBinaryForEngine(ctx context.Context, engine string) (string, error) {
+	engine = normalizeDNSEngine(engine)
+	engineName := dnsEngineDisplayName(engine)
+	binaryOverride := m.options.BinaryPath
+	sourceDir := strings.TrimSpace(m.options.MasterDNSSource)
+	if engine == model.ImportTypeCottenDNS {
+		binaryOverride = m.options.CottenDNSBinaryPath
+		sourceDir = strings.TrimSpace(m.options.CottenDNSSource)
+	}
+	if binaryOverride != "" {
+		if isExecutableFile(binaryOverride) {
+			return binaryOverride, nil
 		}
-		return "", fmt.Errorf("MasterDNS helper not found: %s", m.options.BinaryPath)
+		return "", fmt.Errorf("%s helper not found: %s", engineName, binaryOverride)
 	}
 
-	name := helperPlatformName()
+	name := helperPlatformNameForEngine(engine)
 	checkedDirs := make([]string, 0)
 	for _, dir := range m.clientSearchDirs() {
 		checkedDirs = appendUnique(checkedDirs, dir)
-		if candidate, ok := findClientBinaryInDir(dir); ok {
+		if candidate, ok := findClientBinaryInDirForEngine(dir, engine); ok {
 			return candidate, nil
 		}
 	}
@@ -420,19 +455,19 @@ func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
 		for _, dirName := range []string{"clients", "bin"} {
 			dir := filepath.Join(base, dirName)
 			checkedDirs = appendUnique(checkedDirs, dir)
-			if candidate, ok := findClientBinaryInDir(dir); ok {
+			if candidate, ok := findClientBinaryInDirForEngine(dir, engine); ok {
 				return candidate, nil
 			}
 		}
 	}
-	if candidate, ok := m.extractEmbeddedClient(name); ok {
+	if candidate, ok := m.extractEmbeddedClientForEngine(name, engine); ok {
 		return candidate, nil
 	}
 
-	sourceDir := strings.TrimSpace(m.options.MasterDNSSource)
 	if sourceDir == "" {
 		return "", fmt.Errorf(
-			"MasterDNS client helper not found; expected %s in a clients/ folder. Checked: %s",
+			"%s client helper not found; expected %s in a clients/ folder. Checked: %s",
+			engineName,
 			name,
 			strings.Join(checkedDirs, ", "),
 		)
@@ -447,8 +482,8 @@ func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
 
 	buildCtx, cancel := context.WithTimeout(ctx, m.options.BuildTimeout)
 	defer cancel()
-	m.log("Building MasterDNS helper from source")
-	cmd := exec.CommandContext(buildCtx, "go", "build", "-o", out, "./cmd/client")
+	m.log("Building " + engineName + " helper from source")
+	cmd := exec.CommandContext(buildCtx, "go", "build", "-buildvcs=false", "-o", out, "./cmd/client")
 	hideConsoleWindow(cmd)
 	cmd.Dir = sourceDir
 	output, err := cmd.CombinedOutput()
@@ -477,10 +512,14 @@ func (m *Manager) clientSearchDirs() []string {
 }
 
 func (m *Manager) extractEmbeddedClient(name string) (string, bool) {
+	return m.extractEmbeddedClientForEngine(name, model.ImportTypeMasterDNS)
+}
+
+func (m *Manager) extractEmbeddedClientForEngine(name string, engine string) (string, bool) {
 	if m.options.EmbeddedClientsFS == nil || m.options.RuntimeDir == "" {
 		return "", false
 	}
-	for _, candidateName := range helperNameCandidates() {
+	for _, candidateName := range helperNameCandidatesForEngine(engine) {
 		raw, err := fs.ReadFile(m.options.EmbeddedClientsFS, filepath.ToSlash(filepath.Join("clients", candidateName)))
 		if err != nil || len(raw) == 0 {
 			continue
@@ -1242,12 +1281,13 @@ func (m *Manager) waitForExit(active *activeProcess) {
 	}
 	m.stopXray(active)
 	m.cleanup(active)
+	engineName := dnsEngineDisplayName(active.engine)
 	if err != nil {
-		m.runtimeError(fmt.Sprintf("MasterDNS stopped unexpectedly: %v", err))
-		m.state(model.RuntimeFailed, "MasterDNS stopped unexpectedly")
+		m.runtimeError(fmt.Sprintf("%s stopped unexpectedly: %v", engineName, err))
+		m.state(model.RuntimeFailed, engineName+" stopped unexpectedly")
 		return
 	}
-	m.state(model.RuntimeDisconnected, "MasterDNS stopped")
+	m.state(model.RuntimeDisconnected, engineName+" stopped")
 }
 
 func (m *Manager) waitForXrayExit(active *activeProcess) {
@@ -1483,10 +1523,14 @@ func isExecutableFile(path string) bool {
 }
 
 func findClientBinaryInDir(dir string) (string, bool) {
+	return findClientBinaryInDirForEngine(dir, model.ImportTypeMasterDNS)
+}
+
+func findClientBinaryInDirForEngine(dir string, engine string) (string, bool) {
 	if strings.TrimSpace(dir) == "" {
 		return "", false
 	}
-	for _, name := range helperNameCandidates() {
+	for _, name := range helperNameCandidatesForEngine(engine) {
 		candidate := filepath.Join(dir, name)
 		if isExecutableFile(candidate) {
 			return candidate, true
@@ -1505,7 +1549,11 @@ func findClientBinaryInDir(dir string) (string, bool) {
 		if !strings.Contains(lower, "client") {
 			continue
 		}
-		if !strings.Contains(lower, "masterdns") && !strings.Contains(lower, "masterdnsvpn") {
+		if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
+			if !strings.Contains(lower, "cottendns") {
+				continue
+			}
+		} else if !strings.Contains(lower, "masterdns") && !strings.Contains(lower, "masterdnsvpn") {
 			continue
 		}
 		candidate := filepath.Join(dir, entry.Name())
@@ -1547,7 +1595,15 @@ func findXrayBinaryInDir(dir string) (string, bool) {
 }
 
 func helperPlatformName() string {
-	name := "masterdns-client-" + goruntime.GOOS + "-" + goruntime.GOARCH
+	return helperPlatformNameForEngine(model.ImportTypeMasterDNS)
+}
+
+func helperPlatformNameForEngine(engine string) string {
+	prefix := "masterdns-client-"
+	if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
+		prefix = "cottendns-client-"
+	}
+	name := prefix + goruntime.GOOS + "-" + goruntime.GOARCH
 	if goruntime.GOOS == "windows" {
 		name += ".exe"
 	}
@@ -1563,7 +1619,12 @@ func xrayPlatformName() string {
 }
 
 func helperNameCandidates() []string {
-	platformName := helperPlatformName()
+	return helperNameCandidatesForEngine(model.ImportTypeMasterDNS)
+}
+
+func helperNameCandidatesForEngine(engine string) []string {
+	engine = normalizeDNSEngine(engine)
+	platformName := helperPlatformNameForEngine(engine)
 	exe := ""
 	if goruntime.GOOS == "windows" {
 		exe = ".exe"
@@ -1580,6 +1641,15 @@ func helperNameCandidates() []string {
 	if goruntime.GOARCH == "amd64" {
 		archLabel = "AMD64"
 	}
+	if engine == model.ImportTypeCottenDNS {
+		return []string{
+			platformName,
+			"cottendns-client" + exe,
+			"cottendns_client" + exe,
+			"CottenDns_Client" + exe,
+			"CottenDns_Client_" + platformLabel + "_" + archLabel + exe,
+		}
+	}
 	return []string{
 		platformName,
 		"masterdns-client" + exe,
@@ -1589,6 +1659,20 @@ func helperNameCandidates() []string {
 		"MasterDnsVPN_Client" + exe,
 		"MasterDnsVPN_Client_" + platformLabel + "_" + archLabel + exe,
 	}
+}
+
+func normalizeDNSEngine(engine string) string {
+	if model.NormalizeImportType(engine) == model.ImportTypeCottenDNS {
+		return model.ImportTypeCottenDNS
+	}
+	return model.ImportTypeMasterDNS
+}
+
+func dnsEngineDisplayName(engine string) string {
+	if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
+		return "CottenDNS"
+	}
+	return "MasterDNS"
 }
 
 func xrayNameCandidates() []string {

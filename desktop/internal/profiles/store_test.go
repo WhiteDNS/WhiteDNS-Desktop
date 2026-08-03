@@ -106,6 +106,40 @@ func TestStoreSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestStoreSaveLoadRoundTripsCottenDNSOverrides(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	store := NewStore(path)
+	state := model.DefaultAppState()
+	overrides := map[string]any{
+		"CONFIG_PRESET":      "survival",
+		"RESOLVER_TRANSPORT": "doh",
+		"FAST_CONNECT":       true,
+		"QUERY_TYPES":        []string{"TXT", "HTTPS"},
+	}
+	settings := model.DefaultSettingsProfile()
+	settings.ID = "settings-cottendns"
+	settings.Name = "CottenDNS"
+	settings.ImportType = model.ImportTypeCottenDNS
+	settings.CottenDNSOptions = &overrides
+	state.SettingsProfiles = append(state.SettingsProfiles, settings)
+	state.SelectedSettingsProfileID = settings.ID
+	if err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded.SettingsProfiles[1]
+	if got.ImportType != model.ImportTypeCottenDNS || got.CottenDNSOptions == nil {
+		t.Fatalf("CottenDNS settings were not restored: %#v", got)
+	}
+	if (*got.CottenDNSOptions)["CONFIG_PRESET"] != "survival" || (*got.CottenDNSOptions)["RESOLVER_TRANSPORT"] != "doh" {
+		t.Fatalf("CottenDNS overrides changed during persistence: %#v", *got.CottenDNSOptions)
+	}
+}
+
 func TestStoreRecoversFromCorruptJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {

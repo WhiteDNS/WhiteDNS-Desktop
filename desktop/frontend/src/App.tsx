@@ -127,6 +127,8 @@ import { cn } from "@/lib/utils";
 import type {
   AppState,
   CloudflarePingResult,
+  CottenDNSOptionDefinition,
+  CottenDNSOptionValue,
   ConnectionProfile,
   ConnectionTestResolver,
   ConnectionTestResult,
@@ -176,7 +178,8 @@ type SettingsSection =
   | "traffic"
   | "mtu"
   | "performance"
-  | "reliability";
+  | "reliability"
+  | "cottendns";
 type AppErrorToast = {
   id: number;
   message: string;
@@ -204,6 +207,7 @@ const whiteVpnNoticeDismissedKey = "whitedns.desktop.vpnMovedNotice.dismissed";
 const importTypeOptions: Array<[ImportType, string]> = [
   ["masterdns", "MasterDNS"],
   ["stormdns", "StormDNS"],
+  ["cottendns", "CottenDNS"],
 ];
 const connectionProfileFilterOptions: Array<[ConnectionProfileFilter, string]> = [
   ["all", "All"],
@@ -276,11 +280,12 @@ function normalizeRuntimeLogEntry(value: RuntimeLogEntry | string): RuntimeLogEn
 }
 
 function normalizeImportType(value?: string): ImportType {
-  return value === "stormdns" ? "stormdns" : "masterdns";
+  return value === "stormdns" || value === "cottendns" ? value : "masterdns";
 }
 
 function importTypeLabel(value?: string): string {
-  return normalizeImportType(value) === "stormdns" ? "StormDNS" : "MasterDNS";
+  const normalized = normalizeImportType(value);
+  return normalized === "stormdns" ? "StormDNS" : normalized === "cottendns" ? "CottenDNS" : "MasterDNS";
 }
 
 function normalizeConnectionProfile(profile: ConnectionProfile): ConnectionProfile {
@@ -500,6 +505,7 @@ function normalizeSettingsProfile(profile: SettingsProfile): SettingsProfile {
   return {
     ...profile,
     importType: normalizeImportType(profile.importType),
+    cottenDnsOptions: profile.cottenDnsOptions || {},
     connectionStartupMode: profile.connectionStartupMode === "full-scan" ? "full-scan" : "standard",
     mtuStartupLossVerifyEnabled: missingStartupLoss ? true : profile.mtuStartupLossVerifyEnabled,
     mtuStartupLossVerifySamples: profile.mtuStartupLossVerifySamples || 3,
@@ -964,6 +970,7 @@ const settingsSections: Array<{ id: SettingsSection; label: string; icon: ReactN
   { id: "mtu", label: "MTU", icon: <Gauge /> },
   { id: "performance", label: "Performance", icon: <Cpu /> },
   { id: "reliability", label: "Reliability", icon: <Shield /> },
+  { id: "cottendns", label: "CottenDNS", icon: <Network /> },
 ];
 
 function App() {
@@ -4006,6 +4013,7 @@ function SettingsPage({
 }) {
   const selected = state.settingsProfiles.find((profile) => profile.id === state.selectedSettingsProfileId) || state.settingsProfiles[0];
   const [draft, setDraft] = useState(selected);
+  const [cottenDnsSchema, setCottenDnsSchema] = useState<CottenDNSOptionDefinition[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importText, setImportText] = useState("");
@@ -4013,12 +4021,36 @@ function SettingsPage({
   const [importType, setImportType] = useState<ImportType>("masterdns");
   const importDisabled = !importText.trim();
   const defaultSettingsDraft = draft.id === "settings-default";
+  const cottenDnsDraft = normalizeImportType(draft.importType) === "cottendns";
+  const visibleSettingsSections = cottenDnsDraft
+    ? settingsSections.filter((item) => item.id === "general" || item.id === "proxy" || item.id === "cottendns")
+    : settingsSections.filter((item) => item.id !== "cottendns");
+  const activeSettingsSection = visibleSettingsSections.some((item) => item.id === section) ? section : "general";
 
   useEffect(() => {
     if (!editorOpen) {
       setDraft(selected);
     }
   }, [editorOpen, selected]);
+
+  useEffect(() => {
+    let cancelled = false;
+    backend
+      .getCottenDNSOptionSchema()
+      .then((schema) => {
+        if (!cancelled) {
+          setCottenDnsSchema(schema || []);
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          onError(messageFromError(err));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function exportToml() {
     onError("");
@@ -4033,7 +4065,14 @@ function SettingsPage({
     onError("");
     try {
       const defaults = await backend.getDefaultSettingsProfile();
-      setDraft({ ...defaults, id: draft.id, name: draft.name || defaults.name });
+      const importType = normalizeImportType(draft.importType);
+      setDraft({
+        ...defaults,
+        id: draft.id,
+        name: draft.name || defaults.name,
+        importType,
+        cottenDnsOptions: importType === "cottendns" ? {} : defaults.cottenDnsOptions || {},
+      });
     } catch (err) {
       onError(messageFromError(err));
     }
@@ -4162,6 +4201,14 @@ function SettingsPage({
               <tbody>
                 {state.settingsProfiles.map((profile) => {
                   const selectedProfile = profile.id === selected?.id;
+                  const cottenDNS = normalizeImportType(profile.importType) === "cottendns";
+                  const minUploadMTU = cottenDNS ? Number(cottenDNSOptionValue(profile, cottenDnsSchema, "MIN_UPLOAD_MTU", profile.minUploadMtu)) : profile.minUploadMtu;
+                  const maxUploadMTU = cottenDNS ? Number(cottenDNSOptionValue(profile, cottenDnsSchema, "MAX_UPLOAD_MTU", profile.maxUploadMtu)) : profile.maxUploadMtu;
+                  const minDownloadMTU = cottenDNS ? Number(cottenDNSOptionValue(profile, cottenDnsSchema, "MIN_DOWNLOAD_MTU", profile.minDownloadMtu)) : profile.minDownloadMtu;
+                  const maxDownloadMTU = cottenDNS ? Number(cottenDNSOptionValue(profile, cottenDnsSchema, "MAX_DOWNLOAD_MTU", profile.maxDownloadMtu)) : profile.maxDownloadMtu;
+                  const uploadDuplication = cottenDNS ? Number(cottenDNSOptionValue(profile, cottenDnsSchema, "UPLOAD_PACKET_DUPLICATION_COUNT", profile.uploadDuplication)) : profile.uploadDuplication;
+                  const downloadDuplication = cottenDNS ? Number(cottenDNSOptionValue(profile, cottenDnsSchema, "DOWNLOAD_PACKET_DUPLICATION_COUNT", profile.downloadDuplication)) : profile.downloadDuplication;
+                  const logLevel = cottenDNS ? String(cottenDNSOptionValue(profile, cottenDnsSchema, "LOG_LEVEL", profile.logLevel)) : profile.logLevel;
                   return (
                     <tr
                       key={profile.id}
@@ -4197,13 +4244,13 @@ function SettingsPage({
                       </td>
                       <td className="min-w-0 px-3 py-3">
                         <span className="block truncate font-mono text-xs">
-                          U {profile.minUploadMtu}-{profile.maxUploadMtu} · D {profile.minDownloadMtu}-{profile.maxDownloadMtu}
+                          U {minUploadMTU}-{maxUploadMTU} · D {minDownloadMTU}-{maxDownloadMTU}
                         </span>
                       </td>
                       <td className="px-3 py-3 font-mono text-xs">
-                        U{profile.uploadDuplication} / D{profile.downloadDuplication}
+                        U{uploadDuplication} / D{downloadDuplication}
                       </td>
-                      <td className="px-3 py-3 uppercase">{profile.logLevel || "WARN"}</td>
+                      <td className="px-3 py-3 uppercase">{logLevel || "WARN"}</td>
                     </tr>
                   );
                 })}
@@ -4217,21 +4264,21 @@ function SettingsPage({
         <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-6xl">
           <DialogHeader>
             <DialogTitle>{draft.id ? draft.name : "New settings profile"}</DialogTitle>
-            <DialogDescription>{sectionLabel(section)}</DialogDescription>
+            <DialogDescription>{sectionLabel(activeSettingsSection)}</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 overflow-y-auto pr-1">
-            <Tabs value={section} onValueChange={(value) => onSection(value as SettingsSection)} className="min-h-0 gap-4">
+            <Tabs value={activeSettingsSection} onValueChange={(value) => onSection(value as SettingsSection)} className="min-h-0 gap-4">
               <TabsList className="flex h-auto flex-wrap justify-start">
-                {settingsSections.map((item) => (
+                {visibleSettingsSections.map((item) => (
                   <TabsTrigger key={item.id} value={item.id} className="gap-1.5">
                     {item.icon}
                     {item.label}
                   </TabsTrigger>
                 ))}
               </TabsList>
-              {settingsSections.map((item) => (
+              {visibleSettingsSections.map((item) => (
                 <TabsContent key={item.id} value={item.id} className="mt-0 min-h-0">
-                  <SettingsFields section={item.id} draft={draft} onDraft={setDraft} />
+                  <SettingsFields section={item.id} draft={draft} onDraft={setDraft} cottenDnsSchema={cottenDnsSchema} />
                 </TabsContent>
               ))}
             </Tabs>
@@ -4470,10 +4517,12 @@ function SettingsFields({
   section,
   draft,
   onDraft,
+  cottenDnsSchema,
 }: {
   section: SettingsSection;
   draft: SettingsProfile;
   onDraft: (profile: SettingsProfile) => void;
+  cottenDnsSchema: CottenDNSOptionDefinition[];
 }) {
   switch (section) {
     case "general":
@@ -4483,7 +4532,13 @@ function SettingsFields({
           <SelectField
             label="Import type"
             value={normalizeImportType(draft.importType)}
-            onChange={(nextImportType) => onDraft({ ...draft, importType: nextImportType })}
+            onChange={(nextImportType) =>
+              onDraft({
+                ...draft,
+                importType: nextImportType,
+                cottenDnsOptions: nextImportType === "cottendns" ? draft.cottenDnsOptions || {} : draft.cottenDnsOptions,
+              })
+            }
             options={importTypeOptions}
           />
           {normalizeImportType(draft.importType) === "stormdns" && (
@@ -4498,7 +4553,7 @@ function SettingsFields({
               ]}
             />
           )}
-          <SelectField
+          {normalizeImportType(draft.importType) !== "cottendns" && <SelectField
             label="Log level"
             value={draft.logLevel}
             onChange={(logLevel) => onDraft({ ...draft, logLevel: String(logLevel) })}
@@ -4508,11 +4563,14 @@ function SettingsFields({
               ["WARN", "WARN"],
               ["ERROR", "ERROR"],
             ]}
-          />
-          <ToggleField label="Base encode data" checked={draft.baseEncodeData} onChange={(baseEncodeData) => onDraft({ ...draft, baseEncodeData })} />
+          />}
+          {normalizeImportType(draft.importType) !== "cottendns" && (
+            <ToggleField label="Base encode data" checked={draft.baseEncodeData} onChange={(baseEncodeData) => onDraft({ ...draft, baseEncodeData })} />
+          )}
         </SettingsFieldSet>
       );
     case "proxy":
+      const isCottenDNS = normalizeImportType(draft.importType) === "cottendns";
       return (
         <div className="space-y-6">
           <SettingsFieldSet legend="Public proxy">
@@ -4538,7 +4596,7 @@ function SettingsFields({
             <NumberField label="Public proxy port" value={draft.listenPort} onChange={(listenPort) => onDraft({ ...draft, listenPort })} />
           </SettingsFieldSet>
 
-          <SettingsFieldSet legend="MasterDNS/StormDNS upstream">
+          {!isCottenDNS && <SettingsFieldSet legend="MasterDNS/StormDNS upstream">
             <TextField
               label="MasterDNS/StormDNS listen IP"
               value={draft.stormDnsListenIp}
@@ -4550,9 +4608,9 @@ function SettingsFields({
               value={draft.stormDnsListenPort}
               onChange={(stormDnsListenPort) => onDraft({ ...draft, stormDnsListenPort })}
             />
-          </SettingsFieldSet>
+          </SettingsFieldSet>}
 
-          <SettingsFieldSet legend="Proxy access">
+          {!isCottenDNS && <SettingsFieldSet legend="Proxy access">
             <ToggleField label="Proxy authentication" checked={draft.socks5Authentication} onChange={(socks5Authentication) => onDraft({ ...draft, socks5Authentication })} />
             {draft.socks5Authentication && (
               <>
@@ -4562,7 +4620,7 @@ function SettingsFields({
             )}
             <NumberField label="Local handshake timeout" value={draft.localHandshakeTimeoutSeconds} step="0.1" onChange={(localHandshakeTimeoutSeconds) => onDraft({ ...draft, localHandshakeTimeoutSeconds })} />
             <NumberField label="UDP associate timeout" value={draft.socksUdpAssociateReadTimeoutSeconds} step="0.1" onChange={(socksUdpAssociateReadTimeoutSeconds) => onDraft({ ...draft, socksUdpAssociateReadTimeoutSeconds })} />
-          </SettingsFieldSet>
+          </SettingsFieldSet>}
         </div>
       );
     case "dns":
@@ -4707,7 +4765,208 @@ function SettingsFields({
           )}
         </SettingsFieldSet>
       );
+    case "cottendns":
+      if (normalizeImportType(draft.importType) !== "cottendns") {
+        return (
+          <Alert>
+            <Network />
+            <AlertTitle>CottenDNS engine settings</AlertTitle>
+            <AlertDescription>Select CottenDNS as the import type on the General tab to use these options.</AlertDescription>
+          </Alert>
+        );
+      }
+      return <CottenDNSSettingsFields draft={draft} onDraft={onDraft} schema={cottenDnsSchema} />;
   }
+}
+
+function cottenDNSOptionValue(
+  profile: SettingsProfile,
+  schema: CottenDNSOptionDefinition[],
+  key: string,
+  fallback: CottenDNSOptionValue
+): CottenDNSOptionValue {
+  const overrides = profile.cottenDnsOptions || {};
+  if (Object.prototype.hasOwnProperty.call(overrides, key)) {
+    return overrides[key];
+  }
+  const definition = schema.find((option) => option.key === key);
+  if (!definition) {
+    return fallback;
+  }
+  const preset = String(overrides.CONFIG_PRESET || "default");
+  if (definition.presetDefaults && Object.prototype.hasOwnProperty.call(definition.presetDefaults, preset)) {
+    return definition.presetDefaults[preset];
+  }
+  return definition.defaultValue ?? fallback;
+}
+
+function CottenDNSSettingsFields({
+  draft,
+  onDraft,
+  schema,
+}: {
+  draft: SettingsProfile;
+  onDraft: (profile: SettingsProfile) => void;
+  schema: CottenDNSOptionDefinition[];
+}) {
+  const overrides = draft.cottenDnsOptions || {};
+  const presetName = String(overrides.CONFIG_PRESET || "default");
+  const groups = schema.reduce<Array<{ name: string; options: CottenDNSOptionDefinition[] }>>((result, option) => {
+    const existing = result.find((group) => group.name === option.group);
+    if (existing) {
+      existing.options.push(option);
+    } else {
+      result.push({ name: option.group || "Other", options: [option] });
+    }
+    return result;
+  }, []);
+
+  function effectiveValue(option: CottenDNSOptionDefinition): CottenDNSOptionValue {
+    if (Object.prototype.hasOwnProperty.call(overrides, option.key)) {
+      return overrides[option.key];
+    }
+    if (option.presetDefaults && Object.prototype.hasOwnProperty.call(option.presetDefaults, presetName)) {
+      return option.presetDefaults[presetName];
+    }
+    return option.defaultValue;
+  }
+
+  function updateOption(key: string, value: CottenDNSOptionValue) {
+    onDraft({
+      ...draft,
+      cottenDnsOptions: {
+        ...overrides,
+        [key]: value,
+      },
+    });
+  }
+
+  function clearOption(key: string) {
+    const next = { ...overrides };
+    delete next[key];
+    onDraft({ ...draft, cottenDnsOptions: next });
+  }
+
+  if (!schema.length) {
+    return (
+      <div className="space-y-3">
+        <Skeleton className="h-20 w-full" />
+        <Skeleton className="h-48 w-full" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Alert>
+        <Network />
+        <AlertTitle>CottenDNS configuration</AlertTitle>
+        <AlertDescription>
+          Every client option from the pinned CottenDNS template is available below. Domain, encryption key, encryption method,
+          and resolver list remain managed by their dedicated WhiteDNS profiles. Fields marked Override are written after the
+          selected CottenDNS preset.
+        </AlertDescription>
+      </Alert>
+      <div className="flex justify-end">
+        <Button type="button" size="sm" variant="outline" onClick={() => onDraft({ ...draft, cottenDnsOptions: {} })}>
+          <RotateCcw />
+          Clear all CottenDNS overrides
+        </Button>
+      </div>
+      {groups.map((group) => (
+        <SettingsFieldSet key={group.name} legend={group.name}>
+          {group.options.map((option) => {
+            const overridden = Object.prototype.hasOwnProperty.call(overrides, option.key);
+            const value = effectiveValue(option);
+            const description = option.description || `CottenDNS option ${option.key}.`;
+            let field: ReactNode;
+            if (option.kind === "boolean") {
+              field = (
+                <ToggleField
+                  label={option.label}
+                  checked={Boolean(value)}
+                  onChange={(next) => updateOption(option.key, next)}
+                  description={description}
+                />
+              );
+            } else if (option.kind === "integer" || option.kind === "number") {
+              field = (
+                <NumberField
+                  label={option.label}
+                  value={Number(value)}
+                  step={option.kind === "number" ? "0.01" : "1"}
+                  onChange={(next) => updateOption(option.key, next)}
+                  description={description}
+                />
+              );
+            } else if (option.kind === "string-list") {
+              field = (
+                <TextAreaField
+                  label={option.label}
+                  value={Array.isArray(value) ? value.join("\n") : String(value || "")}
+                  onChange={(next) =>
+                    updateOption(
+                      option.key,
+                      next
+                        .split(/[\n,]/)
+                        .map((item) => item.trim())
+                        .filter(Boolean)
+                    )
+                  }
+                  description={description}
+                  className="min-h-24 font-mono text-xs"
+                />
+              );
+            } else if (option.kind === "select" && option.choices?.length) {
+              field = (
+                <SelectField
+                  label={option.label}
+                  value={value as string | number}
+                  onChange={(next) => updateOption(option.key, next)}
+                  options={option.choices.map((choice) => [choice.value as string | number, choice.label])}
+                  description={description}
+                />
+              );
+            } else if (option.key === "SOCKS5_PASS" || option.key === "RESOLVER_TLS_PIN") {
+              field = (
+                <SecretField
+                  label={option.label}
+                  value={String(value ?? "")}
+                  revealable
+                  onChange={(next) => updateOption(option.key, next)}
+                />
+              );
+            } else {
+              field = (
+                <TextField
+                  label={option.label}
+                  value={String(value ?? "")}
+                  onChange={(next) => updateOption(option.key, next)}
+                  description={description}
+                />
+              );
+            }
+            return (
+              <div key={option.key} className="rounded-lg border bg-muted/10 p-3">
+                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                  <code className="text-[11px] text-muted-foreground">{option.key}</code>
+                  {overridden ? (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => clearOption(option.key)}>
+                      <RotateCcw />
+                      Use preset/default
+                    </Button>
+                  ) : (
+                    <Badge variant="outline">Preset/default</Badge>
+                  )}
+                </div>
+                {field}
+              </div>
+            );
+          })}
+        </SettingsFieldSet>
+      ))}
+    </div>
+  );
 }
 
 function ScannerPage({
@@ -5709,8 +5968,8 @@ function LogsPage({
   const logs = normalizedQuery
     ? runtimeLogs.filter((line) => line.toLowerCase().includes(normalizedQuery))
     : runtimeLogs;
-  const title = "MasterDNS Diagnostics";
-  const description = "MasterDNS/StormDNS runtime diagnostics.";
+  const title = "DNS Engine Diagnostics";
+  const description = "MasterDNS, StormDNS, and CottenDNS runtime diagnostics.";
   const pageRuntimeActive = normalizeRuntimeType(runtime.runtimeType) === "masterdns";
   const pageStatus = pageRuntimeActive ? runtime.status : "disconnected";
 
@@ -6231,12 +6490,14 @@ function TextAreaField({
   value,
   placeholder,
   className,
+  description,
   onChange,
 }: {
   label: string;
   value: string;
   placeholder?: string;
   className?: string;
+  description?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -6248,6 +6509,7 @@ function TextAreaField({
         className={className}
         onChange={(event) => onChange(event.target.value)}
       />
+      {description && <FieldDescription>{description}</FieldDescription>}
     </Field>
   );
 }

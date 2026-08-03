@@ -1,6 +1,6 @@
 # WhiteDNS Desktop
 
-Wails v2 desktop client for running the MasterDNS/StormDNS Go client behind a managed Xray local proxy.
+Wails v2 desktop client for running the MasterDNS/StormDNS or CottenDNS Go client behind a managed Xray local proxy.
 
 ## Release notes
 
@@ -28,7 +28,9 @@ make test
 make dev
 ```
 
-The app can extract embedded runtime binaries from `clients/masterdns-client-<goos>-<goarch>` and `cores/xray-<goos>-<goarch>`. Package targets reset `clients/` and `cores/`, prepare only the binaries and Xray geodata for the target platform, and embed them into the app binary. Release packages do not need separate `clients/` or `cores/` folders beside the app.
+The app extracts engine-specific runtime binaries from `clients/masterdns-client-<goos>-<goarch>`, `clients/cottendns-client-<goos>-<goarch>`, and `cores/xray-<goos>-<goarch>`. Package targets reset `clients/` and `cores/`, build both DNS helpers plus the Xray core for the target platform, and embed them into the app binary. Release packages do not need separate `clients/` or `cores/` folders beside the app.
+
+CottenDNS is vendored at the repository root from the immutable commit recorded in `vendor/cottendns.json`. The desktop option schema is generated from the pinned CottenDNS client templates. Settings profiles store sparse overrides so native `default`, `speed`, `survival`, and `tcp-survival` preset behavior remains intact. Domain, encryption, and resolver data continue to come from the dedicated connection and resolver profiles.
 
 If you keep client binaries outside the app directory, set `WHITEDNS_CLIENTS_DIR=/absolute/path/to/clients` before launching the app.
 
@@ -52,6 +54,7 @@ Useful targets:
 
 ```bash
 make masterdns-client
+make cottendns-client
 make xray-core
 make build
 make package

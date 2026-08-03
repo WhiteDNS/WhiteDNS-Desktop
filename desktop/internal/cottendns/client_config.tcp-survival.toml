@@ -1,0 +1,10 @@
+# CottenDNS paired preset: tcp-survival
+# Use with server_config.tcp-survival.toml when TCP/53 is the main working path.
+
+CONFIG_PRESET = "tcp-survival"
+
+# Your delegated tunnel domain(s), e.g. ["d.example.com"].
+DOMAINS = ["REPLACE_WITH_YOUR_DELEGATED_DOMAIN"]
+
+# Paste the key generated on the server side.
+ENCRYPTION_KEY = ""

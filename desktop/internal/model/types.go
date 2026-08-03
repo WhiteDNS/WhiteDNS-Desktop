@@ -40,6 +40,7 @@ const (
 
 	ImportTypeMasterDNS = "masterdns"
 	ImportTypeStormDNS  = "stormdns"
+	ImportTypeCottenDNS = "cottendns"
 
 	V2RayProtocolVLESS       = "vless"
 	V2RayProtocolVMess       = "vmess"
@@ -63,6 +64,8 @@ func NormalizeImportType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case ImportTypeStormDNS:
 		return ImportTypeStormDNS
+	case ImportTypeCottenDNS:
+		return ImportTypeCottenDNS
 	default:
 		return ImportTypeMasterDNS
 	}
@@ -188,76 +191,77 @@ type V2RayDuplicateRemovalResult struct {
 }
 
 type SettingsProfile struct {
-	ID                               string  `json:"id"`
-	Name                             string  `json:"name"`
-	ImportType                       string  `json:"importType"`
-	ListenIP                         string  `json:"listenIp"`
-	ListenPort                       int     `json:"listenPort"`
-	SOCKS5Authentication             bool    `json:"socks5Authentication"`
-	SOCKSUsername                    string  `json:"socksUsername"`
-	SOCKSPassword                    string  `json:"socksPassword"`
-	SingBoxEnabled                   bool    `json:"singBoxEnabled"`
-	SingBoxInboundType               string  `json:"singBoxInboundType"`
-	SingBoxSetSystemProxy            bool    `json:"singBoxSetSystemProxy"`
-	StormDNSListenIP                 string  `json:"stormDnsListenIp"`
-	StormDNSListenPort               int     `json:"stormDnsListenPort"`
-	LocalDNSEnabled                  bool    `json:"localDnsEnabled"`
-	LocalDNSPort                     int     `json:"localDnsPort"`
-	BalancingStrategy                int     `json:"balancingStrategy"`
-	UploadDuplication                int     `json:"uploadDuplication"`
-	DownloadDuplication              int     `json:"downloadDuplication"`
-	AutoRemoveLowMTUServers          bool    `json:"autoRemoveLowMtuServers"`
-	SaveMTUServersToFile             bool    `json:"saveMtuServersToFile"`
-	MTUServersFileName               string  `json:"mtuServersFileName"`
-	MTUServersFileFormat             string  `json:"mtuServersFileFormat"`
-	MTUUsingSectionSeparatorText     string  `json:"mtuUsingSectionSeparatorText"`
-	MTURemovedServerLogFormat        string  `json:"mtuRemovedServerLogFormat"`
-	MTUAddedServerLogFormat          string  `json:"mtuAddedServerLogFormat"`
-	MTUReactiveAddedServerLogFormat  string  `json:"mtuReactiveAddedServerLogFormat"`
-	UploadCompression                int     `json:"uploadCompression"`
-	DownloadCompression              int     `json:"downloadCompression"`
-	BaseEncodeData                   bool    `json:"baseEncodeData"`
-	MinUploadMTU                     int     `json:"minUploadMtu"`
-	MinDownloadMTU                   int     `json:"minDownloadMtu"`
-	MaxUploadMTU                     int     `json:"maxUploadMtu"`
-	MaxDownloadMTU                   int     `json:"maxDownloadMtu"`
-	MTUTestRetriesResolvers          int     `json:"mtuTestRetriesResolvers"`
-	MTUTestTimeoutResolvers          float64 `json:"mtuTestTimeoutResolvers"`
-	MTUTestParallelismResolvers      int     `json:"mtuTestParallelismResolvers"`
-	MTUStartupLossVerifyEnabled      bool    `json:"mtuStartupLossVerifyEnabled"`
-	MTUStartupLossVerifySamples      int     `json:"mtuStartupLossVerifySamples"`
-	MTUStartupLossVerifyMaxLossPct   int     `json:"mtuStartupLossVerifyMaxLossPercent"`
-	MTUStartupLossVerifyCandidates   int     `json:"mtuStartupLossVerifyCandidates"`
-	MTURecheckEnabled                bool    `json:"mtuRecheckEnabled"`
-	MTURecheckIntervalMinutes        int     `json:"mtuRecheckIntervalMinutes"`
-	MTUTestRetriesLogs               int     `json:"mtuTestRetriesLogs"`
-	MTUTestTimeoutLogs               float64 `json:"mtuTestTimeoutLogs"`
-	MTUTestParallelismLogs           int     `json:"mtuTestParallelismLogs"`
-	ConnectionStartupMode            string  `json:"connectionStartupMode"`
-	RXTXWorkers                      int     `json:"rxTxWorkers"`
-	TunnelProcessWorkers             int     `json:"tunnelProcessWorkers"`
-	TunnelPacketTimeoutSeconds       float64 `json:"tunnelPacketTimeoutSeconds"`
-	DispatcherIdlePollIntervalSec    float64 `json:"dispatcherIdlePollIntervalSeconds"`
-	TXChannelSize                    int     `json:"txChannelSize"`
-	RXChannelSize                    int     `json:"rxChannelSize"`
-	ResolverUDPConnectionPoolSize    int     `json:"resolverUdpConnectionPoolSize"`
-	StreamQueueInitialCapacity       int     `json:"streamQueueInitialCapacity"`
-	OrphanQueueInitialCapacity       int     `json:"orphanQueueInitialCapacity"`
-	DNSResponseFragmentStoreCapacity int     `json:"dnsResponseFragmentStoreCapacity"`
-	MaxActiveStreams                 int     `json:"maxActiveStreams"`
-	LocalHandshakeTimeoutSeconds     float64 `json:"localHandshakeTimeoutSeconds"`
-	SOCKSUDPAssociateReadTimeoutSec  float64 `json:"socksUdpAssociateReadTimeoutSeconds"`
-	ClientTerminalStreamRetentionSec float64 `json:"clientTerminalStreamRetentionSeconds"`
-	ClientCancelledSetupRetentionSec float64 `json:"clientCancelledSetupRetentionSeconds"`
-	SessionInitRetryBaseSeconds      float64 `json:"sessionInitRetryBaseSeconds"`
-	SessionInitRetryStepSeconds      float64 `json:"sessionInitRetryStepSeconds"`
-	SessionInitRetryLinearAfter      int     `json:"sessionInitRetryLinearAfter"`
-	SessionInitRetryMaxSeconds       float64 `json:"sessionInitRetryMaxSeconds"`
-	SessionInitBusyRetryIntervalSec  float64 `json:"sessionInitBusyRetryIntervalSeconds"`
-	SessionInitRacingCount           int     `json:"sessionInitRacingCount"`
-	StartupMode                      string  `json:"startupMode"`
-	PingWatchdogSeconds              int     `json:"pingWatchdogSeconds"`
-	LogLevel                         string  `json:"logLevel"`
+	ID                               string          `json:"id"`
+	Name                             string          `json:"name"`
+	ImportType                       string          `json:"importType"`
+	ListenIP                         string          `json:"listenIp"`
+	ListenPort                       int             `json:"listenPort"`
+	SOCKS5Authentication             bool            `json:"socks5Authentication"`
+	SOCKSUsername                    string          `json:"socksUsername"`
+	SOCKSPassword                    string          `json:"socksPassword"`
+	SingBoxEnabled                   bool            `json:"singBoxEnabled"`
+	SingBoxInboundType               string          `json:"singBoxInboundType"`
+	SingBoxSetSystemProxy            bool            `json:"singBoxSetSystemProxy"`
+	StormDNSListenIP                 string          `json:"stormDnsListenIp"`
+	StormDNSListenPort               int             `json:"stormDnsListenPort"`
+	LocalDNSEnabled                  bool            `json:"localDnsEnabled"`
+	LocalDNSPort                     int             `json:"localDnsPort"`
+	BalancingStrategy                int             `json:"balancingStrategy"`
+	UploadDuplication                int             `json:"uploadDuplication"`
+	DownloadDuplication              int             `json:"downloadDuplication"`
+	AutoRemoveLowMTUServers          bool            `json:"autoRemoveLowMtuServers"`
+	SaveMTUServersToFile             bool            `json:"saveMtuServersToFile"`
+	MTUServersFileName               string          `json:"mtuServersFileName"`
+	MTUServersFileFormat             string          `json:"mtuServersFileFormat"`
+	MTUUsingSectionSeparatorText     string          `json:"mtuUsingSectionSeparatorText"`
+	MTURemovedServerLogFormat        string          `json:"mtuRemovedServerLogFormat"`
+	MTUAddedServerLogFormat          string          `json:"mtuAddedServerLogFormat"`
+	MTUReactiveAddedServerLogFormat  string          `json:"mtuReactiveAddedServerLogFormat"`
+	UploadCompression                int             `json:"uploadCompression"`
+	DownloadCompression              int             `json:"downloadCompression"`
+	BaseEncodeData                   bool            `json:"baseEncodeData"`
+	MinUploadMTU                     int             `json:"minUploadMtu"`
+	MinDownloadMTU                   int             `json:"minDownloadMtu"`
+	MaxUploadMTU                     int             `json:"maxUploadMtu"`
+	MaxDownloadMTU                   int             `json:"maxDownloadMtu"`
+	MTUTestRetriesResolvers          int             `json:"mtuTestRetriesResolvers"`
+	MTUTestTimeoutResolvers          float64         `json:"mtuTestTimeoutResolvers"`
+	MTUTestParallelismResolvers      int             `json:"mtuTestParallelismResolvers"`
+	MTUStartupLossVerifyEnabled      bool            `json:"mtuStartupLossVerifyEnabled"`
+	MTUStartupLossVerifySamples      int             `json:"mtuStartupLossVerifySamples"`
+	MTUStartupLossVerifyMaxLossPct   int             `json:"mtuStartupLossVerifyMaxLossPercent"`
+	MTUStartupLossVerifyCandidates   int             `json:"mtuStartupLossVerifyCandidates"`
+	MTURecheckEnabled                bool            `json:"mtuRecheckEnabled"`
+	MTURecheckIntervalMinutes        int             `json:"mtuRecheckIntervalMinutes"`
+	MTUTestRetriesLogs               int             `json:"mtuTestRetriesLogs"`
+	MTUTestTimeoutLogs               float64         `json:"mtuTestTimeoutLogs"`
+	MTUTestParallelismLogs           int             `json:"mtuTestParallelismLogs"`
+	ConnectionStartupMode            string          `json:"connectionStartupMode"`
+	RXTXWorkers                      int             `json:"rxTxWorkers"`
+	TunnelProcessWorkers             int             `json:"tunnelProcessWorkers"`
+	TunnelPacketTimeoutSeconds       float64         `json:"tunnelPacketTimeoutSeconds"`
+	DispatcherIdlePollIntervalSec    float64         `json:"dispatcherIdlePollIntervalSeconds"`
+	TXChannelSize                    int             `json:"txChannelSize"`
+	RXChannelSize                    int             `json:"rxChannelSize"`
+	ResolverUDPConnectionPoolSize    int             `json:"resolverUdpConnectionPoolSize"`
+	StreamQueueInitialCapacity       int             `json:"streamQueueInitialCapacity"`
+	OrphanQueueInitialCapacity       int             `json:"orphanQueueInitialCapacity"`
+	DNSResponseFragmentStoreCapacity int             `json:"dnsResponseFragmentStoreCapacity"`
+	MaxActiveStreams                 int             `json:"maxActiveStreams"`
+	LocalHandshakeTimeoutSeconds     float64         `json:"localHandshakeTimeoutSeconds"`
+	SOCKSUDPAssociateReadTimeoutSec  float64         `json:"socksUdpAssociateReadTimeoutSeconds"`
+	ClientTerminalStreamRetentionSec float64         `json:"clientTerminalStreamRetentionSeconds"`
+	ClientCancelledSetupRetentionSec float64         `json:"clientCancelledSetupRetentionSeconds"`
+	SessionInitRetryBaseSeconds      float64         `json:"sessionInitRetryBaseSeconds"`
+	SessionInitRetryStepSeconds      float64         `json:"sessionInitRetryStepSeconds"`
+	SessionInitRetryLinearAfter      int             `json:"sessionInitRetryLinearAfter"`
+	SessionInitRetryMaxSeconds       float64         `json:"sessionInitRetryMaxSeconds"`
+	SessionInitBusyRetryIntervalSec  float64         `json:"sessionInitBusyRetryIntervalSeconds"`
+	SessionInitRacingCount           int             `json:"sessionInitRacingCount"`
+	StartupMode                      string          `json:"startupMode"`
+	PingWatchdogSeconds              int             `json:"pingWatchdogSeconds"`
+	LogLevel                         string          `json:"logLevel"`
+	CottenDNSOptions                 *map[string]any `json:"cottenDnsOptions,omitempty"`
 }
 
 type RuntimeStatus struct {

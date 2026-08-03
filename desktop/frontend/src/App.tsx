@@ -3574,7 +3574,7 @@ function ConnectionsPage({
               Cancel
             </Button>
             <Button disabled={importDisabled} onClick={importProfiles}>
-              <Download />
+              <Upload />
               Import
             </Button>
           </DialogFooter>

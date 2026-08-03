@@ -105,3 +105,16 @@ func TestApplyRuntimeSettingsUsesEffectiveCottenDNSListener(t *testing.T) {
 		t.Fatalf("runtime authentication was not applied: %#v", settings)
 	}
 }
+
+func TestNormalizeOverridesRejectsInvalidCottenDNSPorts(t *testing.T) {
+	normalized := NormalizeOverrides(map[string]any{
+		"LISTEN_PORT":    70000,
+		"LOCAL_DNS_PORT": 0,
+	})
+	if _, ok := normalized["LISTEN_PORT"]; ok {
+		t.Fatalf("out-of-range CottenDNS listen port was retained: %#v", normalized)
+	}
+	if _, ok := normalized["LOCAL_DNS_PORT"]; ok {
+		t.Fatalf("out-of-range CottenDNS local DNS port was retained: %#v", normalized)
+	}
+}

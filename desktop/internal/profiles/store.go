@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/resolver"
 )
@@ -827,6 +828,10 @@ func normalizeSettingsProfile(profile model.SettingsProfile) model.SettingsProfi
 		profile.Name = "Settings"
 	}
 	profile.ImportType = model.NormalizeImportType(profile.ImportType)
+	if profile.ImportType == model.ImportTypeCottenDNS {
+		options := cottendns.NormalizeOverrides(cottendns.OptionValues(profile.CottenDNSOptions))
+		profile.CottenDNSOptions = &options
+	}
 	if strings.TrimSpace(profile.ListenIP) == "" {
 		profile.ListenIP = defaults.ListenIP
 	}

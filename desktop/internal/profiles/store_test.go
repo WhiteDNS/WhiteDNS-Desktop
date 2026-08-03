@@ -153,6 +153,33 @@ func TestStoreSaveLoadRoundTripsCottenDNSOverrides(t *testing.T) {
 	}
 }
 
+func TestNormalizeSettingsProfileValidatesCottenDNSOptionsBeforePersistence(t *testing.T) {
+	profile := model.DefaultCottenDNSSettingsProfile()
+	options := map[string]any{
+		"config_preset":      "survival",
+		"listen_port":        float64(19055),
+		"fast_connect":       "true",
+		"resolver_transport": "invalid-transport",
+		"not_a_real_option":  123,
+	}
+	profile.CottenDNSOptions = &options
+
+	normalized := NormalizeSettingsProfile(profile)
+	if normalized.CottenDNSOptions == nil {
+		t.Fatal("normalized CottenDNS options are missing")
+	}
+	got := *normalized.CottenDNSOptions
+	if got["CONFIG_PRESET"] != "survival" || got["LISTEN_PORT"] != 19055 || got["FAST_CONNECT"] != true {
+		t.Fatalf("valid CottenDNS options were not normalized: %#v", got)
+	}
+	if _, ok := got["RESOLVER_TRANSPORT"]; ok {
+		t.Fatalf("invalid choice was persisted: %#v", got)
+	}
+	if _, ok := got["NOT_A_REAL_OPTION"]; ok {
+		t.Fatalf("unknown option was persisted: %#v", got)
+	}
+}
+
 func TestStoreRecoversFromCorruptJSON(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "state.json")
 	if err := os.WriteFile(path, []byte("{broken"), 0o600); err != nil {

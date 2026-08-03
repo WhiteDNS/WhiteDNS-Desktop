@@ -100,6 +100,9 @@ func NormalizeOverrides(input map[string]any) map[string]any {
 		if !validChoice(value, definition.Choices) {
 			continue
 		}
+		if !validOptionRange(key, value) {
+			continue
+		}
 		out[key] = value
 	}
 	return out
@@ -581,6 +584,16 @@ func validChoice(value any, choices []OptionChoice) bool {
 	return false
 }
 
+func validOptionRange(key string, value any) bool {
+	switch key {
+	case "LISTEN_PORT", "LOCAL_DNS_PORT":
+		port, ok := value.(int)
+		return ok && port >= 1 && port <= 65535
+	default:
+		return true
+	}
+}
+
 func optionKind(key string, value any) string {
 	if len(optionChoices(key)) > 0 {
 		return "select"
@@ -667,6 +680,14 @@ func optionGroup(key string) string {
 }
 
 func optionLabel(key string) string {
+	switch key {
+	case "PROTOCOL_TYPE":
+		return "CottenDNS proxy protocol"
+	case "LISTEN_IP":
+		return "CottenDNS listen address"
+	case "LISTEN_PORT":
+		return "CottenDNS SOCKS port"
+	}
 	replacements := map[string]string{
 		"DNS": "DNS", "EDNS": "EDNS", "MTU": "MTU", "ARQ": "ARQ", "RTO": "RTO",
 		"SOCKS5": "SOCKS5", "UDP": "UDP", "TCP": "TCP", "TLS": "TLS", "DOH": "DoH",

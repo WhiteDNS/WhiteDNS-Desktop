@@ -179,10 +179,18 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Upload Linux packages
+      - name: Upload runnable Linux app
         uses: actions/upload-artifact@v6
         with:
           name: WhiteDNS-Desktop-WhiteDns-debug-linux-${{ matrix.label }}
+          path: desktop/build/bin/*
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload Linux installers
+        uses: actions/upload-artifact@v6
+        with:
+          name: WhiteDNS-Desktop-WhiteDns-debug-linux-${{ matrix.label }}-installers
           path: |
             desktop/build/releases/debug/WhiteDNS-Desktop-*
           if-no-files-found: error

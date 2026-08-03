@@ -758,6 +758,20 @@ function proxyEndpoint(ip?: string, port?: number): string {
   return ip && port ? `${ip}:${port}` : "";
 }
 
+function dnsEngineProxyEndpoint(settings?: SettingsProfile, engine?: ImportType): string {
+  if (!settings) {
+    return "";
+  }
+  if (normalizeImportType(engine || settings.importType) === "cottendns") {
+    const options = settings.cottenDnsOptions || {};
+    const listenIp = String(options.LISTEN_IP || "127.0.0.1").trim() || "127.0.0.1";
+    const configuredPort = Number(options.LISTEN_PORT);
+    const listenPort = Number.isInteger(configuredPort) && configuredPort > 0 ? configuredPort : 18000;
+    return proxyEndpoint(listenIp, listenPort);
+  }
+  return proxyEndpoint(settings.stormDnsListenIp, settings.stormDnsListenPort);
+}
+
 type ProxyCountryInfo = {
   icon: string;
   name: string;
@@ -963,7 +977,7 @@ const defaultParallelTestState: ParallelTestState = {
 const navGroups: NavGroup[] = [
   {
     id: "masterdns",
-    label: "MasterDNS",
+    label: "WhiteDNS",
     items: [
       { id: "dashboard", label: "Dashboard", icon: <LayoutDashboard /> },
       { id: "connections", label: "Connections", icon: <Network /> },
@@ -992,6 +1006,22 @@ const settingsSections: Array<{ id: SettingsSection; label: string; icon: ReactN
   { id: "performance", label: "Performance", icon: <Cpu /> },
   { id: "reliability", label: "Reliability", icon: <Shield /> },
   { id: "cottendns", label: "CottenDNS", icon: <Network /> },
+];
+
+const cottenDNSGroupOrder = [
+  "General",
+  "Local proxy",
+  "Local DNS",
+  "Resolvers and transport",
+  "DNS query shaping",
+  "Delivery and failover",
+  "MTU discovery",
+  "ARQ and sessions",
+  "Encoding and compatibility",
+  "Performance and limits",
+  "Timeouts and queues",
+  "Ping policy",
+  "Logging and startup",
 ];
 
 function App() {
@@ -1729,6 +1759,8 @@ function DashboardPage({
   const showStartupProgress = isConnecting;
   const runtimeEndpoint = proxyEndpoint(runtime.listenIp, runtime.listenPort);
   const selectedSettingsEndpoint = selectedSettings ? proxyEndpoint(selectedSettings.listenIp, selectedSettings.listenPort) : "";
+  const selectedEngineEndpoint = dnsEngineProxyEndpoint(selectedSettings, selectedConnection?.importType);
+  const selectedEngineName = importTypeLabel(selectedConnection?.importType || selectedSettings?.importType);
   const endpoint = runtimeEndpoint || selectedSettingsEndpoint || "-";
   const localProxyEndpoint = proxyEndpoint(runtime.localProxyIp, runtime.listenPort);
   const publicProxyEndpoint = localProxyEndpoint
@@ -2067,9 +2099,10 @@ function DashboardPage({
                 }))}
                 onChange={(id) => onRun(() => backend.selectSettingsProfile(id))}
               />
-              <p className="mt-2 text-xs font-mono text-muted-foreground">
-                {selectedSettings ? `${selectedSettings.listenIp}:${selectedSettings.listenPort}` : "No proxy"}
-              </p>
+              <div className="mt-2 space-y-1 text-xs text-muted-foreground">
+                <p><span className="font-medium text-foreground/80">App proxy</span> <span className="font-mono">{selectedSettingsEndpoint || "Not configured"}</span></p>
+                <p><span className="font-medium text-foreground/80">{selectedEngineName}</span> <span className="font-mono">{selectedEngineEndpoint || "Not configured"}</span></p>
+              </div>
             </div>
           </div>
 
@@ -4288,7 +4321,7 @@ function SettingsPage({
       </PageShell>
 
       <Dialog open={editorOpen} onOpenChange={setEditorOpen}>
-        <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-6xl">
+        <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-[min(96vw,90rem)]">
           <DialogHeader>
             <DialogTitle>{draft.id ? draft.name : "New settings profile"}</DialogTitle>
             <DialogDescription>{sectionLabel(activeSettingsSection)}</DialogDescription>
@@ -4827,6 +4860,16 @@ function cottenDNSOptionValue(
   return definition.defaultValue ?? fallback;
 }
 
+function cottenDNSNumberBounds(key: string): { min?: number; max?: number } {
+  switch (key) {
+    case "LISTEN_PORT":
+    case "LOCAL_DNS_PORT":
+      return { min: 1, max: 65535 };
+    default:
+      return {};
+  }
+}
+
 function CottenDNSSettingsFields({
   draft,
   onDraft,
@@ -4838,17 +4881,28 @@ function CottenDNSSettingsFields({
 }) {
   const overrides = draft.cottenDnsOptions || {};
   const presetName = String(overrides.CONFIG_PRESET || "default");
-  const groups = schema.reduce<Array<{ name: string; options: CottenDNSOptionDefinition[] }>>((result, option) => {
-    const existing = result.find((group) => group.name === option.group);
-    if (existing) {
-      existing.options.push(option);
-    } else {
-      result.push({ name: option.group || "Other", options: [option] });
-    }
-    return result;
-  }, []);
+  const groups = schema
+    .reduce<Array<{ name: string; options: CottenDNSOptionDefinition[] }>>((result, option) => {
+      const existing = result.find((group) => group.name === option.group);
+      if (existing) {
+        existing.options.push(option);
+      } else {
+        result.push({ name: option.group || "Other", options: [option] });
+      }
+      return result;
+    }, [])
+    .sort((left, right) => {
+      const leftIndex = cottenDNSGroupOrder.indexOf(left.name);
+      const rightIndex = cottenDNSGroupOrder.indexOf(right.name);
+      return (leftIndex < 0 ? cottenDNSGroupOrder.length : leftIndex) - (rightIndex < 0 ? cottenDNSGroupOrder.length : rightIndex);
+    });
   const [activeGroup, setActiveGroup] = useState("");
   const selectedGroup = groups.some((group) => group.name === activeGroup) ? activeGroup : groups[0]?.name || "";
+  const selectedGroupDefinition = groups.find((group) => group.name === selectedGroup);
+  const selectedGroupOverrides = selectedGroupDefinition?.options.filter((option) =>
+    Object.prototype.hasOwnProperty.call(overrides, option.key)
+  ).length || 0;
+  const totalOverrides = Object.keys(overrides).length;
 
   useEffect(() => {
     if (groups.length && !groups.some((group) => group.name === activeGroup)) {
@@ -4892,35 +4946,97 @@ function CottenDNSSettingsFields({
   }
 
   return (
-    <div className="space-y-6">
-      <Alert>
-        <Network />
-        <AlertTitle>CottenDNS configuration</AlertTitle>
-        <AlertDescription>
-          Every client option from the pinned CottenDNS template is available below. Domain, encryption key, encryption method,
-          and resolver list remain managed by their dedicated WhiteDNS profiles. Fields marked Override are written after the
-          selected CottenDNS preset.
-        </AlertDescription>
-      </Alert>
-      <div className="flex justify-end">
-        <Button type="button" size="sm" variant="outline" onClick={() => onDraft({ ...draft, cottenDnsOptions: {} })}>
+    <div className="space-y-4">
+      <div className="flex flex-col gap-3 rounded-lg border bg-muted/15 p-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex min-w-0 gap-3">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md border bg-background text-muted-foreground">
+            <Network className="size-4" />
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold">CottenDNS engine configuration</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-muted-foreground">
+              These values are saved only for CottenDNS and written to its runtime TOML. Domains, encryption, and resolver
+              sources stay with their dedicated connection and resolver profiles.
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">Preset: {presetName}</Badge>
+              <Badge variant="outline">{totalOverrides} override{totalOverrides === 1 ? "" : "s"}</Badge>
+            </div>
+          </div>
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          disabled={!totalOverrides}
+          onClick={() => onDraft({ ...draft, cottenDnsOptions: {} })}
+        >
           <RotateCcw />
-          Clear all CottenDNS overrides
+          Clear overrides
         </Button>
       </div>
-      <Tabs value={selectedGroup} onValueChange={setActiveGroup} className="gap-4">
-        <TabsList className="flex h-auto flex-wrap justify-start gap-1 bg-muted/50 p-1.5">
-          {groups.map((group) => (
-            <TabsTrigger key={group.name} value={group.name} className="gap-1.5">
-              {group.name}
-              <Badge variant="outline" className="px-1.5 text-[10px]">{group.options.length}</Badge>
-            </TabsTrigger>
-          ))}
-        </TabsList>
-        {groups.map((group) => (
-          <TabsContent key={group.name} value={group.name} className="mt-0">
-            <SettingsFieldSet legend={group.name}>
-          {group.options.map((option) => {
+
+      <div className="grid min-h-[31rem] overflow-hidden rounded-lg border bg-card lg:grid-cols-[16rem_minmax(0,1fr)]">
+        <aside className="border-b bg-muted/20 p-3 lg:border-b-0 lg:border-r">
+          <div className="mb-3 px-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Setting categories</p>
+            <p className="mt-1 text-xs text-muted-foreground">Choose one group to edit.</p>
+          </div>
+          <nav aria-label="CottenDNS setting categories" className="grid gap-1 sm:grid-cols-2 lg:grid-cols-1">
+            {groups.map((group) => {
+              const overrideCount = group.options.filter((option) =>
+                Object.prototype.hasOwnProperty.call(overrides, option.key)
+              ).length;
+              const selected = group.name === selectedGroup;
+              return (
+                <button
+                  key={group.name}
+                  type="button"
+                  aria-current={selected ? "page" : undefined}
+                  onClick={() => setActiveGroup(group.name)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                    selected ? "bg-background font-medium text-foreground shadow-sm ring-1 ring-border" : "text-muted-foreground hover:bg-background/70 hover:text-foreground"
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate">{group.name}</span>
+                  {overrideCount > 0 && (
+                    <span className="size-1.5 shrink-0 rounded-full bg-primary" aria-label={`${overrideCount} overridden`} />
+                  )}
+                  <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">{group.options.length}</span>
+                  <ChevronRight className={cn("size-3.5 shrink-0", selected ? "opacity-100" : "opacity-40")} />
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
+
+        <section className="min-w-0 p-4 sm:p-5" aria-labelledby="cottendns-group-title">
+          <div className="mb-4 flex flex-wrap items-start justify-between gap-3 border-b pb-4">
+            <div>
+              <h3 id="cottendns-group-title" className="text-base font-semibold">{selectedGroup}</h3>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {selectedGroupDefinition?.options.length || 0} settings · {selectedGroupOverrides} overridden
+              </p>
+            </div>
+            {selectedGroupOverrides > 0 && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  const next = { ...overrides };
+                  selectedGroupDefinition?.options.forEach((option) => delete next[option.key]);
+                  onDraft({ ...draft, cottenDnsOptions: next });
+                }}
+              >
+                <RotateCcw />
+                Reset category
+              </Button>
+            )}
+          </div>
+          <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {selectedGroupDefinition?.options.map((option) => {
             const overridden = Object.prototype.hasOwnProperty.call(overrides, option.key);
             const value = effectiveValue(option);
             const description = option.description || `CottenDNS option ${option.key}.`;
@@ -4935,11 +5051,14 @@ function CottenDNSSettingsFields({
                 />
               );
             } else if (option.kind === "integer" || option.kind === "number") {
+              const bounds = cottenDNSNumberBounds(option.key);
               field = (
                 <NumberField
                   label={option.label}
                   value={Number(value)}
                   step={option.kind === "number" ? "0.01" : "1"}
+                  min={bounds.min}
+                  max={bounds.max}
                   onChange={(next) => updateOption(option.key, next)}
                   description={description}
                 />
@@ -4992,7 +5111,7 @@ function CottenDNSSettingsFields({
               );
             }
             return (
-              <div key={option.key} className="rounded-lg border bg-muted/10 p-3">
+              <div key={option.key} className={cn("rounded-lg border p-3", overridden ? "border-primary/30 bg-primary/[0.03]" : "bg-muted/10")}>
                 <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                   <code className="text-[11px] text-muted-foreground">{option.key}</code>
                   {overridden ? (
@@ -5008,10 +5127,9 @@ function CottenDNSSettingsFields({
               </div>
             );
           })}
-            </SettingsFieldSet>
-          </TabsContent>
-        ))}
-      </Tabs>
+          </div>
+        </section>
+      </div>
     </div>
   );
 }

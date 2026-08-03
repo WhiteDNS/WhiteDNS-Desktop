@@ -175,9 +175,9 @@ jobs:
                 LINUX_ASSET_SUFFIX="$asset_platform" \
                 LINUX_PACKAGE_FORMATS="$package_formats" \
                 desktop/scripts/package-linux-dist.sh
-              paths="$archive"
+              release_paths="$archive"
               for package in desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.deb desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.rpm; do
-                paths="${paths}"$'\n'"$package"
+                release_paths="${release_paths}"$'\n'"$package"
               done
               rpm_package="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.rpm"
               if ! rpm -qpR "$rpm_package" | grep -Fxq 'webkit2gtk4.1'; then
@@ -199,9 +199,9 @@ jobs:
               if [[ ",$package_formats," == *",appimage,"* ]]; then
                 appimage="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.AppImage"
                 test -x "$appimage"
-                paths="${paths}"$'\n'"$appimage"
+                release_paths="${release_paths}"$'\n'"$appimage"
               fi
-              release_paths="$paths"
+              paths="$source_dir"
               ;;
           esac
           {
@@ -227,6 +227,14 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: ${{ steps.archive.outputs.paths }}
+          if-no-files-found: error
+
+      - name: Upload Linux installers
+        if: matrix.kind == 'linux'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ matrix.artifact }}-installers
+          path: ${{ steps.archive.outputs.release_paths }}
           if-no-files-found: error
 
       - name: Upload GitHub Release assets

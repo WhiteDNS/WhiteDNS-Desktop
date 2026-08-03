@@ -112,6 +112,68 @@ func TestManagerStartsFakeStormDNSAndStopsCleanly(t *testing.T) {
 	}
 }
 
+func TestManagerUsesCottenDNSBinaryAndExactRuntimeConfigPath(t *testing.T) {
+	tempDir := t.TempDir()
+	cottenHelper := buildFakeMasterDNSHelper(t, tempDir)
+	xray := buildFakeXrayHelper(t, tempDir)
+	enginePort := freePort(t)
+	publicPort := freePort(t)
+	runtimeDir := filepath.Join(tempDir, "runtime")
+
+	manager := NewManager(
+		Options{
+			RuntimeDir:          runtimeDir,
+			CottenDNSBinaryPath: cottenHelper,
+			XrayBinaryPath:      xray,
+			StartTimeout:        5 * time.Second,
+			StopTimeout:         2 * time.Second,
+		},
+		Callbacks{},
+	)
+	cfg := storm.LaunchConfig{
+		Engine: model.ImportTypeCottenDNS,
+		Settings: model.SettingsProfile{
+			ListenIP:   "127.0.0.1",
+			ListenPort: publicPort,
+		},
+		MasterDNSSettings: model.SettingsProfile{
+			ListenIP:   "127.0.0.1",
+			ListenPort: enginePort,
+		},
+		CoreEnabled:      true,
+		CoreConfig:       fmt.Sprintf(`{"inbounds":[{"listen":"127.0.0.1","port":%d}]}`, publicPort),
+		CoreProtocol:     "socks",
+		PublicListenIP:   "127.0.0.1",
+		PublicListenPort: publicPort,
+		ClientTOML:       fmt.Sprintf("LISTEN_IP = \"127.0.0.1\"\nLISTEN_PORT = %d\nFAST_CONNECT = true\n", enginePort),
+		Resolvers:        "1.1.1.1\n",
+	}
+	if err := manager.Start(context.Background(), cfg); err != nil {
+		t.Fatal(err)
+	}
+	defer manager.Stop()
+
+	manager.mu.Lock()
+	active := manager.active
+	manager.mu.Unlock()
+	if active == nil || active.engine != model.ImportTypeCottenDNS {
+		t.Fatalf("CottenDNS was not the active engine: %#v", active)
+	}
+	if !filepath.IsAbs(active.configFile) || filepath.Dir(active.configFile) != runtimeDir {
+		t.Fatalf("CottenDNS config path is not the absolute app runtime path: %q", active.configFile)
+	}
+	raw, err := os.ReadFile(active.configFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), fmt.Sprintf("LISTEN_PORT = %d", enginePort)) || !strings.Contains(string(raw), "FAST_CONNECT = true") {
+		t.Fatalf("CottenDNS runtime config did not retain saved settings:\n%s", raw)
+	}
+	if active.mtuScanControlFile != "" {
+		t.Fatalf("CottenDNS must not use the MasterDNS MTU control path: %q", active.mtuScanControlFile)
+	}
+}
+
 func TestMasterDNSLaunchEnvAddsFullInitialMTUScanOnlyWhenRequested(t *testing.T) {
 	env := masterDNSLaunchEnv(storm.LaunchConfig{
 		FullInitialMTUScan: true,
@@ -1050,7 +1112,7 @@ func TestWaitForSystemProxyFailsAndCleanupRestores(t *testing.T) {
 func buildFakeMasterDNSHelper(t *testing.T, dir string) string {
 	t.Helper()
 	source := filepath.Join(dir, "fake_masterdns.go")
-	binary := filepath.Join(dir, "fake-masterdns")
+	binary := filepath.Join(dir, testExecutableName("fake-masterdns"))
 	if err := os.WriteFile(source, []byte(fakeMasterDNSSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1064,7 +1126,7 @@ func buildFakeMasterDNSHelper(t *testing.T, dir string) string {
 func buildFakeXrayHelper(t *testing.T, dir string) string {
 	t.Helper()
 	source := filepath.Join(dir, "fake_xray.go")
-	binary := filepath.Join(dir, "fake-xray")
+	binary := filepath.Join(dir, testExecutableName("fake-xray"))
 	if err := os.WriteFile(source, []byte(fakeXraySource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1078,7 +1140,7 @@ func buildFakeXrayHelper(t *testing.T, dir string) string {
 func buildFakeGracefulStopHelper(t *testing.T, dir string) string {
 	t.Helper()
 	source := filepath.Join(dir, "fake_graceful_stop.go")
-	binary := filepath.Join(dir, "fake-graceful-stop")
+	binary := filepath.Join(dir, testExecutableName("fake-graceful-stop"))
 	if err := os.WriteFile(source, []byte(fakeGracefulStopSource), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -1087,6 +1149,13 @@ func buildFakeGracefulStopHelper(t *testing.T, dir string) string {
 		t.Fatalf("failed to build fake graceful stop helper: %v\n%s", err, output)
 	}
 	return binary
+}
+
+func testExecutableName(name string) string {
+	if os.PathSeparator == '\\' {
+		return name + ".exe"
+	}
+	return name
 }
 
 func waitForFile(t *testing.T, path string) {

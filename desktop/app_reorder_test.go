@@ -8,6 +8,7 @@ import (
 
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/profiles"
+	"whitedns-desktop/internal/storm"
 )
 
 func TestReorderConnectionProfilesPersistsOrderAndKeepsDefaultProtected(t *testing.T) {
@@ -141,11 +142,12 @@ func TestSaveCottenDNSPresetAppliesToSelectedConnectionAndPersists(t *testing.T)
 	store := profiles.NewStore(filepath.Join(t.TempDir(), "state.json"))
 	state := model.DefaultAppState()
 	state.ConnectionProfiles[0].Domain = "one.example.com"
+	state.ConnectionProfiles[0].EncryptionKey = "key"
 	app := &App{store: store, state: state}
 
 	profile := model.DefaultCottenDNSSettingsProfile()
 	profile.ListenPort = 12000
-	overrides := map[string]any{"CONFIG_PRESET": "survival", "FAST_CONNECT": true}
+	overrides := map[string]any{"CONFIG_PRESET": "survival", "FAST_CONNECT": true, "LISTEN_PORT": 19000}
 	profile.CottenDNSOptions = &overrides
 	result, err := app.SaveSettingsProfile(profile)
 	if err != nil {
@@ -167,8 +169,15 @@ func TestSaveCottenDNSPresetAppliesToSelectedConnectionAndPersists(t *testing.T)
 	}
 	for _, saved := range loaded.SettingsProfiles {
 		if saved.ID == model.DefaultCottenDNSSettingsID {
-			if saved.ListenPort != 12000 || saved.CottenDNSOptions == nil || (*saved.CottenDNSOptions)["CONFIG_PRESET"] != "survival" {
+			if saved.ListenPort != 12000 || saved.CottenDNSOptions == nil || (*saved.CottenDNSOptions)["CONFIG_PRESET"] != "survival" || (*saved.CottenDNSOptions)["LISTEN_PORT"] != 19000 {
 				t.Fatalf("CottenDNS changes did not persist: %#v", saved)
+			}
+			cfg, buildErr := storm.BuildLaunchConfig(loaded)
+			if buildErr != nil {
+				t.Fatal(buildErr)
+			}
+			if cfg.Engine != model.ImportTypeCottenDNS || cfg.MasterDNSSettings.ListenPort != 19000 || !strings.Contains(cfg.ClientTOML, "LISTEN_PORT = 19000") {
+				t.Fatalf("persisted CottenDNS port was not applied to launch config: %#v\n%s", cfg, cfg.ClientTOML)
 			}
 			return
 		}

@@ -4161,6 +4161,13 @@ function SettingsPage({
         draft;
       setDraft(savedProfile);
       setEditorOpen(false);
+      // Engine settings are read when the tunnel launches, so an edit made
+      // during a session looks like it did nothing until the user reconnects.
+      onSuccess(
+        profileSelectionLocked(state.runtime)
+          ? "Settings saved. Reconnect to apply them to the running tunnel."
+          : "Settings saved.",
+      );
     } catch (err) {
       onError(messageFromError(err));
     }

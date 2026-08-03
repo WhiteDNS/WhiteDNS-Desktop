@@ -145,16 +145,19 @@ jobs:
           asset_platform="${{ matrix.artifact }}"
           asset_platform="${asset_platform#whitedns-desktop-}"
           paths=""
+          release_paths=""
           case "${{ matrix.kind }}" in
             macos)
               archive="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.zip"
               (cd "$source_dir" && ditto -c -k --sequesterRsrc --keepParent "WhiteDNS Desktop.app" "../$(basename "$archive")")
               paths="$archive"
+              release_paths="$archive"
               ;;
             windows)
               archive="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.zip"
               (cd "$source_dir" && zip -qry "../$(basename "$archive")" .)
-              paths="$archive"
+              paths="$source_dir"
+              release_paths="$archive"
               ;;
             linux)
               archive="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.tar.gz"
@@ -198,11 +201,15 @@ jobs:
                 test -x "$appimage"
                 paths="${paths}"$'\n'"$appimage"
               fi
+              release_paths="$paths"
               ;;
           esac
           {
             echo "paths<<EOF"
             printf '%s\n' "$paths"
+            echo "EOF"
+            echo "release_paths<<EOF"
+            printf '%s\n' "$release_paths"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           printf '%s\n' "$paths" | xargs ls -lh
@@ -222,6 +229,14 @@ jobs:
           path: ${{ steps.archive.outputs.paths }}
           if-no-files-found: error
 
+      - name: Upload GitHub Release assets
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: actions/upload-artifact@v6
+        with:
+          name: release-${{ matrix.artifact }}
+          path: ${{ steps.archive.outputs.release_paths }}
+          if-no-files-found: error
+
   publish:
     name: Publish release assets
     if: startsWith(github.ref, 'refs/tags/desktop-v')
@@ -231,8 +246,15 @@ jobs:
       - name: Download packages
         uses: actions/download-artifact@v6
         with:
+          pattern: release-*
           path: release-assets
           merge-multiple: true
+
+      - name: Download Arch Linux package
+        uses: actions/download-artifact@v6
+        with:
+          name: whitedns-desktop-archlinux-x64
+          path: release-assets
 
       - name: List release assets
         run: find release-assets -maxdepth 1 -type f -print | sort

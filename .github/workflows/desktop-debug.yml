@@ -73,17 +73,15 @@ jobs:
         working-directory: desktop
         run: wails build -clean -debug -platform windows/amd64
 
-      - name: Archive runnable app
+      - name: Verify runnable app
         run: |
           test -f "desktop/build/bin/WhiteDNS Desktop.exe"
-          cd desktop/build/bin
-          zip -qry ../WhiteDNS-Desktop-WhiteDns-debug-windows-x64.zip .
 
       - name: Upload runnable app
         uses: actions/upload-artifact@v6
         with:
           name: WhiteDNS-Desktop-WhiteDns-debug-windows-x64
-          path: desktop/build/WhiteDNS-Desktop-WhiteDns-debug-windows-x64.zip
+          path: desktop/build/bin/*
           if-no-files-found: error
           retention-days: 14
 

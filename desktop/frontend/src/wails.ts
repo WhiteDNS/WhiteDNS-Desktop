@@ -100,6 +100,8 @@ type AppApi = {
   ExportAllConnectionProfileLinks(): Promise<string>;
   ExportSettingsProfileToml(profile: SettingsProfile): Promise<string>;
   ExportBackup(): Promise<string>;
+  SaveBackup(): Promise<string>;
+  SelectBackupFile(): Promise<string>;
   ImportBackup(rawText: string): Promise<AppState>;
   Quit(): Promise<void>;
 };
@@ -196,6 +198,8 @@ export const backend = {
   exportAllConnectionProfileLinks: () => app().ExportAllConnectionProfileLinks(),
   exportSettingsProfileToml: (profile: SettingsProfile) => app().ExportSettingsProfileToml(profile),
   exportBackup: () => app().ExportBackup(),
+  saveBackup: () => app().SaveBackup(),
+  selectBackupFile: () => app().SelectBackupFile(),
   importBackup: (rawText: string) => app().ImportBackup(rawText),
   quit: () => app().Quit(),
 };

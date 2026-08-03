@@ -105,3 +105,43 @@ func TestImportBackupRejectedWhileRuntimeActive(t *testing.T) {
 		t.Fatalf("runtime state changed after rejected restore: %#v", result.Runtime)
 	}
 }
+
+func TestFullBackupRoundTripPreservesCottenDNSProfile(t *testing.T) {
+	sourceStore := profiles.NewStore(filepath.Join(t.TempDir(), "source", "state.json"))
+	state := model.DefaultAppState()
+	state.ConnectionProfiles[0].ImportType = model.ImportTypeCottenDNS
+	state.ConnectionProfiles[0].Domain = "primary.example.com"
+	state.ConnectionProfiles[0].Domains = []string{"primary.example.com", "backup.example.com"}
+	state.ConnectionProfiles[0].EncryptionKey = "secret"
+	state.SelectedSettingsProfileID = model.DefaultCottenDNSSettingsID
+	options := map[string]any{"CONFIG_PRESET": "survival", "LISTEN_PORT": 19000, "FAST_CONNECT": true}
+	for idx := range state.SettingsProfiles {
+		if state.SettingsProfiles[idx].ID == model.DefaultCottenDNSSettingsID {
+			state.SettingsProfiles[idx].CottenDNSOptions = &options
+		}
+	}
+
+	rawBackup, err := sourceStore.ExportBackup(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	targetStore := profiles.NewStore(filepath.Join(t.TempDir(), "target", "state.json"))
+	app := &App{store: targetStore, state: model.DefaultAppState()}
+	restored, err := app.ImportBackup(rawBackup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.ConnectionProfiles[0].ImportType != model.ImportTypeCottenDNS || len(restored.ConnectionProfiles[0].Domains) != 2 {
+		t.Fatalf("CottenDNS connection was not restored: %#v", restored.ConnectionProfiles[0])
+	}
+	for _, settings := range restored.SettingsProfiles {
+		if settings.ID != model.DefaultCottenDNSSettingsID {
+			continue
+		}
+		if settings.CottenDNSOptions == nil || (*settings.CottenDNSOptions)["LISTEN_PORT"] != 19000 || (*settings.CottenDNSOptions)["FAST_CONNECT"] != true {
+			t.Fatalf("CottenDNS settings were not restored: %#v", settings)
+		}
+		return
+	}
+	t.Fatal("restored CottenDNS settings profile is missing")
+}

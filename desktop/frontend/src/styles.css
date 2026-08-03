@@ -61,6 +61,8 @@
   --color-emerald-950: #022c22;
   --connected-card-bg: rgb(209 250 229 / 70%);
   --connected-card-border: rgb(167 243 208);
+  --connected-glow-strong: rgb(16 185 129 / 20%);
+  --connected-glow-soft: rgb(52 211 153 / 11%);
   --connecting-card-bg: rgb(236 253 245);
   --connecting-card-border: rgb(209 250 229);
 }
@@ -124,6 +126,8 @@
   --color-emerald-950: #ecfdf5;
   --connected-card-bg: rgb(5 36 29 / 96%);
   --connected-card-border: rgb(18 78 61 / 80%);
+  --connected-glow-strong: rgb(16 185 129 / 17%);
+  --connected-glow-soft: rgb(52 211 153 / 9%);
   --connecting-card-bg: rgb(4 46 38 / 82%);
   --connecting-card-border: rgb(18 78 61 / 70%);
 }
@@ -250,14 +254,40 @@
 }
 
 @layer utilities {
-  /* Slow pulse for connected state */
-  @keyframes pulse-slow {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
+  @keyframes connected-ambient-drift {
+    0% {
+      transform: translate3d(-2.5%, -1.5%, 0);
+    }
+    50% {
+      transform: translate3d(1.5%, 1%, 0);
+    }
+    100% {
+      transform: translate3d(2.5%, -0.5%, 0);
+    }
   }
 
-  .animate-pulse-slow {
-    animation: pulse-slow 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  .connected-ambient {
+    position: absolute;
+    inset: -28%;
+    pointer-events: none;
+    opacity: 0.82;
+    background:
+      radial-gradient(ellipse 42% 58% at 24% 50%, var(--connected-glow-strong) 0%, transparent 72%),
+      radial-gradient(ellipse 38% 54% at 74% 34%, var(--connected-glow-soft) 0%, transparent 74%),
+      radial-gradient(ellipse 34% 48% at 58% 82%, var(--connected-glow-soft) 0%, transparent 76%);
+    filter: blur(30px);
+    transform: translate3d(-2.5%, -1.5%, 0);
+    transform-origin: center;
+    backface-visibility: hidden;
+    will-change: transform;
+    animation: connected-ambient-drift 12s cubic-bezier(0.45, 0.05, 0.25, 1) infinite alternate;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .connected-ambient {
+      animation: none;
+      transform: none;
+    }
   }
 
   /* Fade and slide in animations */

@@ -874,18 +874,6 @@ function runtimeProxyDisplayEndpoint(runtime: RuntimeStatus): string {
   );
 }
 
-function downloadTextFile(filename: string, text: string, mimeType = "text/plain;charset=utf-8"): void {
-  const blob = new Blob([text], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  window.setTimeout(() => URL.revokeObjectURL(url), 0);
-}
-
 const defaultValidatorState: ValidatorState = {
   status: "idle",
   paused: false,
@@ -1969,9 +1957,8 @@ function DashboardPage({
       }
     >
       <Card className={cn("relative overflow-hidden transition-all duration-500 border-2", statusCardTone(dashboardStatus))}>
-        {/* Animated gradient overlay on connected state */}
         {isConnected && (
-          <div className="absolute inset-0 bg-gradient-to-r from-emerald-500/5 via-emerald-500/10 to-emerald-500/5 animate-pulse-slow" />
+          <div aria-hidden="true" className="connected-ambient" />
         )}
         <CardContent className="relative z-10 flex flex-col gap-3 p-6">
           <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -4422,25 +4409,40 @@ function FullBackupPage({
   onError: (message: string) => void;
   onSuccess: (message: string) => void;
 }) {
-  const [backupText, setBackupText] = useState("");
   const [restoreOpen, setRestoreOpen] = useState(false);
   const [restoreText, setRestoreText] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [selectingBackup, setSelectingBackup] = useState(false);
   const restoreDisabled = !restoreText.trim() || profileSelectionLocked(state.runtime);
 
   async function exportBackup() {
     onError("");
+    setExporting(true);
     try {
-      setBackupText(await backend.exportBackup());
+      const path = await backend.saveBackup();
+      if (path) {
+        onSuccess("Full backup saved.");
+      }
     } catch (err) {
       onError(messageFromError(err));
+    } finally {
+      setExporting(false);
     }
   }
 
-  async function importBackupFile(file: File | null) {
-    if (!file) {
-      return;
+  async function selectBackupFile() {
+    onError("");
+    setSelectingBackup(true);
+    try {
+      const rawText = await backend.selectBackupFile();
+      if (rawText) {
+        setRestoreText(rawText);
+      }
+    } catch (err) {
+      onError(messageFromError(err));
+    } finally {
+      setSelectingBackup(false);
     }
-    setRestoreText(await file.text());
   }
 
   async function restoreBackup() {
@@ -4467,40 +4469,13 @@ function FullBackupPage({
           <CardContent>
             <BackupRestoreSection
               restoreLocked={profileSelectionLocked(state.runtime)}
+              exporting={exporting}
               onExportBackup={exportBackup}
               onOpenRestore={() => setRestoreOpen(true)}
             />
           </CardContent>
         </Card>
       </PageShell>
-
-      <Dialog open={Boolean(backupText)} onOpenChange={(open) => !open && setBackupText("")}>
-        <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-3xl">
-          <DialogHeader>
-            <DialogTitle>WhiteDNS backup.json</DialogTitle>
-            <DialogDescription>Full profile backup exported as JSON.</DialogDescription>
-          </DialogHeader>
-          <Textarea
-            readOnly
-            value={backupText}
-            className="h-[min(58svh,32rem)] min-h-0 resize-none overflow-auto font-mono text-xs leading-relaxed [field-sizing:fixed]"
-            onFocus={(event) => event.currentTarget.select()}
-          />
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => navigator.clipboard?.writeText(backupText)}>
-              <Copy />
-              Copy JSON
-            </Button>
-            <Button
-              type="button"
-              onClick={() => downloadTextFile(`whitedns-backup-${new Date().toISOString().slice(0, 10)}.json`, backupText, "application/json;charset=utf-8")}
-            >
-              <FileText />
-              Download JSON
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={restoreOpen} onOpenChange={setRestoreOpen}>
         <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-2xl">
@@ -4511,7 +4486,11 @@ function FullBackupPage({
           <div className="min-h-0 space-y-4 overflow-auto pr-1">
             <Field>
               <FieldLabel>Backup file</FieldLabel>
-              <Input type="file" accept=".json,application/json,text/plain" onChange={(event) => importBackupFile(event.target.files?.[0] || null)} />
+              <Button type="button" variant="outline" className="w-full justify-start" disabled={selectingBackup} onClick={selectBackupFile}>
+                <FileText />
+                {selectingBackup ? "Opening…" : restoreText ? "Choose a different backup" : "Choose backup JSON"}
+              </Button>
+              <FieldDescription>Uses the native file picker. You can also paste backup JSON below.</FieldDescription>
             </Field>
             <TextAreaField
               label="Backup JSON"
@@ -4538,38 +4517,44 @@ function FullBackupPage({
 
 function BackupRestoreSection({
   restoreLocked,
+  exporting,
   onExportBackup,
   onOpenRestore,
 }: {
   restoreLocked: boolean;
+  exporting: boolean;
   onExportBackup: () => void;
   onOpenRestore: () => void;
 }) {
   return (
-    <SettingsFieldSet legend="Backup and restore">
-      <FieldGroup>
-        <Field orientation="horizontal" className="items-center justify-between gap-4 rounded-lg border p-4">
-          <FieldContent>
-            <FieldTitle>Export full backup</FieldTitle>
-            <FieldDescription>MasterDNS, V2Ray, resolvers, settings, selected profiles, and saved secrets.</FieldDescription>
-          </FieldContent>
-          <Button type="button" variant="outline" onClick={onExportBackup}>
-            <FileText />
-            Export
-          </Button>
-        </Field>
-        <Field orientation="horizontal" className="items-center justify-between gap-4 rounded-lg border p-4">
-          <FieldContent>
-            <FieldTitle>Restore full backup</FieldTitle>
-            <FieldDescription>Restores are available when WhiteDNS is disconnected.</FieldDescription>
-          </FieldContent>
-          <Button type="button" variant="outline" disabled={restoreLocked} onClick={onOpenRestore}>
-            <Upload />
-            Restore
-          </Button>
-        </Field>
-      </FieldGroup>
-    </SettingsFieldSet>
+    <div className="grid gap-4 md:grid-cols-2">
+      <div className="flex min-h-36 flex-col justify-between gap-5 rounded-lg border bg-muted/10 p-5">
+        <div>
+          <div className="mb-3 flex size-9 items-center justify-center rounded-md border bg-background text-muted-foreground">
+            <Download className="size-4" />
+          </div>
+          <h3 className="text-sm font-semibold">Export full backup</h3>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Connections, resolvers, engine settings, selected profiles, and saved secrets.</p>
+        </div>
+        <Button type="button" className="w-full" disabled={exporting} onClick={onExportBackup}>
+          <Download />
+          {exporting ? "Preparing backup…" : "Save backup file"}
+        </Button>
+      </div>
+      <div className="flex min-h-36 flex-col justify-between gap-5 rounded-lg border bg-muted/10 p-5">
+        <div>
+          <div className="mb-3 flex size-9 items-center justify-center rounded-md border bg-background text-muted-foreground">
+            <Upload className="size-4" />
+          </div>
+          <h3 className="text-sm font-semibold">Restore full backup</h3>
+          <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Replace saved profiles from a WhiteDNS backup. Disconnect before restoring.</p>
+        </div>
+        <Button type="button" variant="outline" className="w-full" disabled={restoreLocked} onClick={onOpenRestore}>
+          <Upload />
+          {restoreLocked ? "Disconnect to restore" : "Restore backup"}
+        </Button>
+      </div>
+    </div>
   );
 }
 

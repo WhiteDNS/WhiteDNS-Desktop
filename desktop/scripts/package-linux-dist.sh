@@ -186,6 +186,8 @@ Release: $rpm_release%{?dist}
 Summary: $description
 License: $license
 Requires: ca-certificates
+Requires: gtk3
+Requires: webkit2gtk4.1
 
 %description
 Managed desktop client for MasterDNS, StormDNS, and CottenDNS.

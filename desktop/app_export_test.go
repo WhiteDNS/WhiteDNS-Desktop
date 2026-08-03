@@ -66,10 +66,10 @@ LOG_LEVEL = "INFO"
 		t.Fatal(err)
 	}
 
-	if len(state.SettingsProfiles) != 2 {
+	if len(state.SettingsProfiles) != 4 {
 		t.Fatalf("expected imported settings profile, got %#v", state.SettingsProfiles)
 	}
-	imported := state.SettingsProfiles[1]
+	imported := state.SettingsProfiles[len(state.SettingsProfiles)-1]
 	if state.SelectedSettingsProfileID != imported.ID {
 		t.Fatalf("expected imported settings to be selected, got %q", state.SelectedSettingsProfileID)
 	}

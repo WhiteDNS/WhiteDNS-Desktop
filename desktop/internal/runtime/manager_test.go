@@ -499,6 +499,9 @@ func TestManagerRuntimeConfigForcesAndPurgesMTUResolverStateFile(t *testing.T) {
 	configFile := manager.active.configFile
 	stateFile := manager.active.mtuResolverStateFile
 	manager.mu.Unlock()
+	if !strings.Contains(filepath.Base(stateFile), ".masterdns.mtu-resolvers.log") {
+		t.Fatalf("expected engine-specific MTU state path, got %q", stateFile)
+	}
 	rawConfig, err := os.ReadFile(configFile)
 	if err != nil {
 		t.Fatal(err)
@@ -515,6 +518,27 @@ func TestManagerRuntimeConfigForcesAndPurgesMTUResolverStateFile(t *testing.T) {
 	}
 	if _, err := os.Stat(stateFile); !os.IsNotExist(err) {
 		t.Fatalf("expected MTU resolver state file to be purged, err=%v", err)
+	}
+}
+
+func TestEngineValidResolverCachesAreSharedAndSeparated(t *testing.T) {
+	manager := NewManager(Options{RuntimeDir: t.TempDir()}, Callbacks{})
+	manager.persistValidResolvers(model.ImportTypeMasterDNS, model.ResolverRuntimeState{ValidResolvers: []string{"1.1.1.1", "9.9.9.9"}})
+	manager.persistValidResolvers(model.ImportTypeCottenDNS, model.ResolverRuntimeState{ValidResolvers: []string{"9.9.9.9", "8.8.8.8"}})
+
+	masterPath := manager.engineValidResolverPath(model.ImportTypeMasterDNS)
+	cottenPath := manager.engineValidResolverPath(model.ImportTypeCottenDNS)
+	if masterPath == cottenPath {
+		t.Fatalf("engine resolver caches must use separate paths: %q", masterPath)
+	}
+	got := manager.readSharedValidResolvers()
+	want := []string{"1.1.1.1", "9.9.9.9", "8.8.8.8"}
+	if !stringSlicesEqual(got, want) {
+		t.Fatalf("expected both engines to share valid resolvers, got %#v want %#v", got, want)
+	}
+	merged := mergeResolverText("1.0.0.1\n1.1.1.1", got)
+	if !strings.Contains(merged, "8.8.8.8") || strings.Count(merged, "1.1.1.1") != 1 {
+		t.Fatalf("resolver merge did not preserve and de-duplicate peers:\n%s", merged)
 	}
 }
 

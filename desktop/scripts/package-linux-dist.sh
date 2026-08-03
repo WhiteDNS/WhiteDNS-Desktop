@@ -7,7 +7,7 @@ version="${VERSION:-${APP_VERSION:-1.0.0-beta6}}"
 source_dir="${PACKAGE_SOURCE_DIR:-build/bin}"
 output_dir="${PACKAGE_OUTPUT_DIR:-build/releases}"
 arch="${LINUX_ARCH:-$(go env GOARCH)}"
-webkit="${LINUX_WEBKIT:-4.0}"
+webkit="${LINUX_WEBKIT:-4.1}"
 formats="${LINUX_PACKAGE_FORMATS-deb,rpm}"
 asset_suffix="${LINUX_ASSET_SUFFIX:-linux-$arch}"
 description="${LINUX_PACKAGE_DESCRIPTION:-WhiteDNS desktop client}"
@@ -36,7 +36,8 @@ case "$webkit" in
     deb_webkit_dep="libwebkit2gtk-4.1-0"
     ;;
   *)
-    deb_webkit_dep="libwebkit2gtk-4.0-37"
+    printf 'Unsupported WebKitGTK ABI: %s; WhiteDNS Linux builds require 4.1\n' "$webkit" >&2
+    exit 1
     ;;
 esac
 
@@ -148,9 +149,9 @@ Priority: optional
 Architecture: $deb_arch
 Maintainer: $maintainer
 Installed-Size: $installed_size
-Depends: ca-certificates, libgtk-3-0, $deb_webkit_dep
+Depends: ca-certificates, libgtk-3-0t64 | libgtk-3-0, $deb_webkit_dep
 Description: $description
- Managed desktop client for WhiteDNS and StormDNS.
+ Managed desktop client for MasterDNS, StormDNS, and CottenDNS.
 EOF
 
   deb_path="$output_dir/$asset_base.deb"
@@ -187,7 +188,7 @@ License: $license
 Requires: ca-certificates
 
 %description
-Managed desktop client for WhiteDNS and StormDNS.
+Managed desktop client for MasterDNS, StormDNS, and CottenDNS.
 
 %prep
 

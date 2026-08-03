@@ -35,6 +35,8 @@ const (
 	DefaultConnectionProfileID = "default"
 	DefaultResolverProfileID   = "resolver-default"
 	DefaultSettingsProfileID   = "settings-default"
+	MasterDNSSettingsProfileID = "settings-master-preset"
+	DefaultCottenDNSSettingsID = "settings-cottendns-preset"
 	DefaultV2RayProfileID      = "v2ray-default"
 	DefaultV2RaySettingsID     = "v2ray-settings-default"
 
@@ -72,13 +74,55 @@ func NormalizeImportType(value string) string {
 }
 
 type ConnectionProfile struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	ImportType        string `json:"importType"`
-	Domain            string `json:"domain"`
-	EncryptionKey     string `json:"encryptionKey"`
-	EncryptionMethod  int    `json:"encryptionMethod"`
-	ResolverProfileID string `json:"resolverProfileId"`
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	ImportType        string   `json:"importType"`
+	Domain            string   `json:"domain"`
+	Domains           []string `json:"domains"`
+	EncryptionKey     string   `json:"encryptionKey"`
+	EncryptionMethod  int      `json:"encryptionMethod"`
+	ResolverProfileID string   `json:"resolverProfileId"`
+}
+
+// ConnectionDomains returns a normalized, de-duplicated domain list while
+// retaining compatibility with profiles saved before multi-domain support.
+func ConnectionDomains(profile ConnectionProfile) []string {
+	return NormalizeConnectionDomains(profile.Domain, profile.Domains)
+}
+
+func NormalizeConnectionDomains(legacyDomain string, domains []string) []string {
+	values := make([]string, 0, len(domains)+1)
+	values = append(values, domains...)
+	if len(values) == 0 {
+		values = append(values, legacyDomain)
+	}
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, raw := range values {
+		for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+			return r == ',' || r == ';' || r == '\n' || r == '\r' || r == '\t' || r == ' '
+		}) {
+			domain := strings.ToLower(strings.TrimSpace(strings.TrimSuffix(part, ".")))
+			if domain == "" {
+				continue
+			}
+			if _, exists := seen[domain]; exists {
+				continue
+			}
+			seen[domain] = struct{}{}
+			out = append(out, domain)
+		}
+	}
+	return out
+}
+
+func NormalizeConnectionProfileDomains(profile ConnectionProfile) ConnectionProfile {
+	profile.Domains = ConnectionDomains(profile)
+	profile.Domain = ""
+	if len(profile.Domains) > 0 {
+		profile.Domain = profile.Domains[0]
+	}
+	return profile
 }
 
 type ResolverProfile struct {
@@ -799,17 +843,34 @@ func DefaultSettingsProfile() SettingsProfile {
 	}
 }
 
+func MasterPresetSettingsProfile() SettingsProfile {
+	profile := DefaultSettingsProfile()
+	profile.ID = MasterDNSSettingsProfileID
+	profile.Name = "Master preset"
+	return profile
+}
+
+func DefaultCottenDNSSettingsProfile() SettingsProfile {
+	profile := DefaultSettingsProfile()
+	profile.ID = DefaultCottenDNSSettingsID
+	profile.Name = "CottenDNS preset"
+	profile.ImportType = ImportTypeCottenDNS
+	options := map[string]any{"CONFIG_PRESET": "default"}
+	profile.CottenDNSOptions = &options
+	return profile
+}
+
 func DefaultAppState() AppState {
 	return AppState{
 		SelectedConnectionProfileID: DefaultConnectionProfileID,
 		SelectedResolverProfileID:   DefaultResolverProfileID,
-		SelectedSettingsProfileID:   DefaultSettingsProfileID,
+		SelectedSettingsProfileID:   MasterDNSSettingsProfileID,
 		SelectedV2RayProfileID:      "",
 		SelectedV2RaySettingsID:     DefaultV2RaySettingsID,
 		Theme:                       "system",
 		ConnectionProfiles:          []ConnectionProfile{DefaultConnectionProfile()},
 		ResolverProfiles:            []ResolverProfile{DefaultResolverProfile()},
-		SettingsProfiles:            []SettingsProfile{DefaultSettingsProfile()},
+		SettingsProfiles:            []SettingsProfile{DefaultSettingsProfile(), MasterPresetSettingsProfile(), DefaultCottenDNSSettingsProfile()},
 		V2RayProfiles:               []V2RayProfile{},
 		V2RaySubscriptions:          []V2RaySubscription{},
 		V2RaySettingsProfiles:       []V2RaySettingsProfile{DefaultV2RaySettingsProfile()},

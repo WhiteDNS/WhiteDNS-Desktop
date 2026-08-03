@@ -205,8 +205,8 @@ func renderTOML(connection model.ConnectionProfile, overrides map[string]any, in
 		line("CONFIG_PRESET = %s", formatTOMLValue(value))
 	}
 	if includeConnection {
-		domain := strings.TrimSpace(strings.TrimSuffix(connection.Domain, "."))
-		line("DOMAINS = [%s]", formatTOMLValue(domain))
+		domains := model.ConnectionDomains(connection)
+		line("DOMAINS = %s", formatTOMLValue(domains))
 		line("DATA_ENCRYPTION_METHOD = %d", connection.EncryptionMethod)
 		line("ENCRYPTION_KEY = %s", formatTOMLValue(strings.TrimSpace(connection.EncryptionKey)))
 	}

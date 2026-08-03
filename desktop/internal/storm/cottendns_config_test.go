@@ -10,6 +10,7 @@ import (
 func TestBuildLaunchConfigSelectsCottenDNSAndItsInternalListener(t *testing.T) {
 	state := model.DefaultAppState()
 	state.ConnectionProfiles[0].Domain = "v.example.com"
+	state.ConnectionProfiles[0].ImportType = model.ImportTypeCottenDNS
 	state.ConnectionProfiles[0].EncryptionKey = "key"
 	overrides := map[string]any{
 		"CONFIG_PRESET":      "speed",
@@ -47,6 +48,26 @@ func TestBuildLaunchConfigSelectsCottenDNSAndItsInternalListener(t *testing.T) {
 	}
 	if !strings.Contains(cfg.CoreConfig, `"port": 19087`) {
 		t.Fatalf("Xray config does not target CottenDNS:\n%s", cfg.CoreConfig)
+	}
+}
+
+func TestSelectedConnectionControlsEngineAndMultipleDomains(t *testing.T) {
+	state := model.DefaultAppState()
+	state.ConnectionProfiles[0].ImportType = model.ImportTypeCottenDNS
+	state.ConnectionProfiles[0].Domain = "one.example.com"
+	state.ConnectionProfiles[0].Domains = []string{"one.example.com", "two.example.com"}
+	state.ConnectionProfiles[0].EncryptionKey = "key"
+	state.SelectedSettingsProfileID = model.MasterDNSSettingsProfileID
+
+	cfg, err := BuildLaunchConfig(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Engine != model.ImportTypeCottenDNS || cfg.Settings.ImportType != model.ImportTypeCottenDNS {
+		t.Fatalf("selected connection did not control engine: %#v", cfg)
+	}
+	if !strings.Contains(cfg.ClientTOML, `DOMAINS = ["one.example.com", "two.example.com"]`) {
+		t.Fatalf("multi-domain CottenDNS config was not rendered:\n%s", cfg.ClientTOML)
 	}
 }
 

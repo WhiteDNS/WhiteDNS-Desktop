@@ -289,10 +289,31 @@ function importTypeLabel(value?: string): string {
 }
 
 function normalizeConnectionProfile(profile: ConnectionProfile): ConnectionProfile {
+  const domains = normalizeConnectionDomains(profile.domains?.length ? profile.domains : [profile.domain]);
   return {
     ...profile,
     importType: normalizeImportType(profile.importType),
+    domain: domains[0] || "",
+    domains,
   };
+}
+
+function normalizeConnectionDomains(values: string[]): string[] {
+  const seen = new Set<string>();
+  return values
+    .flatMap((value) => String(value || "").split(/[\s,;]+/))
+    .map((value) => value.trim().replace(/\.$/, "").toLowerCase())
+    .filter((value) => Boolean(value) && !seen.has(value) && Boolean(seen.add(value)));
+}
+
+function connectionDomains(profile?: ConnectionProfile): string[] {
+  return profile ? normalizeConnectionDomains(profile.domains?.length ? profile.domains : [profile.domain]) : [];
+}
+
+function connectionDomainSummary(profile?: ConnectionProfile): string {
+  const domains = connectionDomains(profile);
+  if (!domains.length) return "No domain";
+  return domains.length === 1 ? domains[0] : `${domains[0]} +${domains.length - 1}`;
 }
 
 function normalizeV2RayProtocol(value?: string): V2RayProtocol {
@@ -773,7 +794,7 @@ function proxyCountryInfo(
     runtime?.autoProfileName,
     settings?.name,
     connection?.name,
-    connection?.domain,
+    connectionDomains(connection).join(" "),
   ]
     .filter(Boolean)
     .join(" ")
@@ -1699,7 +1720,7 @@ function DashboardPage({
   const [proxyCountryLookup, setProxyCountryLookup] = useState<ProxyCountryLookupResult | null>(null);
   const [proxyCountryLookupRunning, setProxyCountryLookupRunning] = useState(false);
   const proxyCountryLookupKeyRef = useRef("");
-  const missingConnection = !selectedConnection?.domain.trim() || !selectedConnection?.encryptionKey.trim();
+  const missingConnection = connectionDomains(selectedConnection).length === 0 || !selectedConnection?.encryptionKey.trim();
   const configuredResolverCount = resolverProfileCount(selectedResolver, validation);
   const missingResolvers = configuredResolverCount <= 0 || (!isFileBackedResolver(selectedResolver) && !validation.isValid);
   const connectDisabled = parallelRunning || (canStart && (missingConnection || missingResolvers));
@@ -2007,7 +2028,7 @@ function DashboardPage({
                 onChange={(id) => onRun(() => backend.selectConnectionProfile(id))}
               />
               <p className="mt-2 text-xs text-muted-foreground truncate">
-                {selectedConnection?.domain || "No domain"}
+                {connectionDomainSummary(selectedConnection)}
               </p>
             </div>
 
@@ -3000,7 +3021,7 @@ function ConnectionsPage({
   const [profileFilter, setProfileFilter] = useState<ConnectionProfileFilter>("all");
   const testRunRef = useRef(0);
   const runtimeBusy = state.runtime.status !== "disconnected" && state.runtime.status !== "failed";
-  const missingDomain = !draft.domain.trim();
+  const missingDomain = connectionDomains(draft).length === 0;
   const missingKey = !draft.encryptionKey.trim();
   const importDisabled = !importText.trim();
   const hasExportableConnections = state.connectionProfiles.some(isExportableConnection);
@@ -3072,6 +3093,7 @@ function ConnectionsPage({
       name: "Connection",
       importType: "masterdns",
       domain: "",
+      domains: [],
       encryptionKey: "",
       encryptionMethod: 1,
       resolverProfileId: state.selectedResolverProfileId,
@@ -3387,7 +3409,7 @@ function ConnectionsPage({
                         </div>
                       </td>
                       <td className="min-w-0 px-3 py-2.5">
-                        <span className="block truncate">{profile.domain || "No domain"}</span>
+                        <span className="block truncate">{connectionDomainSummary(profile)}</span>
                         {result?.resolver && (
                           <span className="mt-1 block truncate font-mono text-[11px] text-muted-foreground">{result.resolver}</span>
                         )}
@@ -3445,12 +3467,17 @@ function ConnectionsPage({
                 onChange={(nextImportType) => setDraft({ ...draft, importType: nextImportType })}
                 options={importTypeOptions}
               />
-              <TextField
-                label="MasterDNS/StormDNS domain"
-                value={draft.domain}
-                onChange={(domain) => setDraft({ ...draft, domain })}
-                placeholder="v.example.com"
-                error={missingDomain ? "MasterDNS/StormDNS domain is required." : undefined}
+              <TextAreaField
+                label="DNS tunnel domains"
+                value={(draft.domains?.length ? draft.domains : [draft.domain]).join("\n")}
+                onChange={(value) => {
+                  const domains = normalizeConnectionDomains([value]);
+                  setDraft({ ...draft, domain: domains[0] || "", domains: value.split(/\r?\n/) });
+                }}
+                placeholder={"v1.example.com\nv2.example.com"}
+                description="One domain per line. Every domain must point to the same DNS tunnel server. CottenDNS can spread duplicate packets across them."
+                error={missingDomain ? "At least one DNS tunnel domain is required." : undefined}
+                className="min-h-28 font-mono text-sm md:col-span-2"
               />
               <SecretField
                 label="Encryption key"
@@ -3506,13 +3533,13 @@ function ConnectionsPage({
         <DialogContent className="max-h-[calc(100svh-2rem)] overflow-hidden sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Import Connections</DialogTitle>
-            <DialogDescription>Paste one or more MasterDNS/StormDNS profile links.</DialogDescription>
+            <DialogDescription>Paste one or more MasterDNS, StormDNS, or CottenDNS profile links. Each profile may contain multiple domains.</DialogDescription>
           </DialogHeader>
           <TextAreaField
             label="Profiles"
             value={importText}
             onChange={setImportText}
-            placeholder={"masterdns://...\nstormdns://..."}
+            placeholder={"masterdns://...\nstormdns://...\ncottendns://..."}
             className="h-[min(45svh,18rem)] min-h-0 resize-none overflow-auto font-mono text-xs"
           />
           <SelectField
@@ -4020,8 +4047,8 @@ function SettingsPage({
   const [importName, setImportName] = useState("Imported settings");
   const [importType, setImportType] = useState<ImportType>("masterdns");
   const importDisabled = !importText.trim();
-  const defaultSettingsDraft = draft.id === "settings-default";
   const cottenDnsDraft = normalizeImportType(draft.importType) === "cottendns";
+  const defaultSettingsDraft = draft.id === "settings-default";
   const visibleSettingsSections = cottenDnsDraft
     ? settingsSections.filter((item) => item.id === "general" || item.id === "proxy" || item.id === "cottendns")
     : settingsSections.filter((item) => item.id !== "cottendns");
@@ -4284,7 +4311,7 @@ function SettingsPage({
             </Tabs>
           </div>
           <DialogFooter className="sm:justify-between">
-            {draft.id !== "settings-default" && Boolean(draft.id) ? (
+            {draft.id !== "settings-default" && draft.id !== "settings-master-preset" && draft.id !== "settings-cottendns-preset" && Boolean(draft.id) ? (
               <Button type="button" variant="destructive" onClick={deleteSettingsDraft} className="sm:mr-auto">
                 <Trash2 />
                 Delete
@@ -4300,7 +4327,7 @@ function SettingsPage({
               <Button type="button" variant="outline" onClick={() => setEditorOpen(false)}>
                 Cancel
               </Button>
-              <Button type="button" disabled={defaultSettingsDraft} title={defaultSettingsDraft ? "Create a new profile to save changes" : undefined} onClick={saveSettingsDraft}>
+              <Button type="button" disabled={defaultSettingsDraft} title={defaultSettingsDraft ? "Use the editable Master preset or create a new profile" : undefined} onClick={saveSettingsDraft}>
                 <Save />
                 Save
               </Button>
@@ -4820,6 +4847,14 @@ function CottenDNSSettingsFields({
     }
     return result;
   }, []);
+  const [activeGroup, setActiveGroup] = useState("");
+  const selectedGroup = groups.some((group) => group.name === activeGroup) ? activeGroup : groups[0]?.name || "";
+
+  useEffect(() => {
+    if (groups.length && !groups.some((group) => group.name === activeGroup)) {
+      setActiveGroup(groups[0].name);
+    }
+  }, [activeGroup, groups.map((group) => group.name).join("|")]);
 
   function effectiveValue(option: CottenDNSOptionDefinition): CottenDNSOptionValue {
     if (Object.prototype.hasOwnProperty.call(overrides, option.key)) {
@@ -4873,8 +4908,18 @@ function CottenDNSSettingsFields({
           Clear all CottenDNS overrides
         </Button>
       </div>
-      {groups.map((group) => (
-        <SettingsFieldSet key={group.name} legend={group.name}>
+      <Tabs value={selectedGroup} onValueChange={setActiveGroup} className="gap-4">
+        <TabsList className="flex h-auto flex-wrap justify-start gap-1 bg-muted/50 p-1.5">
+          {groups.map((group) => (
+            <TabsTrigger key={group.name} value={group.name} className="gap-1.5">
+              {group.name}
+              <Badge variant="outline" className="px-1.5 text-[10px]">{group.options.length}</Badge>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+        {groups.map((group) => (
+          <TabsContent key={group.name} value={group.name} className="mt-0">
+            <SettingsFieldSet legend={group.name}>
           {group.options.map((option) => {
             const overridden = Object.prototype.hasOwnProperty.call(overrides, option.key);
             const value = effectiveValue(option);
@@ -4963,8 +5008,10 @@ function CottenDNSSettingsFields({
               </div>
             );
           })}
-        </SettingsFieldSet>
-      ))}
+            </SettingsFieldSet>
+          </TabsContent>
+        ))}
+      </Tabs>
     </div>
   );
 }
@@ -5012,7 +5059,7 @@ function ScannerPage({
   }, [running]);
 
   const selectedConnection = state.connectionProfiles.find((profile) => profile.id === connectionProfileId) || state.connectionProfiles[0];
-  const connectionReady = Boolean(selectedConnection?.domain.trim() && selectedConnection.encryptionKey.trim());
+  const connectionReady = Boolean(connectionDomains(selectedConnection).length && selectedConnection?.encryptionKey.trim());
   const progress = scanner.total > 0 ? Math.round((scanner.completed / scanner.total) * 100) : 0;
   const elapsed = scanner.startedAt ? formatElapsed(scanner.startedAt, scanner.finishedAt || now) : "-";
   const canStart = !running && Boolean(scanner.inputFileName) && connectionReady;
@@ -5152,7 +5199,7 @@ function ScannerPage({
                     ))}
                   </SelectContent>
                 </Select>
-                <FieldDescription>{selectedConnection?.domain || "Domain required"}</FieldDescription>
+                <FieldDescription>{connectionDomainSummary(selectedConnection) || "Domain required"}</FieldDescription>
               </Field>
               <NumberField
                 label="Scan parallel"
@@ -6491,6 +6538,7 @@ function TextAreaField({
   placeholder,
   className,
   description,
+  error,
   onChange,
 }: {
   label: string;
@@ -6498,6 +6546,7 @@ function TextAreaField({
   placeholder?: string;
   className?: string;
   description?: string;
+  error?: string;
   onChange: (value: string) => void;
 }) {
   return (
@@ -6510,6 +6559,7 @@ function TextAreaField({
         onChange={(event) => onChange(event.target.value)}
       />
       {description && <FieldDescription>{description}</FieldDescription>}
+      <FieldError>{error}</FieldError>
     </Field>
   );
 }
@@ -7005,7 +7055,7 @@ function validatorStatusLabel(status: string, paused = false): string {
 }
 
 function isExportableConnection(profile: ConnectionProfile): boolean {
-  return Boolean(profile.domain.trim() && profile.encryptionKey.trim());
+  return Boolean(connectionDomains(profile).length && profile.encryptionKey.trim());
 }
 
 function messageFromError(err: unknown): string {

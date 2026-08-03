@@ -100,14 +100,14 @@ func TestSaveParallelTestPresetsAddsMissingProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(next.SettingsProfiles) != 3 {
-		t.Fatalf("expected default plus 2 saved presets, got %#v", next.SettingsProfiles)
+	if len(next.SettingsProfiles) != 5 {
+		t.Fatalf("expected built-ins plus 2 saved presets, got %#v", next.SettingsProfiles)
 	}
 	next, err = app.SaveParallelTestPresets([]string{"iran-default"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(next.SettingsProfiles) != 3 {
+	if len(next.SettingsProfiles) != 5 {
 		t.Fatalf("expected duplicate save to be ignored, got %#v", next.SettingsProfiles)
 	}
 }
@@ -180,13 +180,13 @@ func TestSelectParallelWinnerPresetSelectsExistingSettingsProfileByName(t *testi
 
 func TestParallelResolverTargetUsesSelectedUploadDuplication(t *testing.T) {
 	state := model.DefaultAppState()
-	state.SettingsProfiles[0].UploadDuplication = 7
+	state.SettingsProfiles[1].UploadDuplication = 7
 
 	if got := parallelResolverTargetForState(state); got != 7 {
 		t.Fatalf("expected upload duplication resolver target, got %d", got)
 	}
 
-	state.SettingsProfiles[0].UploadDuplication = 1
+	state.SettingsProfiles[1].UploadDuplication = 1
 	if got := parallelResolverTargetForState(state); got != 1 {
 		t.Fatalf("expected minimum resolver target 1, got %d", got)
 	}

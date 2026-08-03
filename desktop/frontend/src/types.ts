@@ -6,6 +6,7 @@ export interface ConnectionProfile {
   name: string;
   importType: ImportType;
   domain: string;
+  domains: string[];
   encryptionKey: string;
   encryptionMethod: number;
   resolverProfileId: string;

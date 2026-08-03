@@ -33,9 +33,9 @@ func TestRuntimeSOCKSProxyAddressFallsBackToLocalhost(t *testing.T) {
 
 func TestActiveSOCKSProxyDoesNotUseMasterDNSAuthForV2RayRuntime(t *testing.T) {
 	app := &App{state: model.DefaultAppState()}
-	app.state.SettingsProfiles[0].SOCKS5Authentication = true
-	app.state.SettingsProfiles[0].SOCKSUsername = "user"
-	app.state.SettingsProfiles[0].SOCKSPassword = "pass"
+	app.state.SettingsProfiles[1].SOCKS5Authentication = true
+	app.state.SettingsProfiles[1].SOCKSUsername = "user"
+	app.state.SettingsProfiles[1].SOCKSPassword = "pass"
 	app.state.V2RayProfiles = []model.V2RayProfile{{ID: "v2ray-1", Name: "V2Ray"}}
 	app.state.Runtime = model.RuntimeStatus{
 		Status:             model.RuntimeConnected,
@@ -58,9 +58,9 @@ func TestActiveSOCKSProxyDoesNotUseMasterDNSAuthForV2RayRuntime(t *testing.T) {
 
 func TestActiveSOCKSProxyUsesMasterDNSAuthForMasterDNSRuntime(t *testing.T) {
 	app := &App{state: model.DefaultAppState()}
-	app.state.SettingsProfiles[0].SOCKS5Authentication = true
-	app.state.SettingsProfiles[0].SOCKSUsername = "user"
-	app.state.SettingsProfiles[0].SOCKSPassword = "pass"
+	app.state.SettingsProfiles[1].SOCKS5Authentication = true
+	app.state.SettingsProfiles[1].SOCKSUsername = "user"
+	app.state.SettingsProfiles[1].SOCKSPassword = "pass"
 	app.state.Runtime = model.RuntimeStatus{
 		Status:             model.RuntimeConnected,
 		ActiveConnectionID: model.DefaultConnectionProfileID,
@@ -79,9 +79,9 @@ func TestActiveSOCKSProxyUsesMasterDNSAuthForMasterDNSRuntime(t *testing.T) {
 
 func TestActiveProxyConfigUsesHTTPWhenRuntimeRequestsHTTP(t *testing.T) {
 	app := &App{state: model.DefaultAppState()}
-	app.state.SettingsProfiles[0].SOCKS5Authentication = true
-	app.state.SettingsProfiles[0].SOCKSUsername = "user"
-	app.state.SettingsProfiles[0].SOCKSPassword = "pass"
+	app.state.SettingsProfiles[1].SOCKS5Authentication = true
+	app.state.SettingsProfiles[1].SOCKSUsername = "user"
+	app.state.SettingsProfiles[1].SOCKSPassword = "pass"
 	app.state.Runtime = model.RuntimeStatus{
 		Status:             model.RuntimeConnected,
 		ActiveConnectionID: model.DefaultConnectionProfileID,

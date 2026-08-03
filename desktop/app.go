@@ -193,7 +193,7 @@ func (a *App) SaveConnectionProfile(profile model.ConnectionProfile) (model.AppS
 		profile.Name = "Connection"
 	}
 	profile.ImportType = model.NormalizeImportType(profile.ImportType)
-	profile.Domain = strings.TrimSpace(strings.TrimSuffix(profile.Domain, "."))
+	profile = model.NormalizeConnectionProfileDomains(profile)
 	profile.EncryptionKey = strings.TrimSpace(profile.EncryptionKey)
 	if profile.EncryptionMethod < 0 || profile.EncryptionMethod > 5 {
 		profile.EncryptionMethod = 1
@@ -212,6 +212,7 @@ func (a *App) SaveConnectionProfile(profile model.ConnectionProfile) (model.AppS
 	}
 	if !a.connectionSelectionLockedLocked() {
 		a.state.SelectedConnectionProfileID = profile.ID
+		a.selectSettingsForEngineLocked(profile.ImportType)
 		if profile.ResolverProfileID != "" {
 			a.state.SelectedResolverProfileID = profile.ResolverProfileID
 		}
@@ -243,6 +244,7 @@ func (a *App) ImportConnectionProfiles(rawText string, importType string) (model
 	}
 	if !a.connectionSelectionLockedLocked() {
 		a.state.SelectedConnectionProfileID = imported[len(imported)-1].ID
+		a.selectSettingsForEngineLocked(imported[len(imported)-1].ImportType)
 	}
 
 	next, err := a.saveLocked()
@@ -366,8 +368,11 @@ func (a *App) SelectConnectionProfile(id string) (model.AppState, error) {
 	}
 	a.state.SelectedConnectionProfileID = id
 	for _, profile := range a.state.ConnectionProfiles {
-		if profile.ID == id && profile.ResolverProfileID != "" {
-			a.state.SelectedResolverProfileID = profile.ResolverProfileID
+		if profile.ID == id {
+			if profile.ResolverProfileID != "" {
+				a.state.SelectedResolverProfileID = profile.ResolverProfileID
+			}
+			a.selectSettingsForEngineLocked(profile.ImportType)
 			break
 		}
 	}
@@ -549,7 +554,7 @@ func (a *App) SaveSettingsProfile(profile model.SettingsProfile) (model.AppState
 	}
 	profile = profiles.NormalizeSettingsProfile(profile)
 	if profile.ID == model.DefaultSettingsProfileID {
-		return a.state, fmt.Errorf("default settings profile cannot be edited; create a new profile")
+		return a.state, fmt.Errorf("default settings profile cannot be edited; use the Master preset or create a new profile")
 	}
 	found := false
 	for idx := range a.state.SettingsProfiles {
@@ -563,6 +568,7 @@ func (a *App) SaveSettingsProfile(profile model.SettingsProfile) (model.AppState
 		a.state.SettingsProfiles = append(a.state.SettingsProfiles, profile)
 	}
 	a.state.SelectedSettingsProfileID = profile.ID
+	a.setSelectedConnectionEngineLocked(profile.ImportType)
 	return a.saveLocked()
 }
 
@@ -582,14 +588,15 @@ func (a *App) ImportSettingsProfileToml(rawText, suggestedName string, importTyp
 	profile.ID = uniqueImportedSettingsID(existingIDs, time.Now().UnixNano())
 	a.state.SettingsProfiles = append(a.state.SettingsProfiles, profile)
 	a.state.SelectedSettingsProfileID = profile.ID
+	a.setSelectedConnectionEngineLocked(profile.ImportType)
 	return a.saveLocked()
 }
 
 func (a *App) DeleteSettingsProfile(id string) (model.AppState, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if id == model.DefaultSettingsProfileID {
-		return a.state, fmt.Errorf("default setting profile cannot be deleted")
+	if id == model.DefaultSettingsProfileID || id == model.MasterDNSSettingsProfileID || id == model.DefaultCottenDNSSettingsID {
+		return a.state, fmt.Errorf("built-in setting profile cannot be deleted")
 	}
 	a.state.SettingsProfiles = slices.DeleteFunc(a.state.SettingsProfiles, func(profile model.SettingsProfile) bool {
 		return profile.ID == id
@@ -613,8 +620,59 @@ func (a *App) SelectSettingsProfile(id string) (model.AppState, error) {
 	if !slices.ContainsFunc(a.state.SettingsProfiles, func(profile model.SettingsProfile) bool { return profile.ID == id }) {
 		return a.state, fmt.Errorf("setting profile not found")
 	}
+	if a.connectionSelectionLockedLocked() {
+		return a.state, fmt.Errorf("settings profile cannot be changed while connected")
+	}
 	a.state.SelectedSettingsProfileID = id
+	for _, profile := range a.state.SettingsProfiles {
+		if profile.ID == id {
+			a.setSelectedConnectionEngineLocked(profile.ImportType)
+			break
+		}
+	}
 	return a.saveLocked()
+}
+
+func (a *App) selectSettingsForEngineLocked(engine string) {
+	engine = model.NormalizeImportType(engine)
+	for _, profile := range a.state.SettingsProfiles {
+		if profile.ID == a.state.SelectedSettingsProfileID && model.NormalizeImportType(profile.ImportType) == engine {
+			return
+		}
+	}
+	preferredID := model.MasterDNSSettingsProfileID
+	if engine == model.ImportTypeCottenDNS {
+		preferredID = model.DefaultCottenDNSSettingsID
+	}
+	for _, profile := range a.state.SettingsProfiles {
+		if profile.ID == preferredID {
+			a.state.SelectedSettingsProfileID = profile.ID
+			return
+		}
+	}
+	for _, profile := range a.state.SettingsProfiles {
+		if model.NormalizeImportType(profile.ImportType) == engine {
+			a.state.SelectedSettingsProfileID = profile.ID
+			return
+		}
+	}
+	if engine == model.ImportTypeCottenDNS {
+		profile := model.DefaultCottenDNSSettingsProfile()
+		a.state.SettingsProfiles = append(a.state.SettingsProfiles, profile)
+		a.state.SelectedSettingsProfileID = profile.ID
+		return
+	}
+	a.state.SelectedSettingsProfileID = model.MasterDNSSettingsProfileID
+}
+
+func (a *App) setSelectedConnectionEngineLocked(engine string) {
+	engine = model.NormalizeImportType(engine)
+	for idx := range a.state.ConnectionProfiles {
+		if a.state.ConnectionProfiles[idx].ID == a.state.SelectedConnectionProfileID {
+			a.state.ConnectionProfiles[idx].ImportType = engine
+			return
+		}
+	}
 }
 
 func (a *App) ReorderSettingsProfiles(ids []string) (model.AppState, error) {

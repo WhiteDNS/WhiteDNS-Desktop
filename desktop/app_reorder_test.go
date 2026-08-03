@@ -92,11 +92,11 @@ func TestReorderSettingsProfilesPersistsOrderAndSelection(t *testing.T) {
 	state.SelectedSettingsProfileID = "settings-one"
 	app := &App{store: store, state: state}
 
-	result, err := app.ReorderSettingsProfiles([]string{"settings-two", model.DefaultSettingsProfileID, "settings-one"})
+	result, err := app.ReorderSettingsProfiles([]string{"settings-two", model.DefaultSettingsProfileID, model.MasterDNSSettingsProfileID, model.DefaultCottenDNSSettingsID, "settings-one"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"settings-two", model.DefaultSettingsProfileID, "settings-one"}
+	want := []string{"settings-two", model.DefaultSettingsProfileID, model.MasterDNSSettingsProfileID, model.DefaultCottenDNSSettingsID, "settings-one"}
 	if got := settingsProfileIDs(result.SettingsProfiles); !reflect.DeepEqual(got, want) {
 		t.Fatalf("unexpected reordered settings: got %#v want %#v", got, want)
 	}
@@ -134,6 +134,61 @@ func TestSaveSettingsProfileRejectsDefaultEdits(t *testing.T) {
 	}
 	if app.state.SettingsProfiles[0] != model.DefaultSettingsProfile() {
 		t.Fatalf("app state default settings profile was mutated: %#v", app.state.SettingsProfiles[0])
+	}
+}
+
+func TestSaveCottenDNSPresetAppliesToSelectedConnectionAndPersists(t *testing.T) {
+	store := profiles.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	state := model.DefaultAppState()
+	state.ConnectionProfiles[0].Domain = "one.example.com"
+	app := &App{store: store, state: state}
+
+	profile := model.DefaultCottenDNSSettingsProfile()
+	profile.ListenPort = 12000
+	overrides := map[string]any{"CONFIG_PRESET": "survival", "FAST_CONNECT": true}
+	profile.CottenDNSOptions = &overrides
+	result, err := app.SaveSettingsProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.SelectedSettingsProfileID != model.DefaultCottenDNSSettingsID {
+		t.Fatalf("CottenDNS preset was not selected: %q", result.SelectedSettingsProfileID)
+	}
+	if got := result.ConnectionProfiles[0].ImportType; got != model.ImportTypeCottenDNS {
+		t.Fatalf("selected connection did not switch to CottenDNS: %q", got)
+	}
+
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := loaded.ConnectionProfiles[0].ImportType; got != model.ImportTypeCottenDNS {
+		t.Fatalf("selected engine did not persist: %q", got)
+	}
+	for _, saved := range loaded.SettingsProfiles {
+		if saved.ID == model.DefaultCottenDNSSettingsID {
+			if saved.ListenPort != 12000 || saved.CottenDNSOptions == nil || (*saved.CottenDNSOptions)["CONFIG_PRESET"] != "survival" {
+				t.Fatalf("CottenDNS changes did not persist: %#v", saved)
+			}
+			return
+		}
+	}
+	t.Fatal("saved CottenDNS preset is missing")
+}
+
+func TestSelectingMasterPresetSwitchesSelectedConnectionEngine(t *testing.T) {
+	store := profiles.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	state := model.DefaultAppState()
+	state.ConnectionProfiles[0].ImportType = model.ImportTypeCottenDNS
+	state.SelectedSettingsProfileID = model.DefaultCottenDNSSettingsID
+	app := &App{store: store, state: state}
+
+	result, err := app.SelectSettingsProfile(model.MasterDNSSettingsProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := result.ConnectionProfiles[0].ImportType; got != model.ImportTypeMasterDNS {
+		t.Fatalf("selected connection did not switch to MasterDNS: %q", got)
 	}
 }
 

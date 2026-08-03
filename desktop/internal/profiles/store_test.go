@@ -18,8 +18,11 @@ func TestStoreLoadDefaultsWhenMissing(t *testing.T) {
 	if state.SelectedConnectionProfileID != model.DefaultConnectionProfileID {
 		t.Fatalf("unexpected selected connection: %s", state.SelectedConnectionProfileID)
 	}
-	if len(state.ConnectionProfiles) != 1 || len(state.SettingsProfiles) != 1 {
+	if len(state.ConnectionProfiles) != 1 || len(state.SettingsProfiles) != 3 {
 		t.Fatalf("expected default profiles, got %#v", state)
+	}
+	if state.SelectedSettingsProfileID != model.MasterDNSSettingsProfileID {
+		t.Fatalf("expected editable Master preset to be selected, got %q", state.SelectedSettingsProfileID)
 	}
 	settings := state.SettingsProfiles[0]
 	if settings.LocalDNSEnabled || settings.LocalDNSPort != 53 {
@@ -80,6 +83,7 @@ func TestStoreSaveLoadRoundTrip(t *testing.T) {
 		ID:               "custom",
 		Name:             "Custom",
 		Domain:           "v.example.com.",
+		Domains:          []string{"v.example.com.", "Backup.Example.com", "v.example.com"},
 		EncryptionKey:    "key",
 		EncryptionMethod: 2,
 	})
@@ -97,6 +101,9 @@ func TestStoreSaveLoadRoundTrip(t *testing.T) {
 	}
 	if loaded.ConnectionProfiles[1].Domain != "v.example.com" {
 		t.Fatalf("domain was not normalized: %#v", loaded.ConnectionProfiles[1])
+	}
+	if got := loaded.ConnectionProfiles[1].Domains; len(got) != 2 || got[0] != "v.example.com" || got[1] != "backup.example.com" {
+		t.Fatalf("multi-domain list was not normalized and persisted: %#v", got)
 	}
 	if loaded.Runtime.Status != model.RuntimeDisconnected {
 		t.Fatalf("runtime state should not persist as active: %#v", loaded.Runtime)
@@ -131,7 +138,13 @@ func TestStoreSaveLoadRoundTripsCottenDNSOverrides(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := loaded.SettingsProfiles[1]
+	var got model.SettingsProfile
+	for _, candidate := range loaded.SettingsProfiles {
+		if candidate.ID == settings.ID {
+			got = candidate
+			break
+		}
+	}
 	if got.ImportType != model.ImportTypeCottenDNS || got.CottenDNSOptions == nil {
 		t.Fatalf("CottenDNS settings were not restored: %#v", got)
 	}
@@ -149,7 +162,7 @@ func TestStoreRecoversFromCorruptJSON(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.SelectedSettingsProfileID != model.DefaultSettingsProfileID {
+	if state.SelectedSettingsProfileID != model.MasterDNSSettingsProfileID {
 		t.Fatalf("expected default state recovery, got %#v", state)
 	}
 }

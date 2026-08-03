@@ -291,7 +291,7 @@ EOF
 
   (
     cd "$arch_root"
-    bsdtar --uid 0 --gid 0 --uname root --gname root --format=mtree --options='!all,use-set,type,uid,gid,mode,time,size,sha256,link' .BUILDINFO .PKGINFO opt usr > "$tmp_dir/MTREE"
+    bsdtar --uid 0 --gid 0 --uname root --gname root --format=mtree --options='!all,use-set,type,uid,gid,mode,time,size,sha256,link' -cf - .BUILDINFO .PKGINFO opt usr > "$tmp_dir/MTREE"
     gzip -c -n "$tmp_dir/MTREE" > .MTREE
   )
 

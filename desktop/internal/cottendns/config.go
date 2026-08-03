@@ -58,6 +58,15 @@ var runtimeFallbacks = []struct {
 	// the engine's higher ceilings.
 	{"MIN_UPLOAD_MTU", 40},
 	{"MIN_DOWNLOAD_MTU", 300},
+	// A full RX channel drops inbound packets outright and logs "RX queue
+	// overloaded", which then costs a retransmit for every drop. The engine's
+	// 2048 is sized for a phone; a desktop pulling 1080p video fills it in about
+	// a minute, and 480p in several. Wider queues and more workers to drain them
+	// cost memory and a little CPU, both of which a desktop has.
+	{"RX_CHANNEL_SIZE", 8192},
+	{"TX_CHANNEL_SIZE", 8192},
+	{"RX_TX_WORKERS", 8},
+	{"TUNNEL_PROCESS_WORKERS", 8},
 }
 
 type OptionChoice struct {

@@ -4872,7 +4872,13 @@ function CottenDNSSettingsFields({
   schema: CottenDNSOptionDefinition[];
 }) {
   const overrides = draft.cottenDnsOptions || {};
-  const presetName = String(overrides.CONFIG_PRESET || "default");
+  // The app picks the preset an untouched profile runs under, so the fallback
+  // comes from the schema rather than being repeated here. Hardcoding it would
+  // let the editor show one preset's values while the engine ran another's.
+  const defaultPresetName = String(
+    schema.find((option) => option.key === "CONFIG_PRESET")?.defaultValue ?? "default",
+  );
+  const presetName = String(overrides.CONFIG_PRESET || defaultPresetName);
   const groups = schema
     .reduce<Array<{ name: string; options: CottenDNSOptionDefinition[] }>>((result, option) => {
       const existing = result.find((group) => group.name === option.group);

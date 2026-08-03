@@ -1,6 +1,7 @@
 package cottendns
 
 import (
+	"fmt"
 	"reflect"
 	"strings"
 	"testing"
@@ -158,5 +159,38 @@ func TestUncustomisedProfileRunsUnderTheSpeedPreset(t *testing.T) {
 	if settingsTOML := RenderSettingsTOML(map[string]any{}); strings.Contains(settingsTOML, "CONFIG_PRESET") ||
 		strings.Contains(settingsTOML, "QUERY_TYPES") {
 		t.Fatalf("settings export must not harden the fallback into an override:\n%s", settingsTOML)
+	}
+}
+
+// The settings editor renders from Schema(), so anything the app supplies on
+// top of the engine defaults has to be visible there too. Otherwise the editor
+// shows one value while the launched engine runs another, which reads as a
+// change that did not take.
+func TestSchemaReportsWhatTheEngineWillActuallyRun(t *testing.T) {
+	shown := map[string]any{}
+	for _, option := range Schema() {
+		shown[option.Key] = option.DefaultValue
+	}
+	if shown["CONFIG_PRESET"] != DefaultConfigPreset {
+		t.Fatalf("editor would offer preset %v while the engine runs %q", shown["CONFIG_PRESET"], DefaultConfigPreset)
+	}
+	if fmt.Sprint(shown["MIN_UPLOAD_MTU"]) != "40" || fmt.Sprint(shown["MIN_DOWNLOAD_MTU"]) != "300" {
+		t.Fatalf("editor would show engine MTU bounds, not the app's: up=%v down=%v",
+			shown["MIN_UPLOAD_MTU"], shown["MIN_DOWNLOAD_MTU"])
+	}
+
+	// Effective values must agree with the rendered config for an untouched profile.
+	values := EffectiveOptions(map[string]any{})
+	raw := RenderClientTOML(model.ConnectionProfile{}, map[string]any{})
+	for key, want := range map[string]string{
+		"MIN_UPLOAD_MTU":   "40",
+		"MIN_DOWNLOAD_MTU": "300",
+	} {
+		if fmt.Sprint(values[key]) != want {
+			t.Fatalf("effective %s = %v, want %s", key, values[key], want)
+		}
+		if !strings.Contains(raw, key+" = "+want) {
+			t.Fatalf("rendered config disagrees with effective %s:\n%s", key, raw)
+		}
 	}
 }

@@ -96,11 +96,32 @@ var connectionManagedKeys = map[string]struct{}{
 	"ENCRYPTION_KEY":         {},
 }
 
+// Schema reports the options with the app's own defaults already applied, so
+// the settings editor shows the value a profile will actually run with instead
+// of the engine's bare default.
 func Schema() []OptionDefinition {
 	loadSchema()
 	out := make([]OptionDefinition, len(schema))
 	copy(out, schema)
+	for idx := range out {
+		if out[idx].Key == "CONFIG_PRESET" {
+			out[idx].DefaultValue = DefaultConfigPreset
+			continue
+		}
+		if value, ok := runtimeFallbackValue(out[idx].Key); ok {
+			out[idx].DefaultValue = value
+		}
+	}
 	return out
+}
+
+func runtimeFallbackValue(key string) (any, bool) {
+	for _, fallback := range runtimeFallbacks {
+		if fallback.key == key {
+			return fallback.value, true
+		}
+	}
+	return nil, false
 }
 
 func DefaultOptions() map[string]any {
@@ -179,6 +200,11 @@ func EffectiveOptions(overrides map[string]any) map[string]any {
 		for key, value := range preset {
 			out[key] = value
 		}
+	}
+	// Applied over the preset and under the user, matching the order a runnable
+	// client config is written in.
+	for _, fallback := range runtimeFallbacks {
+		out[fallback.key] = fallback.value
 	}
 	for key, value := range normalized {
 		out[key] = value

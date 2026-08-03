@@ -98,7 +98,7 @@ jobs:
           - label: x64
             os: ubuntu-24.04
             arch: amd64
-            formats: deb,rpm,appimage
+            formats: deb,rpm,arch,appimage
           - label: arm64
             os: ubuntu-24.04-arm
             arch: arm64
@@ -129,7 +129,7 @@ jobs:
         run: |
           sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
-            build-essential curl file pkg-config rpm libgtk-3-dev libwebkit2gtk-4.1-dev
+            build-essential curl file libarchive-tools pkg-config rpm zstd libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Install frontend dependencies
         run: npm ci --prefix desktop/frontend
@@ -152,10 +152,32 @@ jobs:
             LINUX_PACKAGE_OUTPUT_DIR="build/releases/debug" \
             LINUX_PACKAGE_FORMATS="${{ matrix.formats }}"
 
+      - name: Validate Arch Linux package
+        if: matrix.arch == 'amd64'
+        run: |
+          set -euo pipefail
+          arch_package="$(find desktop/build/releases/debug -maxdepth 1 -type f -name '*.pkg.tar.zst' -print -quit)"
+          test -n "$arch_package"
+          archive_entries="$(bsdtar -tf "$arch_package")"
+          grep -Fxq '.BUILDINFO' <<<"$archive_entries"
+          grep -Fxq '.MTREE' <<<"$archive_entries"
+          grep -Fxq '.PKGINFO' <<<"$archive_entries"
+          pkginfo="$(bsdtar -xOf "$arch_package" .PKGINFO)"
+          grep -Fxq 'xdata = pkgtype=pkg' <<<"$pkginfo"
+          grep -Fxq 'arch = x86_64' <<<"$pkginfo"
+          grep -Fxq 'depend = gtk3' <<<"$pkginfo"
+          grep -Fxq 'depend = webkit2gtk-4.1' <<<"$pkginfo"
+          package_dir="$(dirname "$arch_package")"
+          package_name="$(basename "$arch_package")"
+          docker run --rm -v "$PWD/$package_dir:/packages:ro" archlinux:base \
+            pacman -Qip "/packages/$package_name"
+
       - name: Upload Linux packages
         uses: actions/upload-artifact@v6
         with:
           name: WhiteDNS-Desktop-WhiteDns-debug-linux-${{ matrix.label }}
-          path: desktop/build/releases/debug/WhiteDNS-Desktop-*
+          path: |
+            desktop/build/releases/debug/WhiteDNS-Desktop-*
+            desktop/build/releases/debug/whitedns-desktop-*.pkg.tar.zst
           if-no-files-found: error
           retention-days: 14

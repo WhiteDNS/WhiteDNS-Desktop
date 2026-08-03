@@ -52,7 +52,7 @@ jobs:
             arch: amd64
             webkit: "4.1"
             linux_tags: webkit2_41
-            package_formats: deb,rpm,appimage
+            package_formats: deb,rpm,arch,appimage
           - artifact: whitedns-desktop-linux-arm64
             os: ubuntu-24.04-arm
             kind: linux
@@ -106,7 +106,7 @@ jobs:
         run: |
           sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 update
           sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
-            build-essential curl file pkg-config rpm libgtk-3-dev libwebkit2gtk-4.1-dev
+            build-essential curl file libarchive-tools pkg-config rpm zstd libgtk-3-dev libwebkit2gtk-4.1-dev
 
       - name: Install frontend dependencies
         run: npm ci --prefix desktop/frontend
@@ -177,9 +177,22 @@ jobs:
                 paths="${paths}"$'\n'"$package"
               done
               rpm_package="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.rpm"
-              if rpm -qpR "$rpm_package" | grep -E '^webkit2gtk4\.[01]($|[[:space:]])'; then
-                echo "RPM contains a hard-coded WebKitGTK package dependency" >&2
+              if ! rpm -qpR "$rpm_package" | grep -Fxq 'webkit2gtk4.1'; then
+                echo "RPM is missing the WebKitGTK 4.1 runtime dependency" >&2
                 exit 1
+              fi
+              if [[ ",$package_formats," == *",arch,"* ]]; then
+                arch_package="$(find desktop/build/releases -maxdepth 1 -type f -name 'whitedns-desktop-*.pkg.tar.zst' -print -quit)"
+                test -n "$arch_package"
+                archive_entries="$(bsdtar -tf "$arch_package")"
+                grep -Fxq '.BUILDINFO' <<<"$archive_entries"
+                grep -Fxq '.MTREE' <<<"$archive_entries"
+                grep -Fxq '.PKGINFO' <<<"$archive_entries"
+                pkginfo="$(bsdtar -xOf "$arch_package" .PKGINFO)"
+                grep -Fxq 'xdata = pkgtype=pkg' <<<"$pkginfo"
+                grep -Fxq 'depend = gtk3' <<<"$pkginfo"
+                grep -Fxq 'depend = webkit2gtk-4.1' <<<"$pkginfo"
+                paths="${paths}"$'\n'"$arch_package"
               fi
               if [[ ",$package_formats," == *",appimage,"* ]]; then
                 appimage="desktop/build/releases/WhiteDNS-Desktop-${desktop_version}-${asset_platform}.AppImage"

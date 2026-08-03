@@ -51,22 +51,6 @@ type Options struct {
 	SystemProxyVerifyTimeout time.Duration
 }
 
-type XrayLaunchConfig struct {
-	ProfileID        string
-	Name             string
-	XrayConfig       string
-	CoreProtocol     string
-	SetSystemProxy   bool
-	PublicListenIP   string
-	PublicListenPort int
-	DebugLogs        bool
-	TunEnabled       bool
-	TunInterfaceName string
-	TunMTU           int
-	TunIPv6          bool
-	TunServerHost    string
-}
-
 type Manager struct {
 	options   Options
 	callbacks Callbacks
@@ -107,9 +91,6 @@ type activeProcess struct {
 	systemProxyGuard        systemProxyGuard
 	systemProxySnapshotFile string
 	systemProxyRestoreOnce  sync.Once
-	tunRouteGuard           tunRouteGuard
-	tunRouteSnapshotFile    string
-	tunRouteRestoreOnce     sync.Once
 	resolverStateCancel     context.CancelFunc
 	resolverStateDone       chan struct{}
 	resolverStateStopOnce   sync.Once
@@ -337,151 +318,6 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		return err
 	}
 	m.debugLogf(debugLogs, "Debug Desktop public proxy port is ready: %s:%d", publicListenIP, publicListenPort)
-	m.state(model.RuntimeConnected, "Proxy is connected")
-	return nil
-}
-
-func (m *Manager) StartXray(ctx context.Context, cfg XrayLaunchConfig) error {
-	if err := m.Stop(); err != nil {
-		return err
-	}
-	if strings.TrimSpace(cfg.XrayConfig) == "" {
-		return errors.New("xray config is required")
-	}
-	if cfg.PublicListenPort <= 0 {
-		return errors.New("V2Ray local proxy port is required")
-	}
-	if err := os.MkdirAll(m.options.RuntimeDir, 0o755); err != nil {
-		return err
-	}
-	if err := cleanupStaleLaunchFiles(m.options.RuntimeDir, m.options.XrayStopTimeout, m.log, m.options.SystemProxyPlatform, m.options.SystemProxyRunner); err != nil {
-		m.log(fmt.Sprintf("Runtime cleanup warning: %v", err))
-	}
-
-	binaryPath, err := m.resolveXrayBinary(ctx)
-	if err != nil {
-		return err
-	}
-	launchID := fmt.Sprintf("%d", time.Now().UnixNano())
-	configFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".xray.json")
-	if err := os.WriteFile(configFile, []byte(cfg.XrayConfig), 0o600); err != nil {
-		return err
-	}
-	m.log(fmt.Sprintf("V2Ray xray config written: path=%s bytes=%d", configFile, len(cfg.XrayConfig)))
-	m.debugLogf(cfg.DebugLogs, "Debug Desktop wrote V2Ray xray config: path=%s bytes=%d", configFile, len(cfg.XrayConfig))
-	if cfg.TunEnabled {
-		m.log("V2Ray TUN mode enabled; skipping xray config preflight because native TUN validation creates an OS interface")
-	} else if err := m.testXrayConfig(ctx, binaryPath, configFile); err != nil {
-		_ = os.Remove(configFile)
-		return err
-	}
-
-	tunRouteGuard, err := m.prepareTunRouteGuard(ctx, cfg, binaryPath)
-	if err != nil {
-		_ = os.Remove(configFile)
-		return err
-	}
-	tunRouteSnapshotFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".tun-routes.json")
-	if err := writeTunRouteSnapshotFile(tunRouteSnapshotFile, tunRouteGuard); err != nil {
-		_ = os.Remove(configFile)
-		return err
-	}
-
-	systemProxyEnabled := cfg.SetSystemProxy && !cfg.TunEnabled
-	if cfg.SetSystemProxy && cfg.TunEnabled {
-		m.log("System proxy skipped because V2Ray TUN mode is enabled")
-	}
-	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, systemProxyEnabled, cfg.CoreProtocol, cfg.PublicListenIP, cfg.PublicListenPort)
-	if err != nil {
-		restoreTunRouteGuardWithLog(tunRouteGuard, m.log)
-		_ = os.Remove(tunRouteSnapshotFile)
-		_ = os.Remove(configFile)
-		return err
-	}
-	systemProxySnapshotFile := filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".system-proxy.json")
-	if err := writeSystemProxySnapshotFile(systemProxySnapshotFile, systemProxyGuard); err != nil {
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		restoreTunRouteGuardWithLog(tunRouteGuard, m.log)
-		_ = os.Remove(tunRouteSnapshotFile)
-		_ = os.Remove(configFile)
-		return err
-	}
-	procCtx, cancel := context.WithCancel(context.Background())
-	cmd := exec.CommandContext(procCtx, binaryPath, "run", "-c", configFile)
-	hideConsoleWindow(cmd)
-	cmd.Dir = m.options.RuntimeDir
-	cmd.Env = xrayProcessEnv(binaryPath, m.xraySearchDirs())
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		cancel()
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		restoreTunRouteGuardWithLog(tunRouteGuard, m.log)
-		_ = os.Remove(systemProxySnapshotFile)
-		_ = os.Remove(tunRouteSnapshotFile)
-		_ = os.Remove(configFile)
-		return err
-	}
-	cmd.Stderr = cmd.Stdout
-
-	active := &activeProcess{
-		id:                      launchID,
-		debugLogs:               cfg.DebugLogs,
-		cancel:                  cancel,
-		xrayCmd:                 cmd,
-		xrayCancel:              cancel,
-		xrayConfigFile:          configFile,
-		xrayDone:                make(chan struct{}),
-		systemProxyGuard:        systemProxyGuard,
-		systemProxySnapshotFile: systemProxySnapshotFile,
-		tunRouteGuard:           tunRouteGuard,
-		tunRouteSnapshotFile:    tunRouteSnapshotFile,
-		done:                    make(chan struct{}),
-	}
-	m.mu.Lock()
-	m.active = active
-	m.mu.Unlock()
-
-	m.state(model.RuntimeConnecting, "Starting proxy")
-	if err := cmd.Start(); err != nil {
-		cancel()
-		m.restoreSystemProxyGuard(active)
-		m.restoreTunRouteGuard(active)
-		_ = os.Remove(systemProxySnapshotFile)
-		_ = os.Remove(tunRouteSnapshotFile)
-		m.mu.Lock()
-		if m.active == active {
-			m.active = nil
-		}
-		m.mu.Unlock()
-		_ = os.Remove(configFile)
-		return fmt.Errorf("failed to start xray: %w", err)
-	}
-	pidFile := filepath.Join(m.options.RuntimeDir, ".wd-"+active.id+".xray.pid")
-	if err := writePIDFile(pidFile, cmd.Process.Pid); err != nil {
-		m.log(fmt.Sprintf("Runtime cleanup warning: failed to write xray pid file: %v", err))
-	}
-	active.xrayPIDFile = pidFile
-	m.log(fmt.Sprintf("V2Ray xray process started: pid=%d listen=%s:%d", cmd.Process.Pid, cfg.PublicListenIP, cfg.PublicListenPort))
-	m.debugLogf(cfg.DebugLogs, "Debug Desktop V2Ray xray process started: pid=%d pid_file=%s", cmd.Process.Pid, pidFile)
-
-	m.startTrafficMonitor(active, cmd.Process.Pid)
-	go m.drainOutput(active, stdout)
-	go m.waitForXrayExit(active)
-
-	if err := m.waitForPort(ctx, cfg.PublicListenIP, cfg.PublicListenPort, active); err != nil {
-		_ = m.Stop()
-		return err
-	}
-	if err := m.applyTunRouteGuard(ctx, active); err != nil {
-		_ = m.Stop()
-		return err
-	}
-	if err := m.waitForSystemProxy(ctx, active, cfg.PublicListenIP, cfg.PublicListenPort); err != nil {
-		_ = m.Stop()
-		return err
-	}
-	m.log(fmt.Sprintf("V2Ray local proxy port is ready: %s:%d", cfg.PublicListenIP, cfg.PublicListenPort))
-	m.debugLogf(cfg.DebugLogs, "Debug Desktop V2Ray public proxy port is ready: %s:%d", cfg.PublicListenIP, cfg.PublicListenPort)
 	m.state(model.RuntimeConnected, "Proxy is connected")
 	return nil
 }
@@ -1451,7 +1287,6 @@ func (m *Manager) cleanup(active *activeProcess) {
 	m.stopMTUResolverStateMonitor(active)
 	m.stopTrafficMonitor(active)
 	m.restoreSystemProxyGuard(active)
-	m.restoreTunRouteGuard(active)
 	_ = os.Remove(active.configFile)
 	if active.resolversOwned {
 		_ = os.Remove(active.resolvers)
@@ -1462,7 +1297,6 @@ func (m *Manager) cleanup(active *activeProcess) {
 	_ = os.Remove(active.xrayConfigFile)
 	_ = os.Remove(active.xrayPIDFile)
 	_ = os.Remove(active.systemProxySnapshotFile)
-	_ = os.Remove(active.tunRouteSnapshotFile)
 }
 
 func (m *Manager) stopMTUResolverStateMonitor(active *activeProcess) {
@@ -1851,20 +1685,6 @@ func cleanupStaleLaunchFiles(runtimeDir string, stopTimeout time.Duration, log f
 			logRuntimeCleanup(log, fmt.Sprintf("Runtime cleanup warning: failed to restore stale system proxy snapshot %s: %v", path, err))
 		} else {
 			logRuntimeCleanup(log, "Runtime cleanup restored stale system proxy settings")
-		}
-	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasPrefix(entry.Name(), ".wd-") || !strings.HasSuffix(entry.Name(), ".tun-routes.json") {
-			continue
-		}
-		path := filepath.Join(runtimeDir, entry.Name())
-		restoreCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		err := restoreTunRouteSnapshotFile(restoreCtx, path, platform, runner)
-		cancel()
-		if err != nil {
-			logRuntimeCleanup(log, fmt.Sprintf("Runtime cleanup warning: failed to restore stale TUN routes %s: %v", path, err))
-		} else {
-			logRuntimeCleanup(log, "Runtime cleanup restored stale TUN routes")
 		}
 	}
 	for _, entry := range entries {

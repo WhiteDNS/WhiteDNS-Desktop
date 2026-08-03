@@ -53,9 +53,6 @@ type App struct {
 	parallelState              model.ParallelTestState
 	parallelCancel             context.CancelFunc
 	parallelRunID              int64
-	v2rayTestMu                sync.Mutex
-	v2rayTestCancel            context.CancelFunc
-	v2rayTestRunID             int64
 	validatorMu                sync.Mutex
 	validatorState             model.ValidatorState
 	validatorCancel            context.CancelFunc
@@ -162,7 +159,6 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) shutdown(ctx context.Context) {
 	_ = a.manager.Stop()
-	_ = a.CancelV2RayProfileTests()
 	_, _ = a.CancelParallelTest()
 	_, _ = a.CancelValidatorScan()
 	a.waitValidatorStopped(5 * time.Second)
@@ -770,12 +766,9 @@ func (a *App) ClearRuntimeLogsForType(runtimeType string) model.AppState {
 	switch normalizeRuntimeType(runtimeType) {
 	case model.RuntimeTypeMasterDNS:
 		a.state.Runtime.MasterDNSLogs = []string{}
-	case model.RuntimeTypeV2Ray:
-		a.state.Runtime.V2RayLogs = []string{}
 	default:
 		a.state.Runtime.Logs = []string{}
 		a.state.Runtime.MasterDNSLogs = []string{}
-		a.state.Runtime.V2RayLogs = []string{}
 	}
 	runtimeState := a.state.Runtime
 	next := a.state
@@ -1126,8 +1119,6 @@ func (a *App) handleRuntimeError(message string) {
 	message = brandDisplayText(strings.TrimSpace(message))
 	if strings.TrimSpace(message) != "" {
 		a.mu.Lock()
-		runtimeType := a.activeRuntimeTypeLocked()
-		message = redactRuntimeEndpointConfig(runtimeType, message)
 		if a.state.Runtime.Status != model.RuntimeDisconnected {
 			a.state.Runtime.Message = message
 			runtimeState := a.state.Runtime
@@ -1172,36 +1163,13 @@ func sanitizeRuntimeLogLine(runtimeType string, line string) string {
 	if line == "" {
 		return ""
 	}
-	return redactRuntimeEndpointConfig(runtimeType, line)
-}
-
-func redactRuntimeEndpointConfig(runtimeType string, line string) string {
-	if normalizeRuntimeType(runtimeType) != model.RuntimeTypeV2Ray {
-		return line
-	}
-	line = runtimeLogURLPattern.ReplaceAllString(line, "[redacted-url]")
-	line = runtimeLogConfigField.ReplaceAllStringFunc(line, func(match string) string {
-		if idx := strings.IndexByte(match, '='); idx >= 0 {
-			return match[:idx+1] + "[redacted]"
-		}
-		return "[redacted]"
-	})
-	line = runtimeLogIPv6Endpoint.ReplaceAllString(line, "[redacted-endpoint]")
-	line = runtimeLogIPv4Endpoint.ReplaceAllString(line, "[redacted-endpoint]")
-	line = runtimeLogDomainEndpoint.ReplaceAllString(line, "[redacted-endpoint]")
-	line = runtimeLogConnectionArrow.ReplaceAllString(line, "-> [redacted-endpoint]")
-	line = runtimeLogDialDestination.ReplaceAllString(line, "to [redacted-endpoint]")
-	line = runtimeLogListenDestination.ReplaceAllString(line, "listen=[redacted-endpoint]")
 	return line
 }
 
 func (a *App) appendRuntimeLogLocked(runtimeType string, line string) {
 	a.state.Runtime.Logs = appendRuntimeLog([]string{line}, a.state.Runtime.Logs...)
-	switch normalizeRuntimeType(runtimeType) {
-	case model.RuntimeTypeMasterDNS:
+	if normalizeRuntimeType(runtimeType) == model.RuntimeTypeMasterDNS {
 		a.state.Runtime.MasterDNSLogs = appendRuntimeLog([]string{line}, a.state.Runtime.MasterDNSLogs...)
-	case model.RuntimeTypeV2Ray:
-		a.state.Runtime.V2RayLogs = appendRuntimeLog([]string{line}, a.state.Runtime.V2RayLogs...)
 	}
 }
 
@@ -1221,9 +1189,6 @@ func (a *App) activeRuntimeTypeLocked() string {
 	if activeConnectionID == "" {
 		return ""
 	}
-	if activeRuntimeIsV2Ray(a.state, activeConnectionID) {
-		return model.RuntimeTypeV2Ray
-	}
 	for _, profile := range a.state.ConnectionProfiles {
 		if profile.ID == activeConnectionID {
 			return model.RuntimeTypeMasterDNS
@@ -1236,8 +1201,6 @@ func normalizeRuntimeType(runtimeType string) string {
 	switch strings.ToLower(strings.TrimSpace(runtimeType)) {
 	case model.RuntimeTypeMasterDNS:
 		return model.RuntimeTypeMasterDNS
-	case model.RuntimeTypeV2Ray:
-		return model.RuntimeTypeV2Ray
 	default:
 		return ""
 	}

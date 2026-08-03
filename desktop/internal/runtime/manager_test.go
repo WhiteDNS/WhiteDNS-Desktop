@@ -112,57 +112,6 @@ func TestManagerStartsFakeStormDNSAndStopsCleanly(t *testing.T) {
 	}
 }
 
-func TestManagerStartsXrayOnlyAndStopsCleanly(t *testing.T) {
-	tempDir := t.TempDir()
-	xray := buildFakeXrayHelper(t, tempDir)
-	publicPort := freePort(t)
-
-	var states []string
-	manager := NewManager(
-		Options{
-			RuntimeDir:     filepath.Join(tempDir, "runtime"),
-			XrayBinaryPath: xray,
-			StartTimeout:   5 * time.Second,
-			StopTimeout:    2 * time.Second,
-		},
-		Callbacks{
-			OnState: func(status string, _ string) { states = append(states, status) },
-		},
-	)
-
-	cfg := XrayLaunchConfig{
-		ProfileID:        "v2ray-1",
-		Name:             "V2Ray",
-		XrayConfig:       fmt.Sprintf(`{"inbounds":[{"listen":"127.0.0.1","port":%d}]}`, publicPort),
-		CoreProtocol:     "socks",
-		PublicListenIP:   "127.0.0.1",
-		PublicListenPort: publicPort,
-	}
-	if err := manager.StartXray(context.Background(), cfg); err != nil {
-		t.Fatal(err)
-	}
-	if !manager.IsRunning() {
-		t.Fatal("expected manager to be running")
-	}
-	manager.mu.Lock()
-	active := manager.active
-	hasMasterDNS := active.cmd != nil
-	hasXray := active.xrayCmd != nil && active.xrayCmd.Process != nil
-	manager.mu.Unlock()
-	if hasMasterDNS {
-		t.Fatal("V2Ray runtime should not start MasterDNS")
-	}
-	if !hasXray {
-		t.Fatal("expected xray process")
-	}
-	if err := manager.Stop(); err != nil {
-		t.Fatal(err)
-	}
-	if len(states) == 0 || states[len(states)-1] != model.RuntimeDisconnected {
-		t.Fatalf("expected final disconnected state, got %v", states)
-	}
-}
-
 func TestMasterDNSLaunchEnvAddsFullInitialMTUScanOnlyWhenRequested(t *testing.T) {
 	env := masterDNSLaunchEnv(storm.LaunchConfig{
 		FullInitialMTUScan: true,

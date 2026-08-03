@@ -16,21 +16,13 @@ import (
 )
 
 type fakeParallelRuntimeManager struct {
-	start     func(context.Context, storm.LaunchConfig) error
-	startXray func(context.Context, runtimemgr.XrayLaunchConfig) error
-	stop      func() error
+	start func(context.Context, storm.LaunchConfig) error
+	stop  func() error
 }
 
 func (m fakeParallelRuntimeManager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	if m.start != nil {
 		return m.start(ctx, cfg)
-	}
-	return nil
-}
-
-func (m fakeParallelRuntimeManager) StartXray(ctx context.Context, cfg runtimemgr.XrayLaunchConfig) error {
-	if m.startXray != nil {
-		return m.startXray(ctx, cfg)
 	}
 	return nil
 }

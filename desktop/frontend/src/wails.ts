@@ -17,15 +17,6 @@ import type {
   ScannerStartRequest,
   ScannerState,
   SettingsProfile,
-  V2RayDuplicateRemovalResult,
-  V2RayWhiteIPGenerateResult,
-  V2RayImportResult,
-  V2RayPingResult,
-  V2RayProfile,
-  V2RaySettingsProfile,
-  V2RaySubscription,
-  V2RaySubscriptionRefreshResult,
-  V2RayWhiteIPImportResult,
   ValidatorRangeOption,
   ValidatorRangeImportResult,
   ValidatorRangeRequest,
@@ -54,32 +45,6 @@ type AppApi = {
   TestConnectionProfile(profile: ConnectionProfile, trustedResolvers: ConnectionTestResolver[]): Promise<ConnectionTestResult>;
   SelectConnectionProfile(id: string): Promise<AppState>;
   ReorderConnectionProfiles(ids: string[]): Promise<AppState>;
-  SaveV2RayProfile(profile: V2RayProfile): Promise<AppState>;
-  ImportV2RayProfiles(rawText: string): Promise<V2RayImportResult>;
-  GetDefaultWhiteIPList(): Promise<string>;
-  GenerateV2RayWhiteIPProfiles(configText: string, whiteIPText: string): Promise<V2RayWhiteIPGenerateResult>;
-  ImportV2RayWhiteIPProfiles(configText: string, whiteIPText: string): Promise<V2RayWhiteIPImportResult>;
-  SaveV2RaySubscription(subscription: V2RaySubscription): Promise<AppState>;
-  RefreshV2RaySubscription(id: string): Promise<V2RaySubscriptionRefreshResult>;
-  DeleteV2RaySubscription(id: string): Promise<AppState>;
-  ExportV2RayProfileLink(profile: V2RayProfile): Promise<string>;
-  ExportAllV2RayProfileLinks(): Promise<string>;
-  DeleteV2RayProfile(id: string): Promise<AppState>;
-  DeleteV2RayProfiles(ids: string[]): Promise<AppState>;
-  SelectV2RayProfile(id: string): Promise<AppState>;
-  ReorderV2RayProfiles(ids: string[]): Promise<AppState>;
-  PingV2RayProfiles(): Promise<V2RayPingResult[]>;
-  PingV2RayProfileIDs(ids: string[]): Promise<V2RayPingResult[]>;
-  PingV2RayProfile(profile: V2RayProfile): Promise<V2RayPingResult>;
-  SpeedTestV2RayProfileIDs(ids: string[]): Promise<V2RayPingResult[]>;
-  RealDelayV2RayProfileIDs(ids: string[]): Promise<V2RayPingResult[]>;
-  CancelV2RayProfileTests(): Promise<void>;
-  DeleteDuplicateV2RayProfiles(): Promise<V2RayDuplicateRemovalResult>;
-  SaveV2RaySettingsProfile(profile: V2RaySettingsProfile): Promise<AppState>;
-  DeleteV2RaySettingsProfile(id: string): Promise<AppState>;
-  SelectV2RaySettingsProfile(id: string): Promise<AppState>;
-  ReorderV2RaySettingsProfiles(ids: string[]): Promise<AppState>;
-  GetDefaultV2RaySettingsProfile(): Promise<V2RaySettingsProfile>;
   SaveResolverProfile(profile: ResolverProfile): Promise<AppState>;
   SaveResolverProfileSnapshot(profile: ResolverProfile): Promise<AppState>;
   ImportResolverProfileFile(): Promise<ResolverImportResult>;
@@ -95,10 +60,6 @@ type AppApi = {
   GetDefaultSettingsProfile(): Promise<SettingsProfile>;
   ValidateResolverText(rawText: string): Promise<ResolverTextValidation>;
   StartConnection(): Promise<AppState>;
-  StartWhiteDNSVPNConnection(): Promise<AppState>;
-  RefreshWhiteDNSVPNConnection(): Promise<AppState>;
-  SaveWhiteDNSVPNFrontingIPs(rawText: string): Promise<AppState>;
-  StartV2RayConnection(): Promise<AppState>;
   StopConnection(): Promise<AppState>;
   ClearRuntimeLogs(): Promise<AppState>;
   ClearRuntimeLogsForType(runtimeType: RuntimeType): Promise<AppState>;
@@ -180,32 +141,6 @@ export const backend = {
   testConnectionProfile: (profile: ConnectionProfile, trustedResolvers: ConnectionTestResolver[]) => app().TestConnectionProfile(profile, trustedResolvers),
   selectConnectionProfile: (id: string) => app().SelectConnectionProfile(id),
   reorderConnectionProfiles: (ids: string[]) => app().ReorderConnectionProfiles(ids),
-  saveV2RayProfile: (profile: V2RayProfile) => app().SaveV2RayProfile(profile),
-  importV2RayProfiles: (rawText: string) => app().ImportV2RayProfiles(rawText),
-  getDefaultWhiteIPList: () => app().GetDefaultWhiteIPList(),
-  generateV2RayWhiteIpProfiles: (configText: string, whiteIPText: string) => app().GenerateV2RayWhiteIPProfiles(configText, whiteIPText),
-  importV2RayWhiteIpProfiles: (configText: string, whiteIPText: string) => app().ImportV2RayWhiteIPProfiles(configText, whiteIPText),
-  saveV2RaySubscription: (subscription: V2RaySubscription) => app().SaveV2RaySubscription(subscription),
-  refreshV2RaySubscription: (id: string) => app().RefreshV2RaySubscription(id),
-  deleteV2RaySubscription: (id: string) => app().DeleteV2RaySubscription(id),
-  exportV2RayProfileLink: (profile: V2RayProfile) => app().ExportV2RayProfileLink(profile),
-  exportAllV2RayProfileLinks: () => app().ExportAllV2RayProfileLinks(),
-  deleteV2RayProfile: (id: string) => app().DeleteV2RayProfile(id),
-  deleteV2RayProfiles: (ids: string[]) => app().DeleteV2RayProfiles(ids),
-  selectV2RayProfile: (id: string) => app().SelectV2RayProfile(id),
-  reorderV2RayProfiles: (ids: string[]) => app().ReorderV2RayProfiles(ids),
-  pingV2RayProfiles: () => app().PingV2RayProfiles(),
-  pingV2RayProfileIds: (ids: string[]) => app().PingV2RayProfileIDs(ids),
-  pingV2RayProfile: (profile: V2RayProfile) => app().PingV2RayProfile(profile),
-  speedTestV2RayProfileIds: (ids: string[]) => app().SpeedTestV2RayProfileIDs(ids),
-  realDelayV2RayProfileIds: (ids: string[]) => app().RealDelayV2RayProfileIDs(ids),
-  cancelV2RayProfileTests: () => app().CancelV2RayProfileTests(),
-  deleteDuplicateV2RayProfiles: () => app().DeleteDuplicateV2RayProfiles(),
-  saveV2RaySettingsProfile: (profile: V2RaySettingsProfile) => app().SaveV2RaySettingsProfile(profile),
-  deleteV2RaySettingsProfile: (id: string) => app().DeleteV2RaySettingsProfile(id),
-  selectV2RaySettingsProfile: (id: string) => app().SelectV2RaySettingsProfile(id),
-  reorderV2RaySettingsProfiles: (ids: string[]) => app().ReorderV2RaySettingsProfiles(ids),
-  getDefaultV2RaySettingsProfile: () => app().GetDefaultV2RaySettingsProfile(),
   saveResolverProfile: (profile: ResolverProfile) => app().SaveResolverProfile(profile),
   saveResolverProfileSnapshot: (profile: ResolverProfile) => app().SaveResolverProfileSnapshot(profile),
   importResolverProfileFile: () => app().ImportResolverProfileFile(),
@@ -221,10 +156,6 @@ export const backend = {
   getDefaultSettingsProfile: () => app().GetDefaultSettingsProfile(),
   validateResolverText: (rawText: string) => app().ValidateResolverText(rawText),
   startConnection: () => app().StartConnection(),
-  startWhiteDNSVPNConnection: () => app().StartWhiteDNSVPNConnection(),
-  refreshWhiteDNSVPNConnection: () => app().RefreshWhiteDNSVPNConnection(),
-  saveWhiteDNSVPNFrontingIps: (rawText: string) => app().SaveWhiteDNSVPNFrontingIPs(rawText),
-  startV2RayConnection: () => app().StartV2RayConnection(),
   stopConnection: () => app().StopConnection(),
   clearRuntimeLogs: (runtimeType: RuntimeType = "") => app().ClearRuntimeLogsForType(runtimeType),
   saveRuntimeLogs: (rawText: string) => app().SaveRuntimeLogs(rawText),

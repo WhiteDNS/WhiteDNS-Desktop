@@ -43,7 +43,6 @@ const (
 
 type parallelRuntimeManager interface {
 	Start(context.Context, storm.LaunchConfig) error
-	StartXray(context.Context, runtimemgr.XrayLaunchConfig) error
 	Stop() error
 }
 

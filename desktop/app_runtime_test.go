@@ -4,7 +4,6 @@ import (
 	"context"
 	"path/filepath"
 	"reflect"
-	"strings"
 	"testing"
 
 	"whitedns-desktop/internal/model"
@@ -123,60 +122,33 @@ func TestHandleLogSplitsRuntimeLogsByRuntimeType(t *testing.T) {
 	app := &App{state: model.DefaultAppState()}
 	app.state.Runtime.Logs = nil
 	app.state.Runtime.MasterDNSLogs = nil
-	app.state.Runtime.V2RayLogs = nil
 
 	app.state.Runtime.RuntimeType = model.RuntimeTypeMasterDNS
 	app.handleLog("masterdns log")
-	app.state.Runtime.RuntimeType = model.RuntimeTypeV2Ray
-	app.handleLog("v2ray log")
+	app.state.Runtime.RuntimeType = ""
+	app.handleLog("untyped log")
 
 	runtimeState := app.GetAppState().Runtime
 	if !reflect.DeepEqual(runtimeState.MasterDNSLogs, []string{"masterdns log"}) {
 		t.Fatalf("unexpected MasterDNS logs: %#v", runtimeState.MasterDNSLogs)
 	}
-	if !reflect.DeepEqual(runtimeState.V2RayLogs, []string{"v2ray log"}) {
-		t.Fatalf("unexpected V2Ray logs: %#v", runtimeState.V2RayLogs)
-	}
-	if !reflect.DeepEqual(runtimeState.Logs, []string{"v2ray log", "masterdns log"}) {
+	if !reflect.DeepEqual(runtimeState.Logs, []string{"untyped log", "masterdns log"}) {
 		t.Fatalf("unexpected combined logs: %#v", runtimeState.Logs)
-	}
-}
-
-func TestHandleLogRedactsV2RayEndpointConfig(t *testing.T) {
-	app := &App{state: model.DefaultAppState()}
-	app.state.Runtime.RuntimeType = model.RuntimeTypeV2Ray
-	app.state.Runtime.Logs = nil
-	app.state.Runtime.V2RayLogs = nil
-
-	app.handleLog(`transport/internet/websocket: failed to dial to 108.162.192.75:443 > read tcp 192.168.0.141:14492->108.162.192.75:443 host_header="origin.example.com" tls_server_name="origin.example.com" request_path="/secret" GET https://edge.example.com:443/path`)
-
-	got := app.GetAppState().Runtime.V2RayLogs[0]
-	for _, secret := range []string{"108.162.192.75", "192.168.0.141", "origin.example.com", "/secret", "edge.example.com"} {
-		if strings.Contains(got, secret) {
-			t.Fatalf("expected endpoint config to be redacted, got %q", got)
-		}
-	}
-	if !strings.Contains(got, "[redacted") {
-		t.Fatalf("expected redaction marker, got %q", got)
 	}
 }
 
 func TestClearRuntimeLogsForTypeOnlyClearsSelectedBuffer(t *testing.T) {
 	app := &App{state: model.DefaultAppState()}
-	app.state.Runtime.Logs = []string{"v2ray log", "masterdns log"}
+	app.state.Runtime.Logs = []string{"untyped log", "masterdns log"}
 	app.state.Runtime.MasterDNSLogs = []string{"masterdns log"}
-	app.state.Runtime.V2RayLogs = []string{"v2ray log"}
 
-	app.ClearRuntimeLogsForType(model.RuntimeTypeV2Ray)
+	app.ClearRuntimeLogsForType(model.RuntimeTypeMasterDNS)
 	runtimeState := app.GetAppState().Runtime
 
-	if len(runtimeState.V2RayLogs) != 0 {
-		t.Fatalf("expected V2Ray logs to be cleared, got %#v", runtimeState.V2RayLogs)
+	if len(runtimeState.MasterDNSLogs) != 0 {
+		t.Fatalf("expected MasterDNS logs to be cleared, got %#v", runtimeState.MasterDNSLogs)
 	}
-	if !reflect.DeepEqual(runtimeState.MasterDNSLogs, []string{"masterdns log"}) {
-		t.Fatalf("expected MasterDNS logs to remain, got %#v", runtimeState.MasterDNSLogs)
-	}
-	if !reflect.DeepEqual(runtimeState.Logs, []string{"v2ray log", "masterdns log"}) {
+	if !reflect.DeepEqual(runtimeState.Logs, []string{"untyped log", "masterdns log"}) {
 		t.Fatalf("expected combined logs to remain, got %#v", runtimeState.Logs)
 	}
 }

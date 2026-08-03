@@ -1576,7 +1576,7 @@ function AppSidebar({
             </div>
             <div className="min-w-0 group-data-[collapsible=icon]:hidden">
               <div className="truncate text-sm leading-snug font-medium">WhiteDNS</div>
-              <p className="truncate text-sm leading-normal text-muted-foreground">v1.0.0-beta6</p>
+              <p className="truncate text-sm leading-normal text-muted-foreground">v1.0.0</p>
             </div>
           </div>
           <ThemeSettingsMenu

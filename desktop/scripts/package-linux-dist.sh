@@ -3,7 +3,7 @@ set -eu
 
 app_name="${APP_NAME:-WhiteDNS Desktop}"
 package_name="${LINUX_PACKAGE_NAME:-whitedns-desktop}"
-version="${VERSION:-${APP_VERSION:-1.0.0-beta6}}"
+version="${VERSION:-${APP_VERSION:-1.0.0}}"
 source_dir="${PACKAGE_SOURCE_DIR:-build/bin}"
 output_dir="${PACKAGE_OUTPUT_DIR:-build/releases}"
 arch="${LINUX_ARCH:-$(go env GOARCH)}"

@@ -4,7 +4,7 @@ set -eu
 docker_bin="${LINUX_DOCKER:-docker}"
 image="${FEDORA_DOCKER_IMAGE:-fedora:44}"
 target_arch="${LINUX_CLIENT_ARCH:-amd64}"
-version="${VERSION:-1.0.0-beta6}"
+version="${VERSION:-1.0.0}"
 release_ldflags="${RELEASE_LDFLAGS:--s -w}"
 helper_ldflags="${HELPER_GO_LDFLAGS:-$release_ldflags}"
 upx="${UPX:-0}"

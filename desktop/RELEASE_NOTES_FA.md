@@ -1,4 +1,4 @@
-# یادداشت انتشار WhiteDNS Desktop 1.0.0-beta6
+# یادداشت انتشار WhiteDNS Desktop 1.0.0
 
 WhiteDNS Desktop نسخه دسکتاپ WhiteDNS است؛ یک برنامه ساده برای راه‌اندازی اتصال MasterDNS/StormDNS از روی کامپیوتر، بدون نیاز به کار مستقیم با فایل‌های پیچیده و دستورهای ترمینال.
 

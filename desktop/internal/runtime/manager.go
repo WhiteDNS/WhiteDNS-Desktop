@@ -158,12 +158,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		masterSettings = cfg.Settings
 	}
 	debugLogs := masterDNSDebugLogsEnabled(masterSettings)
-	publicListenIP := cfg.PublicListenIP
-	publicListenPort := cfg.PublicListenPort
-	if publicListenPort == 0 {
-		publicListenIP = cfg.Settings.ListenIP
-		publicListenPort = cfg.Settings.ListenPort
-	}
+	publicListenIP, publicListenPort := publicListenTarget(cfg)
 	if strings.TrimSpace(cfg.CoreConfig) == "" {
 		return errors.New("xray config is required")
 	}
@@ -604,7 +599,8 @@ func (m *Manager) startXray(ctx context.Context, cfg storm.LaunchConfig, active 
 		return err
 	}
 
-	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, cfg.SetSystemProxy, cfg.CoreProtocol, cfg.PublicListenIP, cfg.PublicListenPort)
+	publicListenIP, publicListenPort := publicListenTarget(cfg)
+	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, cfg.SetSystemProxy, cfg.CoreProtocol, publicListenIP, publicListenPort)
 	if err != nil {
 		_ = os.Remove(configFile)
 		return err
@@ -1465,6 +1461,10 @@ func (m *Manager) stopXray(active *activeProcess) {
 	if active.xrayCmd == nil || active.xrayCmd.Process == nil || active.xrayDone == nil {
 		return
 	}
+	// ponytail: os.Interrupt always fails on Windows, so every child is force
+	// killed there instead of shutting down cleanly. Fixing it needs the child
+	// side to cooperate (a stop file or a shared console group); revisit if
+	// servers start seeing stale sessions from Windows clients.
 	m.log("Stopping xray gracefully")
 	if err := active.xrayCmd.Process.Signal(os.Interrupt); err != nil {
 		m.log(fmt.Sprintf("xray graceful stop failed, forcing termination: %v", err))
@@ -1806,6 +1806,13 @@ func appendBaseCandidates(values []string, candidates ...string) []string {
 		values = appendUnique(values, candidate)
 	}
 	return values
+}
+
+func publicListenTarget(cfg storm.LaunchConfig) (string, int) {
+	if cfg.PublicListenPort == 0 {
+		return cfg.Settings.ListenIP, cfg.Settings.ListenPort
+	}
+	return cfg.PublicListenIP, cfg.PublicListenPort
 }
 
 func writePIDFile(path string, pid int) error {

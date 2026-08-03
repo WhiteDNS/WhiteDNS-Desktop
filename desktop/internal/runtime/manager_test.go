@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -569,7 +570,9 @@ func TestManagerRuntimeConfigForcesAndPurgesMTUResolverStateFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	configText := string(rawConfig)
-	if !strings.Contains(configText, `SAVE_MTU_SERVERS_TO_FILE = true`) || !strings.Contains(configText, stateFile) {
+	// The path is TOML-escaped in the rendered config, which matters on Windows.
+	escapedStateFile := strings.ReplaceAll(stateFile, `\`, `\\`)
+	if !strings.Contains(configText, `SAVE_MTU_SERVERS_TO_FILE = true`) || !strings.Contains(configText, escapedStateFile) {
 		t.Fatalf("runtime config did not force app-owned MTU resolver state file %q:\n%s", stateFile, configText)
 	}
 	if err := os.WriteFile(stateFile, []byte("WHITEDNS_MTU_STATE event=valid resolver=1.1.1.1\n"), 0o600); err != nil {
@@ -683,6 +686,9 @@ func TestManagerFindsPrebuiltClientInClientsDir(t *testing.T) {
 }
 
 func TestManagerFindsPrebuiltClientFromEnvDir(t *testing.T) {
+	if goruntime.GOOS == "windows" {
+		t.Skip("executable permission bits do not exist on Windows")
+	}
 	tempDir := t.TempDir()
 	clientsDir := filepath.Join(tempDir, "external-clients")
 	if err := os.MkdirAll(clientsDir, 0o755); err != nil {
@@ -1016,6 +1022,7 @@ func TestCleanupStaleLaunchFilesPurgesRuntimeFiles(t *testing.T) {
 }
 
 func TestStopXrayWaitsForGracefulExit(t *testing.T) {
+	skipIfNoGracefulSignal(t)
 	tempDir := t.TempDir()
 	helper := buildFakeGracefulStopHelper(t, tempDir)
 	readyFile := filepath.Join(tempDir, "ready")
@@ -1052,7 +1059,18 @@ func TestStopXrayWaitsForGracefulExit(t *testing.T) {
 	}
 }
 
+// skipIfNoGracefulSignal skips tests that assert a child process is asked to
+// exit before it is killed. Windows has no such signal, so the manager force
+// kills there; see the ponytail comment on stopXray.
+func skipIfNoGracefulSignal(t *testing.T) {
+	t.Helper()
+	if goruntime.GOOS == "windows" {
+		t.Skip("Windows has no graceful process signal; the manager force kills instead")
+	}
+}
+
 func TestCleanupStaleLaunchFilesWaitsBeforeForceKill(t *testing.T) {
+	skipIfNoGracefulSignal(t)
 	tempDir := t.TempDir()
 	helper := buildFakeGracefulStopHelper(t, tempDir)
 	readyFile := filepath.Join(tempDir, "ready")

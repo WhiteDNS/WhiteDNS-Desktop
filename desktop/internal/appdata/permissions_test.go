@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os/exec"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"testing"
 )
@@ -28,6 +29,13 @@ func TestEnsureAppDataWritableSkipsRepairWhenWritable(t *testing.T) {
 }
 
 func TestEnsureAppDataWritableRepairsDarwinWithAdministratorPrompt(t *testing.T) {
+	// The repair script is wrapped in strconv.Quote and the directory is cleaned
+	// with filepath, so on a Windows test run the path arrives backslashed and
+	// then backslash-escaped. The assertion can only hold where the separator is
+	// "/".
+	if goruntime.GOOS == "windows" {
+		t.Skip("macOS repair command cannot be asserted from a Windows path separator")
+	}
 	runner := &fakeRunner{}
 	dir := filepath.Join(t.TempDir(), "WhiteDNS Desktop")
 

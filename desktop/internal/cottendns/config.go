@@ -76,6 +76,22 @@ var runtimeFallbacks = []struct {
 	// processor serialises on fragmentstore's single global mutex and
 	// RX_TX_WORKERS opens one UDP socket each.
 	{"RX_CHANNEL_SIZE", 4096},
+	// The deployed server is tuned for a 400ms base RTT with 100ms jitter, and
+	// the client has to agree with it. A 0.45s retransmit timeout, which is what
+	// the speed preset asks for, expires before an ACK can physically arrive on
+	// such a link, so almost every packet is resent at least once; the
+	// duplicates add delay, which expires more timers, and the tunnel grinds to
+	// a halt while reporting no loss. These mirror the server's own ARQ block.
+	{"ARQ_INITIAL_RTO_SECONDS", 1.0},
+	{"ARQ_MAX_RTO_SECONDS", 4.0},
+	{"ARQ_DATA_NACK_INITIAL_DELAY_SECONDS", 0.3},
+	{"ARQ_DATA_NACK_REPEAT_SECONDS", 0.8},
+	{"ARQ_DATA_NACK_MAX_GAP", 64},
+	// A high-RTT path needs a deep in-flight window to stay full. Unlike the
+	// packet queues, this is bounded by the ARQ itself rather than by a channel
+	// in front of it, so it does not feed the retransmit loop above.
+	{"ARQ_WINDOW_SIZE", 4096},
+	{"MAX_PACKETS_PER_BATCH", 32},
 }
 
 type OptionChoice struct {

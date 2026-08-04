@@ -3035,6 +3035,8 @@ function ConnectionsPage({
   const [exportTitle, setExportTitle] = useState("Export Connections");
   const [testRunning, setTestRunning] = useState(false);
   const [deleteDisabledRunning, setDeleteDisabledRunning] = useState(false);
+  const [selectedForDeletion, setSelectedForDeletion] = useState<string[]>([]);
+  const [deleteSelectedRunning, setDeleteSelectedRunning] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
   const [testScanningIds, setTestScanningIds] = useState<Record<string, boolean>>({});
   const [testCheckedAt, setTestCheckedAt] = useState<Record<string, number>>({});
@@ -3059,6 +3061,20 @@ function ConnectionsPage({
     () => filterConnectionProfiles(state.connectionProfiles, testResults, testScanningIds, profileFilter),
     [profileFilter, state.connectionProfiles, testResults, testScanningIds]
   );
+  const someFilteredSelected = filteredConnectionProfiles.some((profile) => selectedForDeletion.includes(profile.id));
+  const allFilteredSelected =
+    filteredConnectionProfiles.length > 0 &&
+    filteredConnectionProfiles.every((profile) => selectedForDeletion.includes(profile.id));
+
+  // A profile deleted elsewhere, or hidden by a filter change, must not stay
+  // selected and silently widen the next delete.
+  useEffect(() => {
+    setSelectedForDeletion((current) => {
+      const live = new Set(state.connectionProfiles.map((profile) => profile.id));
+      const next = current.filter((id) => live.has(id));
+      return next.length === current.length ? current : next;
+    });
+  }, [state.connectionProfiles]);
 
   useEffect(() => {
     if (!editorOpen) {
@@ -3238,6 +3254,49 @@ function ConnectionsPage({
     }
   }
 
+  function toggleProfileSelected(id: string) {
+    setSelectedForDeletion((current) =>
+      current.includes(id) ? current.filter((candidate) => candidate !== id) : [...current, id],
+    );
+  }
+
+  function toggleSelectAllShown() {
+    setSelectedForDeletion((current) => {
+      const shown = filteredConnectionProfiles.map((profile) => profile.id);
+      const everyShownSelected = shown.length > 0 && shown.every((id) => current.includes(id));
+      if (everyShownSelected) {
+        return current.filter((id) => !shown.includes(id));
+      }
+      return Array.from(new Set([...current, ...shown]));
+    });
+  }
+
+  async function deleteSelectedConnections() {
+    if (!selectedForDeletion.length) {
+      return;
+    }
+    onError("");
+    setDeleteSelectedRunning(true);
+    try {
+      const count = selectedForDeletion.length;
+      const nextState = await backend.deleteConnectionProfiles(selectedForDeletion);
+      onState(nextState);
+      setSelectedForDeletion([]);
+      onSuccess(`Deleted ${count} connection profile${count === 1 ? "" : "s"}.`);
+      const remainingIds = new Set(nextState.connectionProfiles.map((profile) => profile.id));
+      setTestResults((current) => Object.fromEntries(Object.entries(current).filter(([id]) => remainingIds.has(id))));
+      setTestScanningIds((current) => Object.fromEntries(Object.entries(current).filter(([id]) => remainingIds.has(id))));
+      setTestCheckedAt((current) => Object.fromEntries(Object.entries(current).filter(([id]) => remainingIds.has(id))));
+      if (!remainingIds.has(draft.id)) {
+        setDraft(effectiveConnectionProfile(nextState) || nextState.connectionProfiles[0]);
+      }
+    } catch (err) {
+      onError(messageFromError(err));
+    } finally {
+      setDeleteSelectedRunning(false);
+    }
+  }
+
   async function deleteDisabledConnections() {
     if (!deletableDisabledProfiles.length) {
       return;
@@ -3278,7 +3337,7 @@ function ConnectionsPage({
               Export all
             </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)}>
-              <Upload />
+              <Download />
               Import
             </Button>
             <Button variant="outline" onClick={openNewConnectionProfile}>
@@ -3338,6 +3397,24 @@ function ConnectionsPage({
                 </TooltipTrigger>
                 <TooltipContent>Delete profiles that failed the latest test</TooltipContent>
               </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={!selectedForDeletion.length || deleteSelectedRunning || testRunning || runtimeBusy}
+                    onClick={deleteSelectedConnections}
+                    aria-label="Delete selected connections"
+                  >
+                    <Trash2 className="size-3.5" />
+                    <span className="hidden sm:inline">
+                      {selectedForDeletion.length ? `Delete ${selectedForDeletion.length} selected` : "Delete selected"}
+                    </span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Delete the profiles you ticked</TooltipContent>
+              </Tooltip>
             </div>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 border-b bg-background/50 px-3 py-2">
@@ -3365,7 +3442,8 @@ function ConnectionsPage({
           <div className="overflow-x-auto">
             <table className="w-full min-w-[860px] table-fixed text-left">
               <colgroup>
-                <col className="w-[35%]" />
+                <col className="w-[4%]" />
+                <col className="w-[31%]" />
                 <col className="w-[25%]" />
                 <col className="w-[20%]" />
                 <col className="w-[15%]" />
@@ -3373,6 +3451,20 @@ function ConnectionsPage({
               </colgroup>
               <thead className="sticky top-0 z-10 border-b bg-muted/50 backdrop-blur-sm text-xs uppercase text-muted-foreground shadow-sm">
                 <tr>
+                  <th className="px-3 py-2 font-medium">
+                    <input
+                      type="checkbox"
+                      className="size-4 cursor-pointer align-middle accent-primary"
+                      aria-label={allFilteredSelected ? "Clear selection" : "Select all shown"}
+                      checked={allFilteredSelected}
+                      ref={(node) => {
+                        if (node) {
+                          node.indeterminate = someFilteredSelected && !allFilteredSelected;
+                        }
+                      }}
+                      onChange={toggleSelectAllShown}
+                    />
+                  </th>
                   <th className="px-3 py-2 font-medium">Profile</th>
                   <th className="px-3 py-2 font-medium">Domain</th>
                   <th className="px-3 py-2 font-medium">Resolver</th>
@@ -3407,6 +3499,15 @@ function ConnectionsPage({
                         }
                       }}
                     >
+                      <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
+                        <input
+                          type="checkbox"
+                          className="size-4 cursor-pointer align-middle accent-primary"
+                          aria-label={`Select ${profile.name || "connection"}`}
+                          checked={selectedForDeletion.includes(profile.id)}
+                          onChange={() => toggleProfileSelected(profile.id)}
+                        />
+                      </td>
                       <td className="min-w-0 px-3 py-2.5">
                         <div className="flex min-w-0 items-center gap-2">
                           <span className="truncate font-medium">{profile.name || "Connection"}</span>
@@ -3574,7 +3675,7 @@ function ConnectionsPage({
               Cancel
             </Button>
             <Button disabled={importDisabled} onClick={importProfiles}>
-              <Upload />
+              <Download />
               Import
             </Button>
           </DialogFooter>
@@ -3856,7 +3957,7 @@ function ResolversPage({
         actions={
           <>
             <Button variant="outline" onClick={importResolverFile}>
-              <Upload />
+              <Download />
               Import file
             </Button>
             <Button variant="outline" onClick={openNewResolverProfile}>
@@ -4213,7 +4314,7 @@ function SettingsPage({
               Export TOML
             </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)}>
-              <Upload />
+              <Download />
               Import
             </Button>
             <Button variant="outline" onClick={openNewSettingsProfile}>
@@ -4395,7 +4496,7 @@ function SettingsPage({
               Cancel
             </Button>
             <Button disabled={importDisabled} onClick={importToml}>
-              <Upload />
+              <Download />
               Import
             </Button>
           </DialogFooter>
@@ -4512,7 +4613,7 @@ function FullBackupPage({
               Cancel
             </Button>
             <Button disabled={restoreDisabled} onClick={restoreBackup}>
-              <Upload />
+              <Download />
               Restore
             </Button>
           </DialogFooter>
@@ -4544,7 +4645,7 @@ function BackupRestoreSection({
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Connections, resolvers, engine settings, selected profiles, and saved secrets.</p>
         </div>
         <Button type="button" className="w-full" disabled={exporting} onClick={onExportBackup}>
-          <Download />
+          <Upload />
           {exporting ? "Preparing backup…" : "Save backup file"}
         </Button>
       </div>
@@ -4557,7 +4658,7 @@ function BackupRestoreSection({
           <p className="mt-1 text-sm leading-relaxed text-muted-foreground">Replace saved profiles from a WhiteDNS backup. Disconnect before restoring.</p>
         </div>
         <Button type="button" variant="outline" className="w-full" disabled={restoreLocked} onClick={onOpenRestore}>
-          <Upload />
+          <Download />
           {restoreLocked ? "Disconnect to restore" : "Restore backup"}
         </Button>
       </div>
@@ -5271,7 +5372,7 @@ function ScannerPage({
       actions={
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" disabled={running} onClick={chooseFile}>
-            <Upload />
+            <Download />
             File
           </Button>
           <Button variant="outline" disabled={!running} onClick={pauseOrResume}>
@@ -6177,7 +6278,7 @@ function LogsPage({
             Copy logs
           </Button>
           <Button type="button" variant="outline" onClick={saveLogsFile} disabled={!logs.length}>
-            <Download />
+            <Upload />
             Save log
           </Button>
           <Button type="button" variant="outline" onClick={clearLogs} disabled={!runtimeLogs.length}>

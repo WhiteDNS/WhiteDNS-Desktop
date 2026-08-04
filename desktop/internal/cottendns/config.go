@@ -63,14 +63,19 @@ var runtimeFallbacks = []struct {
 	// 2048 is sized for a phone; a desktop pulling 1080p video fills it in about
 	// a minute, and 480p in several.
 	//
-	// Only the receive side is widened. Raising TX_CHANNEL_SIZE deepens the send
-	// queue in front of the ARQ, inflating the RTT samples it derives its RTO
-	// from, which buys spurious retransmits. Raising the worker counts was worse
-	// still: every processor serialises on fragmentstore's single global mutex,
-	// so more of them contend rather than drain, and RX_TX_WORKERS additionally
-	// opens one UDP socket each, doubling the NAT mappings a home router has to
-	// hold. Both were tried in 1.1.2 and reported as slower.
-	{"RX_CHANNEL_SIZE", 8192},
+	// 4096 is what the MasterDNS engine ships and streams 1080p on, so it is a
+	// measured value rather than one derived from a bitrate estimate.
+	//
+	// Only the receive side is widened. 1.1.2 also raised TX_CHANNEL_SIZE to
+	// 8192 and both worker counts to 8, and was reported not as lossy but as
+	// collapsing to a standstill. Deep queues in front of the ARQ are how that
+	// happens: a packet can sit queued longer than the retransmit timeout, so
+	// the ARQ resends it, which lengthens the same queue and expires more
+	// timers. Nothing reports a full queue because it is draining, just
+	// uselessly. The worker counts were their own problem, since every
+	// processor serialises on fragmentstore's single global mutex and
+	// RX_TX_WORKERS opens one UDP socket each.
+	{"RX_CHANNEL_SIZE", 4096},
 }
 
 type OptionChoice struct {

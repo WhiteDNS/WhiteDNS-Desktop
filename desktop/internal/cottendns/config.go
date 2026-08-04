@@ -92,6 +92,19 @@ var runtimeFallbacks = []struct {
 	// in front of it, so it does not feed the retransmit loop above.
 	{"ARQ_WINDOW_SIZE", 4096},
 	{"MAX_PACKETS_PER_BATCH", 32},
+	// Session churn is what turns a slow link into "server is overloaded". The
+	// speed preset drops the ping watchdog to 20s, so on a 400ms path any stall
+	// past twenty seconds tears the session down and starts another. The server
+	// then holds the abandoned one for its full SESSION_TIMEOUT_SECONDS, and
+	// with a 2048 session table those slots run out, at which point the server
+	// answers SESSION_BUSY and the client restarts again. Back to the engine's
+	// 300s, and the inactivity timeout matches the server's 1800s so the two
+	// ends stop disagreeing about when a session is dead.
+	{"PING_WATCHDOG_TIMEOUT_SECONDS", 300.0},
+	{"ARQ_INACTIVITY_TIMEOUT_SECONDS", 1800.0},
+	// Racing five session inits instead of three multiplies the init queries
+	// during exactly the churn described above.
+	{"SESSION_INIT_RACING_COUNT", 3},
 }
 
 type OptionChoice struct {

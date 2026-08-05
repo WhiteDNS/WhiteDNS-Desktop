@@ -35,8 +35,17 @@ func (m *tunnelLossMeter) recordData() {
 	}
 }
 
+// A window is a window of fresh data, so retransmits normally just accumulate
+// into the next flush. They also close the window on their own once there are
+// a window's worth of them, which is the stalled case: a tunnel losing enough
+// to choke sends little new data while resends pile up, so it never reached a
+// data-driven flush and the estimate stayed frozen at whatever the last healthy
+// period measured. Adaptive duplication reads this estimate, so without this it
+// could not rise during exactly the loss it exists to answer.
 func (m *tunnelLossMeter) recordResend() {
-	m.windowResends.Add(1)
+	if m.windowResends.Add(1) >= tunnelLossWindow {
+		m.flush()
+	}
 }
 
 func (m *tunnelLossMeter) flush() {

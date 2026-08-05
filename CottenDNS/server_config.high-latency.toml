@@ -1,0 +1,14 @@
+# ==============================================================================
+# CottenDns Go Server — high-latency preset
+# ==============================================================================
+# For mobile carriers where the base round trip is several hundred
+# milliseconds. The stock timings assume an ACK returns quickly, so on such a
+# path the server retransmits packets that were never lost and the duplicates
+# add the delay that expires the next timer.
+#
+# Explicit keys always win over the preset, so override anything below freely.
+# ==============================================================================
+
+CONFIG_PRESET = "high-latency"
+DOMAIN = ["REPLACE_WITH_YOUR_DELEGATED_DOMAIN"]
+ENCRYPTION_KEY_FILE = "encrypt_key.txt"

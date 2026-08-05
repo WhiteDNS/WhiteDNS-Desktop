@@ -141,7 +141,7 @@ jobs:
       - name: Build Linux packages
         run: |
           make -C desktop package-linux-distros \
-            VERSION="1.1.3-WhiteDns-debug" \
+            VERSION="1.1.4-WhiteDns-debug" \
             LINUX_PLATFORMS="linux/${{ matrix.arch }}" \
             LINUX_CLIENT_ARCH="${{ matrix.arch }}" \
             LINUX_GO_TAGS="webkit2_41" \

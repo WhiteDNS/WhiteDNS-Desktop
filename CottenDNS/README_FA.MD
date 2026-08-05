@@ -12,19 +12,12 @@
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-00a36c?style=for-the-badge"></a>
   <img alt="Go" src="https://img.shields.io/badge/Go-1.25-00add8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="Transport" src="https://img.shields.io/badge/transport-DNS%20over%20UDP%2F53-4f46e5?style=for-the-badge">
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-f59e0b?style=for-the-badge">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-f59e0b?style=for-the-badge">
 </p>
 
 <p align="center">
   <a href="README.MD">English</a> ·
-  <a href="README_FA.MD">فارسی</a> ·
-  <a href="README_RU.MD">Русский</a> ·
-  <a href="README_ZH.MD">简体中文</a> ·
-  <a href="README_ES.MD">Español</a>
-</p>
-
-<p align="center">
-  <a href="https://github.com/TaJirax/CottenDns/releases/latest">آخرین Release</a> ·
+  <a href="https://github.com/WhiteDNS/CottenDns/releases/latest">آخرین Release</a> ·
   <a href="https://t.me/whitedns">کانال تلگرام</a>
 </p>
 
@@ -41,9 +34,7 @@ CottenDns یک سیستم تونل client/server است که ترافیک TCP ر
 
 کارهای اخیر روی کارکرد پایدار روی شبکه‌های بسیار محدودکننده و پر-loss متمرکز بوده است:
 
-- **انتخاب transport به‌صورت per-resolver.** سرور هم‌زمان روی UDP/53 و TCP/53 (همان پورت) سرویس می‌دهد. با `RESOLVER_TRANSPORT = auto` هر resolver مستقل ارزیابی می‌شود؛ UDP سالم سریع باقی می‌ماند و فقط resolverای که UDP آن واقعاً خراب یا کند است به TCP/53 می‌رود. همهٔ کانال‌های پاسخ (TXT/CNAME/A/NULL/HTTPS) روی هر دو مسیر کار می‌کنند.
-- **کنترل‌گر یکپارچهٔ مسیر.** حالت پیش‌فرض `PATH_CONTROLLER_MODE = "unified"` شواهد upload/download را جدا نگه می‌دارد و duplication، FEC، probe، replay و فشار صف را با یک بودجهٔ مشترک هماهنگ می‌کند. `COMPARABLE_PATH_STRIPING = true` بسته‌های متوالی را فقط میان مسیرهای سریع و کاملاً اندازه‌گیری‌شده پخش می‌کند، بدون ارسال کپی اضافه. برای rollback فوری و بدون تغییر سرور می‌توان `PATH_CONTROLLER_MODE = "legacy"` را انتخاب کرد.
-- **رمزنگاری پویای امن‌تر در سرور.** با `ENCRYPTION_AUTO_DETECT = true` همهٔ روش‌های AES-GCM پیش از روش‌های legacy بررسی می‌شوند و XOR/ChaCha20 باید با وضعیت session یا ساختار دقیق MTU سازگار باشند. بنابراین هر کلاینت می‌تواند روش رمزنگاری خودش را روی UDP، TCP/53، DoT یا DoH انتخاب کند؛ روش بدون رمز `0` فقط وقتی فعال می‌شود که سرور صریحاً برای plaintext تنظیم شده باشد.
+- **fallback به DNS-over-TCP/53.** سرور هم‌زمان روی UDP/53 و TCP/53 (همان پورت) سرویس می‌دهد و کلاینت (`RESOLVER_TRANSPORT = auto`) ابتدا روی UDP پروب می‌کند و اگر هیچ resolverای پیدا نشد، کل لیست را روی **TCP/53** دوباره پروب می‌کند — برای شبکه‌هایی که UDP/53 را فیلتر یا truncate می‌کنند. وقتی UDP کار می‌کند هیچ هزینه‌ای ندارد. همهٔ کانال‌های پاسخ (TXT/CNAME/A/NULL/HTTPS) روی TCP هم کار می‌کنند.
 - **محدودسازی نرخ هوشمند.** resolverای که سیگنال overload می‌دهد (REFUSED/SERVFAIL یا timeout) به‌صورت AIMD کوتاه‌مدت خنک می‌شود و بارش به resolverهای دارای ظرفیت منتقل می‌شود — توزیع مجدد، نه throttle سراسری. خودگِیت است (به resolverهای سالم کاری ندارد)، هرگز بی‌کار نمی‌ماند و از بلاک شدن IP/نرخ جلوگیری می‌کند.
 - **بازشکل‌دهی QNAME.** `QNAME_LABEL_LENGTH` داده را در labelهای کوتاه‌تر و jitter-شده می‌چیند به‌جای یک زنجیرهٔ یکنواخت ۶۳ کاراکتری — یک اهرم کاهش fingerprint. برای سرور شفاف است (سرور labelها را بدون توجه به نحوهٔ تقسیم بازسازی می‌کند) پس desync نمی‌شود؛ پیش‌فرض ظرفیت بیشینه را حفظ می‌کند.
 - **MTU تطبیقی گروهی.** به‌جای تحمیل MTU کندترین resolver به همه، کلاینت هر resolver را اندازه می‌گیرد و session را روی نقطهٔ بهینهٔ throughput اجرا می‌کند (بیشینهٔ `MTU × تعداد resolverهایی که آن را تحمل می‌کنند`، به‌صورت مشترک روی upload و download). resolverهای کندتر حذف نمی‌شوند بلکه به‌عنوان **ذخیره (reserve)** نگه داشته می‌شوند و در صورت افت pool فعال به‌طور خودکار (با hysteresis برای جلوگیری از نوسان) ارتقا می‌یابند.
@@ -73,7 +64,7 @@ CottenDns یک سیستم تونل client/server است که ترافیک TCP ر
 | 📉 packet loss عادی است | ARQ window، ACK/NACK، timerهای retransmission و terminal drain |
 | 📡 resolverها کند یا از دسترس خارج می‌شوند | health check، auto-disable در runtime، recheck پس‌زمینه و stream failover |
 | ⬆️ upload معمولاً گلوگاه است | duplication جداگانه برای data، ACK، setup و control packetها |
-| 🕒 startup می‌تواند زمان‌بر باشد | `FAST_CONNECT` با scan تازه و ادامه بررسی resolverها در background |
+| 🕒 startup می‌تواند زمان‌بر باشد | resolver cache log و startup از logهای قبلی |
 | 🧪 رفتار resolverها یکسان نیست | اعتبارسنجی MTU برای هر resolver و strategyهای balancing |
 | 🧱 DPI و protocol filtering رایج است | transport فقط روی DNS query/response معمولی UDP/53 |
 
@@ -127,7 +118,7 @@ v.example.com   NS  ns.example.com
 ### 2. نصب سرور
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/WhiteDNS/CottenDns/main/server_linux_install.sh)
 ```
 
 بعد از startup، سرور active encryption key را نمایش می‌دهد و آن را در `encrypt_key.txt` می‌نویسد.
@@ -215,7 +206,7 @@ label کوتاه مهم است. domain کوتاه فضای بیشتری برای
 روی سرور لینوکسی اجرا کنید:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/WhiteDNS/CottenDns/main/server_linux_install.sh)
 ```
 
 installer این کارها را انجام می‌دهد:
@@ -243,9 +234,9 @@ installer این کارها را انجام می‌دهد:
 نمونه‌ها:
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
+bash <(curl -Ls https://raw.githubusercontent.com/WhiteDNS/CottenDns/main/server_linux_install.sh) --version vYYYY.MM.DD.HHMMSS-abcdef0
 sudo bash server_linux_install.sh --local
-bash <(curl -Ls https://raw.githubusercontent.com/TaJirax/CottenDns/main/server_linux_install.sh) --uninstall
+bash <(curl -Ls https://raw.githubusercontent.com/WhiteDNS/CottenDns/main/server_linux_install.sh) --uninstall
 ```
 
 دستورهای service:
@@ -284,7 +275,7 @@ flagهای کاربردی سرور:
 archive کلاینت مناسب platform خود را از این صفحه دریافت کنید:
 
 ```text
-https://github.com/TaJirax/CottenDns/releases/latest
+https://github.com/WhiteDNS/CottenDns/releases/latest
 ```
 
 archiveهای کلاینت شامل این موارد هستند:
@@ -331,7 +322,7 @@ flagهای کاربردی کلاینت:
 نمونه CLI override:
 
 ```bash
-./CottenDns_Client_Linux_AMD64 --config client_config.toml --listen-port 18001 --startup-mode resolvers
+./CottenDns_Client_Linux_AMD64 --config client_config.toml --listen-port 18001 --startup-mode logs
 ```
 
 ### 🐧 نصب service کلاینت روی Linux
@@ -350,9 +341,7 @@ journalctl -u cottendns-client -f
 systemctl restart cottendns-client
 ```
 
-service کلاینت non-interactive اجرا می‌شود. installer مقدارهای قدیمی `ask` یا
-`logs` را به `STARTUP_MODE = "resolvers"` تبدیل می‌کند تا در هر restart یک scan
-تازه انجام شود.
+service کلاینت non-interactive اجرا می‌شود. اگر config هنوز `STARTUP_MODE = "ask"` داشته باشد، installer آن را به `logs` تغییر می‌دهد.
 
 <a id="configuration-overview"></a>
 
@@ -465,9 +454,8 @@ CottenDns از فایل‌های TOML استفاده می‌کند. مسیرها
 1. با sample config شروع کنید.
 2. تعداد زیادی resolver candidate داخل `client_resolvers.txt` بگذارید.
 3. برای scan کامل با `STARTUP_MODE = "resolvers"` اجرا کنید.
-4. `LOG_TO_FILE = true` را فقط برای بررسی و عیب‌یابی نگه دارید.
-5. همیشه `STARTUP_MODE = "resolvers"` را نگه دارید؛ `FAST_CONNECT` بعد از آماده
-   شدن یک pool کوچک اتصال را شروع می‌کند و scan بقیه resolverها در background ادامه دارد.
+4. `LOG_TO_FILE = true` را روشن نگه دارید تا نتیجه resolver/MTU ذخیره شود.
+5. بعد از scan موفق، برای startup سریع‌تر از `STARTUP_MODE = "logs"` استفاده کنید.
 
 ```toml
 STARTUP_MODE = "resolvers"
@@ -475,8 +463,12 @@ LOG_TO_FILE = true
 RESOLVER_BALANCING_STRATEGY = 3
 ```
 
-نتیجه‌های run قبلی برای fast start استفاده نمی‌شوند، چون وضعیت resolverها،
-poisoning، transport و MTU ممکن است بین دو اجرا عوض شود.
+بعد از scan موفق:
+
+```toml
+STARTUP_MODE = "logs"
+LOG_BASED_MTU_VERIFY = true
+```
 
 ### 📏 تنظیم بازه MTU
 
@@ -587,6 +579,7 @@ sequenceDiagram
 | --- | --- |
 | 🖥️ LAN proxy | کلاینت را روی کامپیوتر اجرا کنید و گوشی‌ها از SOCKS5 آن روی LAN استفاده کنند |
 | 📦 Router/VPS client | کلاینت را روی router، mini PC یا VPS اجرا کنید و دستگاه‌ها را به آن وصل کنید |
+| 📱 Termux | در صورت پشتیبانی release matrix از artifactهای Termux استفاده کنید |
 | 🔗 Chaining | یک proxy/panel محلی دیگر را به SOCKS5 listener CottenDns chain کنید |
 
 اگر دستگاه دیگری باید روی LAN به کلاینت وصل شود:
@@ -617,7 +610,7 @@ CottenDns_Server_<Platform>_<ARCH>.zip
 CottenDns_Server_<Platform>_<ARCH>.tar.gz
 ```
 
-release matrix گیت‌هاب شامل targetهای Windows، Linux، Linux-Legacy و macOS است. packageهای کلاینت executable، `client_config.toml` و `client_resolvers.txt` دارند. packageهای Linux کلاینت `client_linux_install.sh` را هم دارند. packageهای سرور executable و `server_config.toml` دارند.
+release matrix گیت‌هاب شامل targetهای Windows، Linux، Linux-Legacy، macOS و Termux/Android است. packageهای کلاینت executable، `client_config.toml` و `client_resolvers.txt` دارند. packageهای Linux کلاینت `client_linux_install.sh` را هم دارند. packageهای سرور executable و `server_config.toml` دارند.
 
 <a id="development"></a>
 
@@ -706,9 +699,7 @@ sudo systemctl restart systemd-resolved
 
 ### 🕒 startup کلاینت کند است
 
-`STARTUP_MODE = "resolvers"` و `FAST_CONNECT = true` را نگه دارید، بازه‌های MTU
-را کوچک‌تر کنید، `MTU_TEST_RETRIES_RESOLVERS` را پایین بیاورید و resolverهایی را
-که همیشه fail می‌شوند از `client_resolvers.txt` حذف کنید.
+بعد از یک full scan موفق از `STARTUP_MODE = "logs"` استفاده کنید، بازه‌های MTU را کوچک‌تر کنید، `MTU_TEST_RETRIES_RESOLVERS` را پایین بیاورید و resolverهایی را که همیشه fail می‌شوند از `client_resolvers.txt` حذف کنید.
 
 ### 🧊 تونل وصل می‌شود اما سایت‌ها stall می‌شوند
 
@@ -761,8 +752,8 @@ go vet ./...
 
 | منبع | لینک |
 | --- | --- |
-| Issues | <https://github.com/TaJirax/CottenDns/issues> |
-| Pull requests | <https://github.com/TaJirax/CottenDns/pulls> |
+| Issues | <https://github.com/WhiteDNS/CottenDns/issues> |
+| Pull requests | <https://github.com/WhiteDNS/CottenDns/pulls> |
 | Telegram | <https://t.me/whitedns> |
 
 ## 📄 مجوز
@@ -775,9 +766,9 @@ lineage پروژه:
 
 | مورد | مقدار |
 | --- | --- |
-| پروژه اصلی | [MasterDnsVPN](https://github.com/masterking32/MasterDnsVPN) |
+| پروژه اصلی | Master DNS / MasterDnsVPN |
 | نویسنده اصلی | Amin Mahmoudi |
-| fork/source بالادستی | [StormDNS](https://github.com/nullroute1970/StormDNS) توسط NullRoute1970 |
+| fork/source بالادستی | Null Route / NullRoute1970 |
 | fork فعلی | CottenDns (مخزن `CottenDns`) |
 | نگهدارنده فعلی | tajirax |
 | License | MIT License |

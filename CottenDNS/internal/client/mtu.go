@@ -38,6 +38,12 @@ const (
 	// 1/8 = 12.5%) before the session adopts it, so flapping resolvers do not
 	// churn the session MTU. Stranded (unsustainable) points always move.
 	mtuHysteresisDivisor = 8
+	// The MTU scan owns the middle of the connect progress bar: it starts where
+	// the "starting" phase leaves off and stops below the "selecting" phase, so
+	// the bar only ever moves forward.
+	mtuProgressStartPercent = 10
+	mtuProgressSpanPercent  = 70
+	mtuProgressInterval     = 250 * time.Millisecond
 )
 
 var (
@@ -639,6 +645,9 @@ func (c *Client) runConnectionMTUTest(ctx context.Context, conn *Connection, ser
 	if conn == nil {
 		return
 	}
+	// Registered before the recover below so it runs after it: every exit path,
+	// panic included, has updated the counters by the time progress is reported.
+	defer c.logMTUProgress(counters, total)
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			c.mtuStateMu.Lock()

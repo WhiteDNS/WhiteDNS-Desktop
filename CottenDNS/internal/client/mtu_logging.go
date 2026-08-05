@@ -49,6 +49,66 @@ func (c *Client) logConnectionProgress(phase string, percent int, keyValues ...a
 	c.log.Machinef("%s", b.String())
 }
 
+// logMTUProgress reports scan progress for the desktop app, which draws its
+// connection progress bar from these lines. The MTU scan is by far the longest
+// phase of a connect, so without it the bar sits at the "starting" percent and
+// then jumps straight to "selecting" when the scan ends.
+func (c *Client) logMTUProgress(counters *mtuScanCounters, total int) {
+	if counters == nil || total < 0 {
+		return
+	}
+	completed := int(counters.completed.Load())
+	valid := int(counters.valid.Load())
+	rejected := int(counters.rejectUpload.Load() + counters.rejectDownload.Load())
+	percent := mtuProgressStartPercent
+	if total > 0 {
+		percent += (mtuProgressSpanPercent * completed) / total
+	}
+	if !c.shouldLogMTUProgress(completed, total, percent) {
+		return
+	}
+	c.logConnectionProgress(
+		"mtu",
+		percent,
+		"completed", completed,
+		"total", total,
+		"valid", valid,
+		"rejected", rejected,
+	)
+}
+
+func (c *Client) resetMTUProgressThrottle() {
+	if c == nil {
+		return
+	}
+	c.mtuProgressLogMu.Lock()
+	c.lastMTUProgressPercent = -1
+	c.lastMTUProgressAt = time.Time{}
+	c.mtuProgressLogMu.Unlock()
+}
+
+// shouldLogMTUProgress holds the machine output to one line per percent step,
+// and never drops the first or last line of a scan.
+func (c *Client) shouldLogMTUProgress(completed, total, percent int) bool {
+	if c == nil {
+		return true
+	}
+	now := c.now()
+	c.mtuProgressLogMu.Lock()
+	defer c.mtuProgressLogMu.Unlock()
+	if completed == 0 || (total > 0 && completed >= total) {
+		c.lastMTUProgressPercent = percent
+		c.lastMTUProgressAt = now
+		return true
+	}
+	if c.lastMTUProgressPercent != percent || c.lastMTUProgressAt.IsZero() || now.Sub(c.lastMTUProgressAt) >= mtuProgressInterval {
+		c.lastMTUProgressPercent = percent
+		c.lastMTUProgressAt = now
+		return true
+	}
+	return false
+}
+
 func (c *Client) logMTUProbe(isRetry bool, background bool, format string, args ...any) {
 	if isRetry || background || !c.mtuDebugEnabled() {
 		return
@@ -57,6 +117,7 @@ func (c *Client) logMTUProbe(isRetry bool, background bool, format string, args 
 }
 
 func (c *Client) logMTUStart(workerCount int) {
+	c.resetMTUProgressThrottle()
 	if !c.mtuInfoEnabled() {
 		return
 	}

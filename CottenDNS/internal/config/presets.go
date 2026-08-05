@@ -17,6 +17,8 @@ func normalizeConfigPresetName(name string) string {
 	switch name {
 	case "tcp", "tcp-survival", "tcp-survive":
 		return "tcp-survival"
+	case "high-latency", "highlatency", "latency", "mobile":
+		return "high-latency"
 	default:
 		return name
 	}
@@ -33,11 +35,11 @@ func isKnownConfigPreset(name string) bool {
 
 // Server preset validation remains independent from the client preset set.
 // Keep these helpers here because server.go uses them during final validation.
-const serverConfigPresetNames = "default, speed, survival, tcp-survival"
+const serverConfigPresetNames = "default, speed, survival, tcp-survival, high-latency"
 
 func isKnownServerConfigPreset(name string) bool {
 	switch normalizeConfigPresetName(name) {
-	case "default", "speed", "survival", "tcp-survival":
+	case "default", "speed", "survival", "tcp-survival", "high-latency":
 		return true
 	default:
 		return false
@@ -89,7 +91,9 @@ func applyServerConfigPreset(cfg *ServerConfig, isDefined configKeyDefinedFunc) 
 		return nil
 	}
 	preset := normalizeConfigPresetName(cfg.ConfigPreset)
-	if !isKnownConfigPreset(preset) {
+	// Validated against the server set, which carries presets the client has no
+	// use for.
+	if !isKnownServerConfigPreset(preset) {
 		return invalidConfigPresetError(preset)
 	}
 	cfg.ConfigPreset = preset
@@ -101,8 +105,47 @@ func applyServerConfigPreset(cfg *ServerConfig, isDefined configKeyDefinedFunc) 
 		applyServerSurvivalPreset(cfg, isDefined)
 	case "tcp-survival":
 		applyServerTCPSurvivalPreset(cfg, isDefined)
+	case "high-latency":
+		applyServerHighLatencyPreset(cfg, isDefined)
 	}
 	return nil
+}
+
+// applyServerHighLatencyPreset targets mobile carriers where the base RTT is
+// several hundred milliseconds. The defaults assume an ACK can come back
+// quickly: a 0.6s retransmit timeout on a 400ms path with 100ms of jitter
+// expires while the ACK is still in flight, so the server resends packets that
+// were never lost, and the duplicates add the delay that expires the next
+// timer. A 1000 packet window also cannot keep such a path full.
+//
+// These values come from a deployed Hamrahe Avval server that was hand tuned
+// against the problem before this preset existed.
+func applyServerHighLatencyPreset(cfg *ServerConfig, isDefined configKeyDefinedFunc) {
+	setServerFloat(isDefined, "ARQ_INITIAL_RTO_SECONDS", &cfg.ARQInitialRTOSeconds, 1.0)
+	setServerFloat(isDefined, "ARQ_MAX_RTO_SECONDS", &cfg.ARQMaxRTOSeconds, 4.0)
+	// Reporting a gap before the reordering window has drained asks for data
+	// that is merely late, which on a long path is most of it.
+	setServerFloat(isDefined, "ARQ_DATA_NACK_INITIAL_DELAY_SECONDS", &cfg.ARQDataNackInitialDelaySeconds, 0.3)
+	setServerFloat(isDefined, "ARQ_DATA_NACK_REPEAT_SECONDS", &cfg.ARQDataNackRepeatSeconds, 0.8)
+	setServerInt(isDefined, "ARQ_DATA_NACK_MAX_GAP", &cfg.ARQDataNackMaxGap, 64)
+	// Bandwidth times delay: the window and batch have to cover a full round
+	// trip of data or the link idles waiting for ACKs.
+	setServerInt(isDefined, "ARQ_WINDOW_SIZE", &cfg.ARQWindowSize, 4096)
+	setServerInt(isDefined, "MAX_PACKETS_PER_BATCH", &cfg.MaxPacketsPerBatch, 32)
+	setServerInt(isDefined, "MAX_DNS_RESPONSE_BYTES", &cfg.MaxDNSResponseBytes, 65535)
+	// A long path keeps far more requests in flight at once, so the ingress
+	// side needs room to hold them rather than shedding them.
+	setServerInt(isDefined, "UDP_READERS", &cfg.UDPReaders, 16)
+	setServerInt(isDefined, "DNS_REQUEST_WORKERS", &cfg.DNSRequestWorkers, 16)
+	setServerInt(isDefined, "MAX_CONCURRENT_REQUESTS", &cfg.MaxConcurrentRequests, 32768)
+	setServerInt(isDefined, "MAX_INGRESS_QUEUE_BYTES", &cfg.MaxIngressQueueBytes, 128*1024*1024)
+	setServerInt(isDefined, "SOCKET_BUFFER_SIZE", &cfg.SocketBufferSize, 32*1024*1024)
+	setServerInt(isDefined, "DEFERRED_SESSION_WORKERS", &cfg.DeferredSessionWorkers, 16)
+	setServerInt(isDefined, "DEFERRED_SESSION_QUEUE_LIMIT", &cfg.DeferredSessionQueueLimit, 16384)
+	// SESSION_TIMEOUT_SECONDS is deliberately left at the default. Raising it
+	// keeps abandoned sessions holding slots in a fixed size table, and a client
+	// that reconnects mid stall then meets SESSION_BUSY, which makes it
+	// reconnect again.
 }
 
 func invalidConfigPresetError(name string) error {

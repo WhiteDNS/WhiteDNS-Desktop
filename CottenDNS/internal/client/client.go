@@ -77,6 +77,9 @@ type Client struct {
 	resolverRuntimeLogMu     sync.Mutex
 	lastResolverRuntimeLog   string
 	lastResolverRuntimeLogAt time.Time
+	mtuProgressLogMu         sync.Mutex
+	lastMTUProgressPercent   int
+	lastMTUProgressAt        time.Time
 
 	// MTU States
 	mtuStateMu        sync.Mutex

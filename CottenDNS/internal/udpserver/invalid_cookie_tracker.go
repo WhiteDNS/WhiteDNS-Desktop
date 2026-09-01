@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -30,6 +30,7 @@ type invalidCookieTracker struct {
 }
 
 const unknownExpectedCookieMarker = 256
+const maxInvalidCookieTrackerRecords = 16384
 
 func newInvalidCookieTracker() *invalidCookieTracker {
 	return &invalidCookieTracker{
@@ -57,7 +58,13 @@ func (t *invalidCookieTracker) Note(sessionID uint16, lookup sessionLookupResult
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	record := t.records[key]
+	record, exists := t.records[key]
+	if !exists && len(t.records) >= maxInvalidCookieTrackerRecords {
+		// Invalid-cookie tracking is advisory response suppression, not required
+		// for packet rejection. Refuse new state when a keyed attacker sprays
+		// session/cookie combinations rather than growing memory without bound.
+		return false
+	}
 	record.attempts = pruneAttemptTimes(record.attempts, cutoff)
 	record.attempts = appendBoundedAttempt(record.attempts, nowUnix, threshold)
 	if len(record.attempts) < threshold {

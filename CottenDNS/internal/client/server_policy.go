@@ -89,6 +89,8 @@ func (c *Client) refreshPolicyDerivedState() {
 	}
 	c.syncedUploadMTU = c.effectivePolicyMTU(c.discoveredUploadMTU, true)
 	c.syncedDownloadMTU = c.effectivePolicyMTU(c.discoveredDownloadMTU, false)
+	c.statusUploadMTU.Store(int64(c.syncedUploadMTU))
+	c.statusDownloadMTU.Store(int64(c.syncedDownloadMTU))
 	c.tunnelRX_TX_Workers = c.effectiveRxTxWorkers()
 	if c.syncedUploadMTU <= 0 {
 		return

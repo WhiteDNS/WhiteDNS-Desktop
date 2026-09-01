@@ -12,7 +12,7 @@ Official channel: [https://t.me/whitedns](https://t.me/whitedns)
 
 WhiteDNS is backed by the [MasterDNS Client](https://github.com/masterking32/MasterDnsVPN)
 project and vendors the CottenDNS engine from
-[WhiteDNS/CottenDNS](https://github.com/WhiteDNS/CottenDNS) at the commit pinned
+[TaJirax/cottenDNS](https://github.com/TaJirax/cottenDNS) at the commit pinned
 in [`vendor/cottendns.json`](./vendor/cottendns.json).
 
 The desktop shell is built with [Wails](https://wails.io), and the proxy hop
@@ -27,6 +27,8 @@ engines are vendored in-tree under their own terms.
   restored on disconnect and after an unclean exit.
 - Multi-domain connection profiles, with import, export, and bulk management.
 - Resolver profile management with validation, plus a DNS resolver scanner.
+- IPv4 and IPv6 resolver endpoints, including bracketed ports and bounded CIDR
+  imports, with automatic IPv4-to-IPv6 failover or selectable dual-stack modes.
 - Full CottenDNS option editor covering the complete engine schema, grouped by
   category, showing the value each profile will actually run with.
 - Engine presets, including speed, survival, and TCP-survival.

@@ -79,11 +79,22 @@ func udpSocketCount(readers int) int {
 // others run free, so anything short of the full count is torn down in favour of
 // the predictable single-socket path.
 func (s *Server) listenUDP(addr *net.UDPAddr) ([]*net.UDPConn, error) {
+	// Bind to an explicit address family so an IPv6 wildcard ([::]) never
+	// silently becomes a dual-stack socket that also swallows IPv4 — the IPv4
+	// and IPv6 listeners are kept as distinct sockets, matching the TCP side.
+	network := "udp"
+	if addr != nil && addr.IP != nil {
+		if addr.IP.To4() != nil {
+			network = "udp4"
+		} else {
+			network = "udp6"
+		}
+	}
 	sockets := udpSocketCount(s.cfg.UDPReaders)
 	if reusePortSupported && sockets > 1 {
 		conns := make([]*net.UDPConn, 0, sockets)
 		for range sockets {
-			conn, err := listenUDPReusePort(addr)
+			conn, err := listenUDPReusePort(network, addr)
 			if err != nil {
 				for _, opened := range conns {
 					_ = opened.Close()
@@ -101,7 +112,7 @@ func (s *Server) listenUDP(addr *net.UDPAddr) ([]*net.UDPConn, error) {
 		}
 	}
 
-	conn, err := net.ListenUDP("udp", addr)
+	conn, err := net.ListenUDP(network, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +122,13 @@ func (s *Server) listenUDP(addr *net.UDPAddr) ([]*net.UDPConn, error) {
 // startReaders runs one reader per socket when SO_REUSEPORT gave us a socket
 // each, and otherwise fans every reader onto the single shared socket.
 func (s *Server) startReaders(ctx context.Context, conns []*net.UDPConn, queues ingressQueues, readErrCh chan<- error, readerWG *sync.WaitGroup) {
-	for i := range s.cfg.UDPReaders {
+	// Never fewer readers than sockets, or an appended IPv6 socket could go
+	// unread on low UDP_READERS configs (i%len would never reach it).
+	readers := s.cfg.UDPReaders
+	if readers < len(conns) {
+		readers = len(conns)
+	}
+	for i := range readers {
 		conn := conns[i%len(conns)]
 		readerWG.Add(1)
 		go func(readerID int, conn *net.UDPConn) {

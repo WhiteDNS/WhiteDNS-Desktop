@@ -165,7 +165,7 @@ func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, request
 		PacketType:      Enums.PACKET_ERROR_DROP,
 		Payload:         payload[:],
 		LegacySessionID: legacy,
-	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
+	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
@@ -183,7 +183,7 @@ func (s *Server) buildSessionBusyResponse(questionPacket []byte, requestName str
 		PacketType:      Enums.PACKET_SESSION_BUSY,
 		Payload:         payload[:],
 		LegacySessionID: legacy,
-	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
+	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
@@ -200,7 +200,7 @@ func (s *Server) buildSessionVPNResponse(questionPacket []byte, requestName stri
 	// upstream (pong, queued data, ack, packed control blocks), it goes back in
 	// the wire format this session was opened with.
 	packet.LegacySessionID = record.LegacySessionID
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseBase64, s.cfg.ARecordDataDelivery)
+	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
@@ -876,7 +876,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 		PacketType:      Enums.PACKET_SESSION_ACCEPT,
 		Payload:         responsePayload,
 		LegacySessionID: record.LegacySessionID,
-	}, record.ResponseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery)
+	}, record.ResponseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
 	if err != nil {
 		return nil
 	}
@@ -910,7 +910,7 @@ func (s *Server) handleMTUUpRequest(questionPacket []byte, _ DnsParser.LitePacke
 		PacketType:      Enums.PACKET_MTU_UP_RES,
 		Payload:         responsePayload[:],
 		LegacySessionID: vpnPacket.LegacySessionID,
-	}, baseEncode, s.cfg.ARecordDataDelivery)
+	}, baseEncode, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
 
 	if err != nil {
 		return nil
@@ -955,7 +955,7 @@ func (s *Server) handleMTUDownRequest(questionPacket []byte, _ DnsParser.LitePac
 		TotalFragments:  vpnPacket.TotalFragments,
 		Payload:         payload,
 		LegacySessionID: vpnPacket.LegacySessionID,
-	}, baseEncode, s.cfg.ARecordDataDelivery)
+	}, baseEncode, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
 	if err != nil {
 		return nil
 	}

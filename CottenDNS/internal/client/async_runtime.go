@@ -31,6 +31,58 @@ type asyncReadPacket struct {
 	localAddr string
 }
 
+type tunnelSocketPair struct {
+	v4 *net.UDPConn
+	v6 *net.UDPConn
+}
+
+func (p tunnelSocketPair) forAddr(addr *net.UDPAddr) *net.UDPConn {
+	if addr == nil || addr.IP == nil {
+		return nil
+	}
+	if addr.IP.To4() != nil {
+		return p.v4
+	}
+	return p.v6
+}
+
+func (c *Client) configuredResolverFamilies() (want4, want6 bool) {
+	for _, resolver := range c.cfg.Resolvers {
+		if resolverAddressIsIPv6(resolver.IP) {
+			want6 = true
+		} else if net.ParseIP(resolver.IP) != nil {
+			want4 = true
+		}
+	}
+	switch c.cfg.ResolverIPMode {
+	case "ipv4":
+		return want4, false
+	case "ipv6":
+		return false, want6
+	default:
+		return want4, want6
+	}
+}
+
+func openTunnelSocketFamily(network string, workers int) ([]*net.UDPConn, error) {
+	conns := make([]*net.UDPConn, 0, workers)
+	bind := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
+	if network == "udp6" {
+		bind.IP = net.IPv6unspecified
+	}
+	for i := 0; i < workers; i++ {
+		conn, err := net.ListenUDP(network, bind)
+		if err != nil {
+			for _, opened := range conns {
+				_ = opened.Close()
+			}
+			return nil, err
+		}
+		conns = append(conns, conn)
+	}
+	return conns, nil
+}
+
 // StopAsyncRuntime stops all running workers (Readers, Writers, Processors).
 // It ensures the UDP socket is closed and all goroutines exit.
 func (c *Client) StopAsyncRuntime() {
@@ -262,21 +314,43 @@ func (c *Client) StartAsyncRuntime(parentCtx context.Context) error {
 	// their sockets and queues; allocating unused UDP descriptors wastes scarce
 	// resources on Android and large resolver fleets.
 	useStream := c.usesStreamTransport()
-	conns := make([]*net.UDPConn, 0, c.tunnelRX_TX_Workers)
-	for i := 0; !useStream && i < c.tunnelRX_TX_Workers; i++ {
-		conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4zero, Port: 0})
-		if err != nil {
-			for _, opened := range conns {
-				_ = opened.Close()
-			}
+	conns := make([]*net.UDPConn, 0, c.tunnelRX_TX_Workers*2)
+	pairs := make([]tunnelSocketPair, c.tunnelRX_TX_Workers)
+	if !useStream {
+		want4, want6 := c.configuredResolverFamilies()
+		var v4Conns, v6Conns []*net.UDPConn
+		var v4Err, v6Err error
+		if want4 {
+			v4Conns, v4Err = openTunnelSocketFamily("udp4", c.tunnelRX_TX_Workers)
+		}
+		if want6 {
+			v6Conns, v6Err = openTunnelSocketFamily("udp6", c.tunnelRX_TX_Workers)
+		}
+		if v4Err != nil && c.log != nil {
+			c.log.Warnf("<yellow>IPv4 tunnel sockets unavailable:</yellow> %v", v4Err)
+		}
+		if v6Err != nil && c.log != nil {
+			c.log.Warnf("<yellow>IPv6 tunnel sockets unavailable; IPv4 remains active:</yellow> %v", v6Err)
+		}
+		if len(v4Conns) == 0 && len(v6Conns) == 0 {
 			cancel()
 			c.asyncCancel = nil
-			return fmt.Errorf("failed to open tunnel socket %d/%d: %w", i+1, c.tunnelRX_TX_Workers, err)
+			return fmt.Errorf("failed to open tunnel sockets (ipv4: %v, ipv6: %v)", v4Err, v6Err)
 		}
-		conns = append(conns, conn)
+		for i := range pairs {
+			if i < len(v4Conns) {
+				pairs[i].v4 = v4Conns[i]
+				conns = append(conns, v4Conns[i])
+			}
+			if i < len(v6Conns) {
+				pairs[i].v6 = v6Conns[i]
+				conns = append(conns, v6Conns[i])
+			}
+		}
 	}
 
 	c.tunnelConns = conns
+	c.tunnelSocketPairs = pairs
 	c.resetTunnelActivity(c.now())
 
 	c.log.Infof("\U0001F4E1 <cyan>Async Runtime Initialized: <green>%d RX/TX Workers</green>, <green>%d Processors</green></cyan>",
@@ -314,9 +388,9 @@ func (c *Client) StartAsyncRuntime(parentCtx context.Context) error {
 		c.streamData.Start(runtimeCtx)
 		c.log.Infof("\U0001F517 <cyan>Resolver transport: <green>%s</green></cyan>", active)
 	} else {
-		for i := 0; i < c.tunnelRX_TX_Workers; i++ {
+		for i, conn := range conns {
 			c.asyncWG.Add(1)
-			go c.asyncReaderWorker(runtimeCtx, i, conns[i])
+			go c.asyncReaderWorker(runtimeCtx, i, conn)
 		}
 	}
 
@@ -335,11 +409,11 @@ func (c *Client) StartAsyncRuntime(parentCtx context.Context) error {
 	// 7. Spawn Writer Workers (UDP send stage)
 	for i := 0; i < c.tunnelRX_TX_Workers; i++ {
 		c.asyncWG.Add(1)
-		var conn *net.UDPConn
+		var pair tunnelSocketPair
 		if !useStream {
-			conn = conns[i]
+			pair = pairs[i]
 		}
-		go c.asyncWriterWorker(runtimeCtx, i, conn)
+		go c.asyncWriterWorker(runtimeCtx, i, pair)
 	}
 
 	// 8. Spawn Dispatcher (Fair Queuing & Packing)
@@ -505,6 +579,7 @@ func (c *Client) closeTunnelSockets() {
 		}
 	}
 	c.tunnelConns = nil
+	c.tunnelSocketPairs = nil
 }
 
 // asyncEncodeWorker turns raw outbound tasks into ready-to-send DNS packets.
@@ -644,14 +719,10 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 }
 
 // asyncWriterWorker sends already-built DNS packets on the assigned socket.
-func (c *Client) asyncWriterWorker(ctx context.Context, id int, conn *net.UDPConn) {
+func (c *Client) asyncWriterWorker(ctx context.Context, id int, sockets tunnelSocketPair) {
 	defer c.asyncWG.Done()
 	c.log.Debugf("\U0001F680 <green>Writer Worker <cyan>#%d</cyan> started</green>", id)
-	var lastDeadline time.Time
-	localAddr := ""
-	if conn != nil && conn.LocalAddr() != nil {
-		localAddr = conn.LocalAddr().String()
-	}
+	lastDeadlines := make(map[*net.UDPConn]time.Time, 2)
 	refreshWindow := c.tunnelPacketTimeout / 2
 	useStream := c.usesStreamTransport()
 	if refreshWindow < 250*time.Millisecond {
@@ -666,12 +737,6 @@ func (c *Client) asyncWriterWorker(ctx context.Context, id int, conn *net.UDPCon
 				return
 			}
 			now := time.Now()
-			if !useStream && conn != nil && c.tunnelPacketTimeout > 0 {
-				if lastDeadline.IsZero() || now.Add(refreshWindow).After(lastDeadline) {
-					lastDeadline = now.Add(c.tunnelPacketTimeout)
-					_ = conn.SetWriteDeadline(lastDeadline)
-				}
-			}
 			for _, frame := range task.frames {
 				if frame.addr == nil || len(frame.packet) == 0 {
 					continue
@@ -683,6 +748,22 @@ func (c *Client) asyncWriterWorker(ctx context.Context, id int, conn *net.UDPCon
 						c.streamData.Send(frame.serverKey, frame.addr, frame.packet, frame.priority, now)
 					}
 					continue
+				}
+				conn := sockets.forAddr(frame.addr)
+				if conn == nil {
+					continue
+				}
+				if c.tunnelPacketTimeout > 0 {
+					lastDeadline := lastDeadlines[conn]
+					if lastDeadline.IsZero() || now.Add(refreshWindow).After(lastDeadline) {
+						lastDeadline = now.Add(c.tunnelPacketTimeout)
+						lastDeadlines[conn] = lastDeadline
+						_ = conn.SetWriteDeadline(lastDeadline)
+					}
+				}
+				localAddr := ""
+				if conn.LocalAddr() != nil {
+					localAddr = conn.LocalAddr().String()
 				}
 				if _, err := conn.WriteToUDP(frame.packet, frame.addr); err == nil {
 					c.recordTunnelSend(now)

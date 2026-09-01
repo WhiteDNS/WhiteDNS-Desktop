@@ -141,7 +141,10 @@ func (c *Client) dialDoTResolver(resolverLabel string, timeout time.Duration) (n
 func resolverHostWithPort(resolverLabel string, port int) string {
 	host, _, err := net.SplitHostPort(resolverLabel)
 	if err != nil {
-		host = resolverLabel
+		host = strings.TrimSpace(resolverLabel)
+		if len(host) >= 2 && host[0] == '[' && host[len(host)-1] == ']' {
+			host = host[1 : len(host)-1]
+		}
 	}
 	return net.JoinHostPort(host, strconv.Itoa(port))
 }

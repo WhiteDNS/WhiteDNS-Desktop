@@ -11,8 +11,10 @@ import (
 	"context"
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -22,6 +24,7 @@ import (
 	domainMatcher "cottendns-go/internal/domainmatcher"
 	fragmentStore "cottendns-go/internal/fragmentstore"
 	"cottendns-go/internal/logger"
+	"cottendns-go/internal/netutil"
 	"cottendns-go/internal/security"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
@@ -567,13 +570,31 @@ func (s *Server) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	conns, err := s.listenUDP(&net.UDPAddr{
-		IP:   net.ParseIP(s.cfg.UDPHost),
-		Port: s.cfg.UDPPort,
-	})
+	listenAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(s.cfg.UDPHost, strconv.Itoa(s.cfg.UDPPort)))
+	if err != nil {
+		return fmt.Errorf("resolve UDP listen address: %w", err)
+	}
+	conns, err := s.listenUDP(listenAddr)
 
 	if err != nil {
 		return err
+	}
+
+	// Serve IPv4 and IPv6 clients together. The IPv6 tunnel socket is opened
+	// dynamically — only when this is an IPv4 primary and the host actually has
+	// a usable IPv6 address — so an IPv4-only host neither errors nor wastes a
+	// socket. Responses go back on req.conn, the exact socket a datagram arrived
+	// on, so a v6 client is answered over the v6 socket.
+	if s.cfg.UDPIPv6Enabled && listenAddr.IP.To4() != nil && netutil.HasIPv6() {
+		v6Addr, v6Err := net.ResolveUDPAddr("udp6", net.JoinHostPort(strings.TrimSpace(s.cfg.UDPIPv6Host), strconv.Itoa(s.cfg.UDPPort)))
+		if v6Err != nil {
+			s.log.Warnf("<yellow>IPv6 UDP listener address invalid; IPv4 UDP remains active:</yellow> %v", v6Err)
+		} else if v6Conns, listenErr := s.listenUDP(v6Addr); listenErr != nil {
+			s.log.Warnf("<yellow>IPv6 UDP listener unavailable; IPv4 UDP remains active:</yellow> %v", listenErr)
+		} else {
+			conns = append(conns, v6Conns...)
+			s.log.Infof("\U0001F4E1 <green>IPv6 UDP Listener Ready, Addr: <cyan>%s</cyan></green>", v6Addr.String())
+		}
 	}
 	s.running.Store(true)
 	defer s.running.Store(false)

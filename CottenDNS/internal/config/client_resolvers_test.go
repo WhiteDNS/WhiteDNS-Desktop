@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -59,6 +59,23 @@ func TestLoadClientResolversRejectsHugeCIDR(t *testing.T) {
 
 	if _, _, err := LoadClientResolvers(path); err == nil {
 		t.Fatal("LoadClientResolvers should still fail when no valid resolvers remain")
+	}
+}
+
+func TestLoadClientResolversSupportsScopedIPv6(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "client_resolvers.txt")
+	if err := os.WriteFile(path, []byte("fe80::1%eth0\n[fe80::2%eth0]:5353\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	resolvers, _, err := LoadClientResolvers(path)
+	if err != nil {
+		t.Fatalf("LoadClientResolvers returned error: %v", err)
+	}
+	if len(resolvers) != 2 || resolvers[0].IP != "fe80::1%eth0" || resolvers[0].Port != 53 ||
+		resolvers[1].IP != "fe80::2%eth0" || resolvers[1].Port != 5353 {
+		t.Fatalf("unexpected scoped IPv6 resolvers: %+v", resolvers)
 	}
 }
 

@@ -58,6 +58,18 @@ func LocalInterfaceIPs() []string {
 	return ips
 }
 
+// HasIPv6 reports whether the host has a usable (non-loopback, non-link-local)
+// IPv6 address. The server uses it to decide dynamically whether to open its
+// IPv6 tunnel listener, so a host without IPv6 doesn't fail or waste a socket.
+func HasIPv6() bool {
+	for _, ip := range LocalInterfaceIPs() {
+		if strings.Contains(ip, ":") {
+			return true
+		}
+	}
+	return false
+}
+
 // FormatListenHint returns a user-friendly string listing the reachable addresses
 // for a listener bound to the given ip and port.
 // If ip is a wildcard (0.0.0.0 or ::), it enumerates host interfaces.

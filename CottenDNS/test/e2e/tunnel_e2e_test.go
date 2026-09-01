@@ -68,12 +68,20 @@ func buildBinary(t *testing.T, root, pkg, outPath string) {
 
 // freeUDPPort grabs an ephemeral UDP port and releases it for the server to bind.
 func freeUDPPort(t *testing.T) int {
+	return freeUDPPortForHost(t, "127.0.0.1")
+}
+
+func freeUDPPortForHost(t *testing.T, host string) int {
 	t.Helper()
-	addr, err := net.ResolveUDPAddr("udp", "127.0.0.1:0")
+	network := "udp4"
+	if strings.Contains(host, ":") {
+		network = "udp6"
+	}
+	addr, err := net.ResolveUDPAddr(network, net.JoinHostPort(host, "0"))
 	if err != nil {
 		t.Fatalf("resolve udp: %v", err)
 	}
-	c, err := net.ListenUDP("udp", addr)
+	c, err := net.ListenUDP(network, addr)
 	if err != nil {
 		t.Fatalf("listen udp: %v", err)
 	}
@@ -191,6 +199,26 @@ func TestTunnelEndToEndTCPTransport(t *testing.T) {
 	runTunnelEcho(t, 1, 1, "", "", "RESOLVER_TRANSPORT = \"tcp\"\n")
 }
 
+func TestTunnelEndToEndIPv6UDPTransport(t *testing.T) {
+	requireIPv6Loopback(t)
+	runTunnelEchoOnDNSHost(t, 1, 1, "", "", "RESOLVER_IP_MODE = \"ipv6\"\n", "::1")
+}
+
+func TestTunnelEndToEndIPv6TCPTransport(t *testing.T) {
+	requireIPv6Loopback(t)
+	runTunnelEchoOnDNSHost(t, 1, 1, "", "",
+		"RESOLVER_IP_MODE = \"ipv6\"\nRESOLVER_TRANSPORT = \"tcp\"\n", "::1")
+}
+
+func TestTunnelEndToEndAutoIPv4ToIPv6Fallback(t *testing.T) {
+	requireIPv6Loopback(t)
+	// The server only binds ::1. Auto mode must try the preferred IPv4 entry,
+	// reject it as unhealthy, and establish the tunnel through the supplied
+	// IPv6 resolver without requiring a restart or configuration change.
+	runTunnelEchoOnDNSHost(t, 1, 1, "", "", "RESOLVER_IP_MODE = \"auto\"\n",
+		"::1", "127.0.0.1", "::1")
+}
+
 func TestTunnelEndToEndTCPWithNonTXTChannels(t *testing.T) {
 	// Integration check: DNS-over-TCP/53 transport AND the non-TXT response
 	// channels (NULL, HTTPS) together. The client rotates query types over TCP;
@@ -209,6 +237,25 @@ func TestTunnelEndToEndReshapedQNameTCPNonTXT(t *testing.T) {
 }
 
 func runTunnelEcho(t *testing.T, serverMethod, clientMethod int, serverExtra, clientQueryTypes, clientExtra string) {
+	runTunnelEchoOnDNSHost(t, serverMethod, clientMethod, serverExtra, clientQueryTypes, clientExtra, "127.0.0.1")
+}
+
+func requireIPv6Loopback(t *testing.T) {
+	t.Helper()
+	ln, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback is unavailable: %v", err)
+	}
+	_ = ln.Close()
+
+	pc, err := net.ListenPacket("udp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 UDP loopback is unavailable: %v", err)
+	}
+	_ = pc.Close()
+}
+
+func runTunnelEchoOnDNSHost(t *testing.T, serverMethod, clientMethod int, serverExtra, clientQueryTypes, clientExtra, dnsHost string, resolverHosts ...string) {
 	if clientQueryTypes == "" {
 		clientQueryTypes = `["TXT", "CNAME", "A", "AAAA"]`
 	}
@@ -221,7 +268,7 @@ func runTunnelEcho(t *testing.T, serverMethod, clientMethod int, serverExtra, cl
 	buildBinary(t, root, "./cmd/client", clientBin)
 
 	echoPort := startEchoServer(t)
-	udpPort := freeUDPPort(t)
+	udpPort := freeUDPPortForHost(t, dnsHost)
 	clientPort := freeTCPPort(t)
 
 	serverCfg := filepath.Join(work, "server_config.toml")
@@ -231,7 +278,7 @@ func runTunnelEcho(t *testing.T, serverMethod, clientMethod int, serverExtra, cl
 	// Server: TCP mode, forwards every tunneled connection to the echo server.
 	if err := os.WriteFile(serverCfg, []byte(fmt.Sprintf(`
 PROTOCOL_TYPE = "TCP"
-UDP_HOST = "127.0.0.1"
+UDP_HOST = %q
 UDP_PORT = %d
 DOMAIN = ["a.io"]
 MIN_VPN_LABEL_LENGTH = 1
@@ -274,7 +321,7 @@ ARQ_DATA_NACK_REPEAT_SECONDS = 0.8
 ARQ_TERMINAL_DRAIN_TIMEOUT_SECONDS = 120.0
 ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS = 90.0
 %s
-`, udpPort, serverMethod, echoPort, serverExtra)), 0644); err != nil {
+`, dnsHost, udpPort, serverMethod, echoPort, serverExtra)), 0644); err != nil {
 		t.Fatalf("write server cfg: %v", err)
 	}
 
@@ -295,7 +342,15 @@ ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS = 90.0
 	encryptionKey := strings.TrimSpace(string(keyData))
 
 	resolverFile := filepath.Join(work, "client_resolvers.txt")
-	if err := os.WriteFile(resolverFile, []byte(fmt.Sprintf("127.0.0.1:%d\n", udpPort)), 0644); err != nil {
+	if len(resolverHosts) == 0 {
+		resolverHosts = []string{dnsHost}
+	}
+	var resolverList strings.Builder
+	for _, host := range resolverHosts {
+		resolverList.WriteString(net.JoinHostPort(host, fmt.Sprintf("%d", udpPort)))
+		resolverList.WriteByte('\n')
+	}
+	if err := os.WriteFile(resolverFile, []byte(resolverList.String()), 0644); err != nil {
 		t.Fatalf("write resolvers: %v", err)
 	}
 

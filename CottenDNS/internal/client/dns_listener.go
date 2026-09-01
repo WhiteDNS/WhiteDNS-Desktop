@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -9,9 +9,9 @@ package client
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -30,7 +30,7 @@ type dnsFragmentKey struct {
 
 type DNSListener struct {
 	client   *Client
-	conn     *net.UDPConn
+	conns    []*net.UDPConn
 	stopChan chan struct{}
 	stopOnce sync.Once
 }
@@ -43,30 +43,69 @@ func NewDNSListener(c *Client) *DNSListener {
 }
 
 func (l *DNSListener) Start(ctx context.Context, ip string, port int) error {
-	addr, err := net.ResolveUDPAddr("udp", fmt.Sprintf("%s:%d", ip, port))
-	if err != nil {
-		return err
+	addresses := listenerAddressesForBind(ip, port)
+	if len(addresses) == 0 {
+		return errors.New("invalid DNS listener address")
 	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		return err
-	}
-	l.conn = conn
-
-	l.client.log.Infof("🚀 <green>DNS server is listening on <cyan>%s:%d</cyan></green>", ip, port)
+	listeners := make([]*net.UDPConn, 0, len(addresses))
 	actualPort := port
-	if localAddr, ok := conn.LocalAddr().(*net.UDPAddr); ok && localAddr != nil && localAddr.Port > 0 {
-		actualPort = localAddr.Port
+	for idx, text := range addresses {
+		// When port zero is used for tests or embedding, bind the second family to
+		// the first listener's selected port so both loopbacks expose one endpoint.
+		if idx > 0 && port == 0 && actualPort > 0 {
+			host, _, splitErr := net.SplitHostPort(text)
+			if splitErr == nil {
+				text = net.JoinHostPort(host, strconv.Itoa(actualPort))
+			}
+		}
+		addr, err := net.ResolveUDPAddr("udp", text)
+		if err != nil {
+			continue
+		}
+		network := "udp4"
+		if addr.IP != nil && addr.IP.To4() == nil {
+			network = "udp6"
+		}
+		conn, err := net.ListenUDP(network, addr)
+		if err != nil {
+			if len(addresses) == 1 {
+				return err
+			}
+			continue
+		}
+		listeners = append(listeners, conn)
+		if localAddr, ok := conn.LocalAddr().(*net.UDPAddr); ok && localAddr != nil && localAddr.Port > 0 {
+			actualPort = localAddr.Port
+		}
+	}
+	if len(listeners) == 0 {
+		return errors.New("failed to bind any DNS listener")
+	}
+	l.conns = listeners
+
+	for _, conn := range listeners {
+		l.client.log.Infof("🚀 <green>DNS server is listening on <cyan>%s</cyan></green>", conn.LocalAddr())
 	}
 
 	if hint := netutil.FormatListenHint(ip, actualPort); hint != "" {
 		l.client.log.Infof("🌐 <green>DNS Server %s</green>", hint)
 	}
 
-	go func() {
+	for _, conn := range listeners {
+		go l.readLoop(ctx, conn)
+	}
+
+	return nil
+}
+
+func (l *DNSListener) readLoop(ctx context.Context, conn *net.UDPConn) {
+	if conn == nil {
+		return
+	}
+	func() {
 		buf := make([]byte, 4096)
 		for {
-			n, peerAddr, err := l.conn.ReadFromUDP(buf)
+			n, peerAddr, err := conn.ReadFromUDP(buf)
 			if err != nil {
 				if errors.Is(err, net.ErrClosed) {
 					return
@@ -90,11 +129,9 @@ func (l *DNSListener) Start(ctx context.Context, ip string, port int) error {
 			// Copy data for the handler to prevent overwrite race condition
 			dataCopy := make([]byte, n)
 			copy(dataCopy, buf[:n])
-			go l.handleQuery(ctx, dataCopy, peerAddr)
+			go l.handleQuery(ctx, conn, dataCopy, peerAddr)
 		}
 	}()
-
-	return nil
 }
 
 func dnsListenerShouldRetryRead(err error) bool {
@@ -122,22 +159,24 @@ func (l *DNSListener) Stop() {
 	}
 	l.stopOnce.Do(func() {
 		close(l.stopChan)
-		if l.conn != nil {
-			_ = l.conn.Close()
-			l.conn = nil
+		for _, conn := range l.conns {
+			if conn != nil {
+				_ = conn.Close()
+			}
 		}
+		l.conns = nil
 	})
 }
 
 // handleQuery manages incoming DNS queries by checking the local cache or redirecting to the tunnel.
-func (l *DNSListener) handleQuery(ctx context.Context, data []byte, addr *net.UDPAddr) {
+func (l *DNSListener) handleQuery(ctx context.Context, conn *net.UDPConn, data []byte, addr *net.UDPAddr) {
 	if l.client == nil {
 		return
 	}
 
 	l.client.ProcessDNSQuery(data, addr, func(resp []byte) {
-		if l.conn != nil {
-			_, _ = l.conn.WriteToUDP(resp, addr)
+		if conn != nil {
+			_, _ = conn.WriteToUDP(resp, addr)
 		}
 	})
 }

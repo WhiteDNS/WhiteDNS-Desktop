@@ -20,6 +20,8 @@ import (
 	"encoding/binary"
 	"io"
 	"net"
+	"net/netip"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -72,7 +74,7 @@ func (s *Server) serveTCP(ctx context.Context, host string, port int) error {
 	// on 443, and multiplying listeners there would interact with that
 	// hand-off for no gain, since TLS connections are long-lived and accept
 	// rate is not their bottleneck.
-	ln, err := s.listenTCPShared(net.JoinHostPort(host, itoaPort(port)), udpSocketCount(s.cfg.UDPReaders))
+	ln, err := s.listenTCP53(host, port)
 	if err != nil {
 		return err
 	}
@@ -80,6 +82,41 @@ func (s *Server) serveTCP(ctx context.Context, host string, port int) error {
 	defer s.tcpListenerUp.Store(0)
 	limited := newLimitedListenerWithBudget(ln, s.streamConnBudget, s.cfg.TCPMaxConns, s.cfg.TCPMaxConnsPerIP)
 	return s.serveDNSOverStream(ctx, limited, "TCP")
+}
+
+// listenTCP53 opens the normal listener plus a distinct tcp6 listener when
+// enabled. Both are presented as one logical listener so TCP_MAX_CONNS and the
+// per-IP limit remain global across address families.
+func (s *Server) listenTCP53(host string, port int) (net.Listener, error) {
+	sockets := udpSocketCount(s.cfg.UDPReaders)
+	trimmed := strings.TrimSpace(host)
+	primaryNetwork := "tcp"
+	if ip, parseErr := netip.ParseAddr(trimmed); parseErr == nil {
+		if ip.Unmap().Is4() {
+			primaryNetwork = "tcp4"
+		} else {
+			primaryNetwork = "tcp6"
+		}
+	}
+	primary, err := s.listenTCPSharedNetwork(primaryNetwork, net.JoinHostPort(trimmed, itoaPort(port)), sockets)
+	if err != nil {
+		return nil, err
+	}
+
+	// An IPv6 primary already provides the requested family. Do not open the
+	// same address twice, and do not assume it also accepts IPv4.
+	if !s.cfg.TCPIPv6Enabled || primaryNetwork == "tcp6" {
+		return primary, nil
+	}
+	ipv6Address := net.JoinHostPort(strings.TrimSpace(s.cfg.TCPIPv6Host), itoaPort(port))
+	ipv6, ipv6Err := s.listenTCPSharedNetwork("tcp6", ipv6Address, sockets)
+	if ipv6Err != nil {
+		if s.log != nil {
+			s.log.Warnf("<yellow>IPv6 TCP/53 listener unavailable; IPv4 TCP/53 remains active:</yellow> %v", ipv6Err)
+		}
+		return primary, nil
+	}
+	return newMultiListener([]net.Listener{primary, ipv6}), nil
 }
 
 // serveDNSOverStream runs the connection-oriented DNS accept loop on an already
@@ -93,10 +130,21 @@ func (s *Server) serveDNSOverStream(ctx context.Context, ln net.Listener, transp
 		maxConns = 2048
 	}
 
+	addresses := ln.Addr().String()
+	if multi, ok := ln.(interface{ Addresses() []net.Addr }); ok {
+		items := multi.Addresses()
+		parts := make([]string, 0, len(items))
+		for _, address := range items {
+			parts = append(parts, address.String())
+		}
+		if len(parts) > 0 {
+			addresses = strings.Join(parts, ", ")
+		}
+	}
 	s.log.Infof(
 		"\U0001F4E1 <green>%s Listener Ready, Addr: <cyan>%s</cyan>, MaxConns: <cyan>%d</cyan></green>",
 		transportName,
-		ln.Addr().String(),
+		addresses,
 		maxConns,
 	)
 
@@ -244,9 +292,9 @@ func tcpRemoteIPKey(addr net.Addr) string {
 	}
 	host, _, err := net.SplitHostPort(addr.String())
 	if err != nil {
-		return addr.String()
+		return clientIPLimitKey(addr.String())
 	}
-	return host
+	return clientIPLimitKey(host)
 }
 
 func reserveTCPIPSlot(ip string, limit int, mu *sync.Mutex, activeByIP map[string]int) bool {

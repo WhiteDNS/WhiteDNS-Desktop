@@ -164,6 +164,10 @@ type Client struct {
 	// session restart; only a sustained streak escalates to a full MTU re-probe.
 	// Reset by recordTunnelResponse the moment traffic flows again.
 	transportRecoveryStreak atomic.Int32
+	runtimePhase            atomic.Int32
+	ipv6FallbackActive      atomic.Bool
+	statusUploadMTU         atomic.Int64
+	statusDownloadMTU       atomic.Int64
 	// scanTelemetryActive makes the MTU probe path emit a WD_SCAN valid/rejected
 	// line the instant each resolver is decided, so the UI's Valid/Rejected
 	// counters advance in real time during a -scan-only run instead of only after
@@ -199,6 +203,7 @@ type Client struct {
 	asyncWG              sync.WaitGroup
 	asyncCancel          context.CancelFunc
 	tunnelConns          []*net.UDPConn
+	tunnelSocketPairs    []tunnelSocketPair
 	txChannel            chan rawOutboundTask
 	encodedTXChannel     chan encodedOutboundTask
 	rxChannel            chan asyncReadPacket
@@ -513,6 +518,7 @@ func New(cfg config.ClientConfig, log *logger.Logger, codec *security.Codec) *Cl
 		sessionResetSignal:     make(chan struct{}, 1),
 		socksRateLimit:         newSocksRateLimiter(),
 	}
+	c.balancer.SetFamilyMode(cfg.ResolverIPMode)
 
 	if c.streamResolverFailoverResendThreshold < 1 {
 		c.streamResolverFailoverResendThreshold = 1
@@ -547,6 +553,8 @@ func (c *Client) nextSessionInitRetryDelay(failures int) time.Duration {
 // Run starts the main execution loop of the client.
 func (c *Client) Run(ctx context.Context) error {
 	c.successMTUChecks = false
+	c.runtimePhase.Store(clientPhaseStarting)
+	defer c.runtimePhase.Store(clientPhaseStopped)
 	c.log.Infof("\U0001F504 <cyan>Starting main runtime loop...</cyan>")
 	c.logConnectionProgress("starting", 5)
 	sessionInitRetryDelay := time.Duration(0)
@@ -566,6 +574,7 @@ func (c *Client) Run(ctx context.Context) error {
 			return nil
 		default:
 			if !c.successMTUChecks {
+				c.runtimePhase.Store(clientPhaseDiscovering)
 				var mtuErr error
 				if c.cfg.FastConnect {
 					c.connectionsHavePreknownMTU = false
@@ -622,6 +631,7 @@ func (c *Client) Run(ctx context.Context) error {
 			}
 
 			if !c.sessionReady {
+				c.runtimePhase.Store(clientPhaseConnecting)
 				retries := c.cfg.MTUTestRetries
 				if retries < 1 {
 					retries = 3
@@ -630,6 +640,9 @@ func (c *Client) Run(ctx context.Context) error {
 				c.logConnectionProgress("session", 90, "attempt", sessionInitRetryFailures+1)
 				if err := c.InitializeSession(retries); err != nil {
 					sessionInitRetryFailures++
+					if c.rotateResolverFamilyAfterSessionFailure() {
+						c.runtimePhase.Store(clientPhaseRecovering)
+					}
 					lastRecovery := c.lastTransportRecovery.Load()
 					if sessionInitRetryFailures >= runtimeSessionInitFailureLimit &&
 						(lastRecovery == 0 || c.now().Sub(time.Unix(0, lastRecovery)) >= runtimeTransportRecoveryCooldown) {
@@ -660,6 +673,7 @@ func (c *Client) Run(ctx context.Context) error {
 					c.log.Errorf("<red>❌ Async Runtime failed to launch: %v</red>", err)
 					return err
 				}
+				c.runtimePhase.Store(clientPhaseConnected)
 
 				c.InitVirtualStream0()
 
@@ -676,6 +690,7 @@ func (c *Client) Run(ctx context.Context) error {
 				c.StopAsyncRuntime()
 				return nil
 			case <-c.sessionResetSignal:
+				c.runtimePhase.Store(clientPhaseRecovering)
 				c.StopAsyncRuntime()
 				c.resetSessionState(true)
 				c.activatePendingTransportRecovery()

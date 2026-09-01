@@ -1,6 +1,6 @@
 services:
   server:
-    image: ghcr.io/whitedns/cottendns-server:${COTTENDNS_IMAGE_TAG:-latest}
+    image: ghcr.io/tajirax/cottendns-server:${COTTENDNS_IMAGE_TAG:-latest}
     container_name: cottendns-server
     restart: unless-stopped
     network_mode: host

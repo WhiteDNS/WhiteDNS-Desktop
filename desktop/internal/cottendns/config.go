@@ -47,6 +47,17 @@ var runtimeFallbacks = []struct {
 	key   string
 	value any
 }{
+	// Prefer IPv4 while keeping configured IPv6 resolvers warm. If the IPv4
+	// pool cannot establish or maintain a session, the engine can fail over to
+	// IPv6 without a restart.
+	{"RESOLVER_IP_MODE", "auto"},
+	// The desktop supervises the engine through pipes, so keep its output
+	// line-oriented for the runtime parsers even if a user imported a config
+	// created for an interactive terminal.
+	{"TERMINAL_UI", "plain"},
+	// Never leave a GUI-launched helper waiting at the interactive startup
+	// question. The resolver file is the desktop's source of truth.
+	{"STARTUP_MODE", "resolvers"},
 	// The speed preset rotates in HTTPS queries. Filtered networks drop non-TXT
 	// records, which surfaces as loss and retransmits, so TXT-only stays the
 	// default until the user asks for the rotation.
@@ -749,6 +760,8 @@ func optionChoices(key string) []OptionChoice {
 		return []OptionChoice{{Value: "SOCKS5", Label: "SOCKS5"}, {Value: "SOCKS4", Label: "SOCKS4"}}
 	case "RESOLVER_TRANSPORT":
 		return []OptionChoice{{Value: "auto", Label: "Automatic"}, {Value: "udp", Label: "UDP/53"}, {Value: "tcp", Label: "TCP/53"}, {Value: "dot", Label: "DNS over TLS"}, {Value: "doh", Label: "DNS over HTTPS"}}
+	case "RESOLVER_IP_MODE":
+		return []OptionChoice{{Value: "auto", Label: "IPv4 with IPv6 fallback"}, {Value: "dual", Label: "IPv4 and IPv6"}, {Value: "ipv4", Label: "IPv4 only"}, {Value: "ipv6", Label: "IPv6 only"}}
 	case "RESOLVER_BALANCING_STRATEGY":
 		labels := []string{"Random", "Round robin", "Least loss", "Lowest latency", "MTU weighted", "Loss then latency", "Least-loss random pool", "Least-loss round-robin pool"}
 		out := make([]OptionChoice, len(labels))
@@ -762,6 +775,8 @@ func optionChoices(key string) []OptionChoice {
 		return []OptionChoice{{Value: "DEBUG", Label: "DEBUG"}, {Value: "INFO", Label: "INFO"}, {Value: "WARN", Label: "WARN"}, {Value: "ERROR", Label: "ERROR"}}
 	case "STARTUP_MODE":
 		return []OptionChoice{{Value: "resolvers", Label: "Resolver scan"}, {Value: "logs", Label: "Cached logs"}, {Value: "ask", Label: "Ask"}}
+	case "TERMINAL_UI":
+		return []OptionChoice{{Value: "auto", Label: "Automatic"}, {Value: "tui", Label: "Interactive dashboard"}, {Value: "plain", Label: "Plain logs"}}
 	}
 	return nil
 }

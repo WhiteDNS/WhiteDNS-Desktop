@@ -71,6 +71,7 @@ func (c *Client) activatePendingTransportRecovery() bool {
 		return false
 	}
 	c.successMTUChecks = false
+	c.restoreConfiguredResolverFamilyMode()
 	c.connectionsHavePreknownMTU = false
 	for i := range c.connections {
 		c.prepareConnectionMTUScanState(&c.connections[i])

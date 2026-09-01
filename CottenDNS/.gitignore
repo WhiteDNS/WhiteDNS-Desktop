@@ -24,7 +24,14 @@ build/
 dist/
 .gocache/
 .gocache-audit/
+.gocache-*/
+.cache/
 .bench/
+.*-cache/
+.*-tmp/
+*.cpu
+*.prof
+*.test
 
 # OpenCode tooling artifacts
 .opencode/

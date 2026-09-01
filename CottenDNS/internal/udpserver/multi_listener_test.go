@@ -137,3 +137,57 @@ func TestListenTCPSharedFallsBackCleanly(t *testing.T) {
 	}
 	_ = accepted.Close()
 }
+
+func TestListenTCP53AcceptsIPv4AndIPv6(t *testing.T) {
+	v6Probe, err := net.Listen("tcp6", "[::1]:0")
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable: %v", err)
+	}
+	_ = v6Probe.Close()
+	v4Probe, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	port := v4Probe.Addr().(*net.TCPAddr).Port
+	_ = v4Probe.Close()
+
+	s := &Server{cfg: config.ServerConfig{
+		UDPReaders:     1,
+		TCPIPv6Enabled: true,
+		TCPIPv6Host:    "::1",
+	}}
+	ln, err := s.listenTCP53("127.0.0.1", port)
+	if err != nil {
+		t.Fatalf("listenTCP53: %v", err)
+	}
+	defer ln.Close()
+
+	accepted := make(chan struct{}, 2)
+	go func() {
+		for range 2 {
+			conn, acceptErr := ln.Accept()
+			if acceptErr != nil {
+				return
+			}
+			_ = conn.Close()
+			accepted <- struct{}{}
+		}
+	}()
+	for _, address := range []string{
+		net.JoinHostPort("127.0.0.1", itoaPort(port)),
+		net.JoinHostPort("::1", itoaPort(port)),
+	} {
+		conn, dialErr := net.DialTimeout("tcp", address, 5*time.Second)
+		if dialErr != nil {
+			t.Fatalf("dial %s: %v", address, dialErr)
+		}
+		_ = conn.Close()
+	}
+	for range 2 {
+		select {
+		case <-accepted:
+		case <-time.After(5 * time.Second):
+			t.Fatal("dual-stack TCP listener did not accept both families")
+		}
+	}
+}

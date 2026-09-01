@@ -46,6 +46,14 @@ type ClientConfig struct {
 	LocalDNSCachePersist      bool     `toml:"LOCAL_DNS_CACHE_PERSIST_TO_FILE"`
 	LocalDNSCacheFlushSec     float64  `toml:"LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS"`
 	ResolverBalancingStrategy int      `toml:"RESOLVER_BALANCING_STRATEGY"`
+	// ResolverIPMode controls which address family carries DNS queries:
+	//   "auto" (default) prefers healthy IPv4 resolvers and automatically falls
+	//          back to healthy IPv6 resolvers when the IPv4 pool is unavailable.
+	//   "dual" balances across both families.
+	//   "ipv4" / "ipv6" restrict selection to one family.
+	// MTU discovery and health checks still exercise every configured resolver in
+	// auto mode, so IPv6 fallback is warm rather than discovered after an outage.
+	ResolverIPMode string `toml:"RESOLVER_IP_MODE"`
 	// QNameLabelLength is the target maximum DNS label length when laying the
 	// tunnel payload into the query name (1..63). The default 63 packs the payload
 	// into the fewest, longest labels (max capacity); a smaller value produces
@@ -192,12 +200,16 @@ type ClientConfig struct {
 	// resolvers still yields exactly one session. Higher values connect faster
 	// on lossy networks where any single resolver may be dead, at the cost of
 	// that many queries per attempt. 1 disables racing.
-	SessionInitRacingCount         int               `toml:"SESSION_INIT_RACING_COUNT"`
-	LogLevel                       string            `toml:"LOG_LEVEL"`
-	LogToFile                      bool              `toml:"LOG_TO_FILE"`
-	LogDir                         string            `toml:"LOG_DIR"`
-	LogFileName                    string            `toml:"LOG_FILE_NAME"`
-	StatsReportIntervalSeconds     float64           `toml:"STATS_REPORT_INTERVAL_SECONDS"`
+	SessionInitRacingCount     int     `toml:"SESSION_INIT_RACING_COUNT"`
+	LogLevel                   string  `toml:"LOG_LEVEL"`
+	LogToFile                  bool    `toml:"LOG_TO_FILE"`
+	LogDir                     string  `toml:"LOG_DIR"`
+	LogFileName                string  `toml:"LOG_FILE_NAME"`
+	StatsReportIntervalSeconds float64 `toml:"STATS_REPORT_INTERVAL_SECONDS"`
+	// TerminalUI selects the client console presentation. "auto" uses the
+	// interactive dashboard only on a terminal; "tui" forces it and "plain"
+	// retains line-oriented logs for services, redirection, and integrations.
+	TerminalUI                     string            `toml:"TERMINAL_UI"`
 	StartupMode                    string            `toml:"STARTUP_MODE"`
 	LogScanMaxDays                 int               `toml:"LOG_SCAN_MAX_DAYS"`
 	LogScanMaxResolvers            int               `toml:"LOG_SCAN_MAX_RESOLVERS"`
@@ -319,6 +331,7 @@ func defaultClientConfig() ClientConfig {
 		LocalDNSCachePersist:                  true,
 		LocalDNSCacheFlushSec:                 60.0,
 		ResolverBalancingStrategy:             3,
+		ResolverIPMode:                        "auto",
 		QNameLabelLength:                      63,
 		ResolverRateLimitEnabled:              true,
 		ResolverTransport:                     "auto",
@@ -409,6 +422,7 @@ func defaultClientConfig() ClientConfig {
 		LogDir:                               "logs",
 		LogFileName:                          "cottendns_{time}.log",
 		StatsReportIntervalSeconds:           5.0,
+		TerminalUI:                           "auto",
 		StartupMode:                          "logs",
 		LogScanMaxDays:                       30,
 		LogScanMaxResolvers:                  0,
@@ -618,6 +632,26 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 
 	if cfg.ResolverBalancingStrategy < 0 || cfg.ResolverBalancingStrategy > 5 {
 		return cfg, fmt.Errorf("invalid RESOLVER_BALANCING_STRATEGY: %d", cfg.ResolverBalancingStrategy)
+	}
+
+	cfg.ResolverIPMode = strings.ToLower(strings.TrimSpace(cfg.ResolverIPMode))
+	if cfg.ResolverIPMode == "" {
+		cfg.ResolverIPMode = "auto"
+	}
+	switch cfg.ResolverIPMode {
+	case "auto", "dual", "ipv4", "ipv6":
+	default:
+		return cfg, fmt.Errorf("invalid RESOLVER_IP_MODE: %q (valid: auto, dual, ipv4, ipv6)", cfg.ResolverIPMode)
+	}
+
+	cfg.TerminalUI = strings.ToLower(strings.TrimSpace(cfg.TerminalUI))
+	if cfg.TerminalUI == "" {
+		cfg.TerminalUI = "auto"
+	}
+	switch cfg.TerminalUI {
+	case "auto", "tui", "plain":
+	default:
+		return cfg, fmt.Errorf("invalid TERMINAL_UI: %q (valid: auto, tui, plain)", cfg.TerminalUI)
 	}
 
 	if cfg.QNameLabelLength <= 0 || cfg.QNameLabelLength > 63 {

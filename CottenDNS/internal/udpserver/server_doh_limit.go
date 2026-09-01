@@ -53,6 +53,8 @@ type dohRateLimiter struct {
 	lastGC time.Time
 }
 
+const maxDoHRateLimiterStates = 16384
+
 func newDoHRateLimiter(rate float64, burst int) *dohRateLimiter {
 	return &dohRateLimiter{states: make(map[string]dohRateState), rate: rate, burst: float64(burst)}
 }
@@ -61,6 +63,7 @@ func (l *dohRateLimiter) allow(key string, now time.Time) bool {
 	if l == nil || l.rate <= 0 || l.burst <= 0 {
 		return true
 	}
+	key = clientIPLimitKey(key)
 	if key == "" {
 		key = "unknown"
 	}
@@ -77,6 +80,12 @@ func (l *dohRateLimiter) allow(key string, now time.Time) bool {
 	}
 	st, ok := l.states[key]
 	if !ok {
+		// Fail closed when a source-address spray fills the bounded identity
+		// table. Existing clients keep their buckets; new identities cannot turn
+		// an IPv6 prefix scan into unbounded server memory.
+		if len(l.states) >= maxDoHRateLimiterStates {
+			return false
+		}
 		st.tokens = l.burst
 		st.last = now
 	}
@@ -141,12 +150,21 @@ func dohRequestClientIP(r *http.Request, trusted trustedProxySet) string {
 	if !trusted.contains(host) {
 		return host
 	}
-	// Only honor forwarding headers from explicitly trusted peers. The first
-	// X-Forwarded-For entry is the original client in conventional proxy chains.
+	// Only honor forwarding headers from explicitly trusted peers. Walk from the
+	// trusted socket peer toward the client and stop at the first untrusted hop.
+	// Trusting the leftmost value lets a client-supplied prefix bypass limits
+	// when a reverse proxy appends instead of replacing X-Forwarded-For.
 	if forwarded := r.Header.Get("X-Forwarded-For"); forwarded != "" {
-		if candidate := strings.TrimSpace(strings.Split(forwarded, ",")[0]); candidate != "" {
-			if addr, err := netip.ParseAddr(candidate); err == nil {
-				return addr.Unmap().String()
+		parts := strings.Split(forwarded, ",")
+		for i := len(parts) - 1; i >= 0; i-- {
+			candidate := strings.TrimSpace(parts[i])
+			addr, parseErr := netip.ParseAddr(candidate)
+			if parseErr != nil {
+				continue
+			}
+			candidate = addr.Unmap().String()
+			if !trusted.contains(candidate) {
+				return candidate
 			}
 		}
 	}
@@ -156,4 +174,23 @@ func dohRequestClientIP(r *http.Request, trusted trustedProxySet) string {
 		}
 	}
 	return host
+}
+
+// clientIPLimitKey returns a stable abuse-control identity. IPv4 remains per
+// address. IPv6 is grouped by /64 so privacy-address rotation inside a normal
+// delegated subnet cannot bypass connection or request-rate ceilings.
+func clientIPLimitKey(value string) string {
+	value = strings.TrimSpace(value)
+	if zone := strings.LastIndexByte(value, '%'); zone >= 0 {
+		value = value[:zone]
+	}
+	addr, err := netip.ParseAddr(value)
+	if err != nil {
+		return value
+	}
+	addr = addr.Unmap()
+	if addr.Is4() {
+		return addr.String()
+	}
+	return netip.PrefixFrom(addr, 64).Masked().String()
 }

@@ -194,3 +194,44 @@ func TestSchemaReportsWhatTheEngineWillActuallyRun(t *testing.T) {
 		}
 	}
 }
+
+func TestIPv6DesktopIntegrationContract(t *testing.T) {
+	definitions := map[string]OptionDefinition{}
+	for _, definition := range Schema() {
+		definitions[definition.Key] = definition
+	}
+	familyDefinition, ok := definitions["RESOLVER_IP_MODE"]
+	if !ok {
+		t.Fatal("RESOLVER_IP_MODE is missing from the desktop settings schema")
+	}
+	wantFamilyModes := []any{"auto", "dual", "ipv4", "ipv6"}
+	gotFamilyModes := make([]any, 0, len(familyDefinition.Choices))
+	for _, choice := range familyDefinition.Choices {
+		gotFamilyModes = append(gotFamilyModes, choice.Value)
+	}
+	if !reflect.DeepEqual(gotFamilyModes, wantFamilyModes) {
+		t.Fatalf("resolver family choices = %#v, want %#v", gotFamilyModes, wantFamilyModes)
+	}
+
+	shown := map[string]any{}
+	for _, definition := range Schema() {
+		shown[definition.Key] = definition.DefaultValue
+	}
+	if shown["RESOLVER_IP_MODE"] != "auto" {
+		t.Fatalf("desktop must default to automatic IPv6 fallback, got %v", shown["RESOLVER_IP_MODE"])
+	}
+	if shown["TERMINAL_UI"] != "plain" || shown["STARTUP_MODE"] != "resolvers" {
+		t.Fatalf("GUI-safe engine modes are not reflected by the schema: terminal=%v startup=%v", shown["TERMINAL_UI"], shown["STARTUP_MODE"])
+	}
+
+	raw := RenderClientTOML(model.ConnectionProfile{}, map[string]any{})
+	for _, want := range []string{
+		`RESOLVER_IP_MODE = "auto"`,
+		`TERMINAL_UI = "plain"`,
+		`STARTUP_MODE = "resolvers"`,
+	} {
+		if !strings.Contains(raw, want) {
+			t.Fatalf("runtime config missing GUI-safe IPv6 setting %q:\n%s", want, raw)
+		}
+	}
+}

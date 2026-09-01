@@ -1458,3 +1458,24 @@ func TestClearScannerResultsRemovesPersistedScannerFiles(t *testing.T) {
 		}
 	}
 }
+
+func TestScannerInputPreservesIPv6ResolversAndExpandsSmallRanges(t *testing.T) {
+	tests := []struct {
+		token string
+		want  []string
+	}{
+		{token: "2001:4860:4860::8888", want: []string{"2001:4860:4860::8888"}},
+		{token: "[2606:4700:4700::1111]:5353", want: []string{"2606:4700:4700::1111"}},
+		{token: "2001:db8::/126", want: []string{"2001:db8::1", "2001:db8::2", "2001:db8::3"}},
+	}
+
+	for _, test := range tests {
+		got, ok := scannerResolversFromToken(test.token)
+		if !ok || !reflect.DeepEqual(got, test.want) {
+			t.Fatalf("scanner resolver %q = %#v, ok=%t; want %#v", test.token, got, ok, test.want)
+		}
+	}
+	if _, ok := scannerResolversFromToken("2001:db8::/64"); ok {
+		t.Fatal("expected an IPv6 range larger than 65,536 addresses to be rejected")
+	}
+}

@@ -318,6 +318,11 @@ func (c *Client) finalizeMTUSelection(validConns []Connection, minUpload, minDow
 }
 
 func (c *Client) finalizeMTUSelectionLocked(validConns []Connection, minUpload, minDownload, minUploadChars int) []Connection {
+	validConns = c.resolverConnectionsForOperatingPoint(validConns)
+	if len(validConns) == 0 {
+		return nil
+	}
+	_, minUpload, minDownload, minUploadChars = summarizeValidMTUConnections(validConns)
 	// Cluster the full validated set BEFORE any demotion so every tier (including
 	// the slower ones that may be demoted) is visible in the UI.
 	groups := clusterConnectionsByMTU(c.connections, c.cfg.MTUGroupGapRatio)
@@ -402,7 +407,7 @@ func (c *Client) recomputeMTUOperatingPoint() {
 	if c == nil || !c.cfg.MTUAdaptiveGrouping || c.balancer == nil {
 		return
 	}
-	conns := c.balancer.AllValidConnectionsIncludingBackup()
+	conns := c.resolverConnectionsForOperatingPoint(c.balancer.AllValidConnectionsIncludingBackup())
 	if len(conns) == 0 {
 		return
 	}

@@ -176,6 +176,20 @@ func (l *Logger) Enabled(level int) bool {
 	return l != nil && level >= l.level
 }
 
+// SwapConsoleWriter atomically replaces the human console destination and
+// returns the previous writer. File logging is unaffected. Interactive
+// frontends use this to consume log events without concurrent terminal writes.
+func (l *Logger) SwapConsoleWriter(writer io.Writer) io.Writer {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	previous := l.consoleWriter
+	l.consoleWriter = writer
+	return previous
+}
+
 // Close releases the log file writer, if any. Safe to call more than once and
 // on a nil Logger. Console output is unaffected.
 func (l *Logger) Close() error {

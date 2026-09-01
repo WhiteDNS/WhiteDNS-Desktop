@@ -29,10 +29,11 @@ const (
 )
 
 type Balancer struct {
-	strategy  int
-	rrCounter atomic.Uint64
-	rngState  atomic.Uint64
-	version   atomic.Uint64
+	strategy   int
+	familyMode string
+	rrCounter  atomic.Uint64
+	rngState   atomic.Uint64
+	version    atomic.Uint64
 
 	mu       sync.Mutex
 	sources  []*Connection
@@ -58,9 +59,33 @@ type balancerSnapshot struct {
 }
 
 func NewBalancer(strategy int) *Balancer {
-	b := &Balancer{strategy: strategy}
+	b := &Balancer{strategy: strategy, familyMode: "dual"}
 	b.rngState.Store(seedRNG())
 	return b
+}
+
+// SetFamilyMode changes the active address-family policy without discarding
+// resolver statistics. In auto mode IPv4 is the primary carrier and IPv6 is a
+// ready fallback; discovery and health checking remain outside the balancer and
+// continue to probe both families.
+func (b *Balancer) SetFamilyMode(mode string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if mode == "" {
+		mode = "auto"
+	}
+	b.familyMode = mode
+	snap := b.snapshot.Load()
+	if snap == nil {
+		return
+	}
+	b.snapshot.Store(&balancerSnapshot{
+		version:     b.version.Add(1),
+		connections: snap.connections,
+		valid:       rebuildValidIndicesWithFamily(snap.connections, b.familyMode),
+		indexByKey:  snap.indexByKey,
+		stats:       snap.stats,
+	})
 }
 
 func (b *Balancer) SetConnections(connections []*Connection) {
@@ -85,7 +110,7 @@ func (b *Balancer) SetConnections(connections []*Connection) {
 	b.snapshot.Store(&balancerSnapshot{
 		version:     b.version.Add(1),
 		connections: copied,
-		valid:       rebuildValidIndices(copied),
+		valid:       rebuildValidIndicesWithFamily(copied, b.familyMode),
 		indexByKey:  indexByKey,
 		stats:       stats,
 	})
@@ -147,7 +172,7 @@ func (b *Balancer) SetConnectionValidity(key string, valid bool) bool {
 	b.snapshot.Store(&balancerSnapshot{
 		version:     b.version.Add(1),
 		connections: connections,
-		valid:       rebuildValidIndices(connections),
+		valid:       rebuildValidIndicesWithFamily(connections, b.familyMode),
 		indexByKey:  snap.indexByKey,
 		stats:       snap.stats,
 	})
@@ -185,7 +210,7 @@ func (b *Balancer) SetConnectionMTU(key string, uploadBytes int, uploadChars int
 	b.snapshot.Store(&balancerSnapshot{
 		version:     b.version.Add(1),
 		connections: connections,
-		valid:       rebuildValidIndices(connections),
+		valid:       rebuildValidIndicesWithFamily(connections, b.familyMode),
 		indexByKey:  snap.indexByKey,
 		stats:       snap.stats,
 	})
@@ -213,7 +238,7 @@ func (b *Balancer) RefreshValidConnections() {
 	b.snapshot.Store(&balancerSnapshot{
 		version:     b.version.Add(1),
 		connections: connections,
-		valid:       rebuildValidIndices(connections),
+		valid:       rebuildValidIndicesWithFamily(connections, b.familyMode),
 		indexByKey:  snap.indexByKey,
 		stats:       snap.stats,
 	})
@@ -446,7 +471,7 @@ func (b *Balancer) ReclassifyBackups(isBackup func(Connection) bool) {
 	b.snapshot.Store(&balancerSnapshot{
 		version:     b.version.Add(1),
 		connections: connections,
-		valid:       rebuildValidIndices(connections),
+		valid:       rebuildValidIndicesWithFamily(connections, b.familyMode),
 		indexByKey:  snap.indexByKey,
 		stats:       snap.stats,
 	})
@@ -471,12 +496,55 @@ func (b *Balancer) AverageRTT(serverKey string) (time.Duration, bool) {
 // only when no primary is available, so the session normally runs entirely on
 // the active pool but slow reserves still take over if every primary fails.
 func rebuildValidIndices(connections []Connection) []int {
-	primary := make([]int, 0, len(connections))
-	var backup []int
+	return rebuildValidIndicesWithFamily(connections, "dual")
+}
+
+func rebuildValidIndicesWithFamily(connections []Connection, familyMode string) []int {
+	all := make([]int, 0, len(connections))
 	for idx := range connections {
-		if !connections[idx].IsValid {
+		if connections[idx].IsValid {
+			all = append(all, idx)
+		}
+	}
+	if familyMode == "dual" {
+		return selectResolverTier(connections, all)
+	}
+	v4, v6 := splitResolverFamilies(connections, all)
+	switch familyMode {
+	case "ipv4":
+		return selectResolverTier(connections, v4)
+	case "ipv6":
+		return selectResolverTier(connections, v6)
+	case "auto":
+		if len(v4) > 0 {
+			return selectResolverTier(connections, v4)
+		}
+		return selectResolverTier(connections, v6)
+	default:
+		return selectResolverTier(connections, all)
+	}
+}
+
+func splitResolverFamilies(connections []Connection, indices []int) (v4, v6 []int) {
+	v4 = make([]int, 0, len(indices))
+	v6 = make([]int, 0, len(indices))
+	for _, idx := range indices {
+		if idx < 0 || idx >= len(connections) {
 			continue
 		}
+		if resolverAddressIsIPv6(connections[idx].Resolver) {
+			v6 = append(v6, idx)
+		} else {
+			v4 = append(v4, idx)
+		}
+	}
+	return v4, v6
+}
+
+func selectResolverTier(connections []Connection, indices []int) []int {
+	primary := make([]int, 0, len(indices))
+	backup := make([]int, 0, len(indices))
+	for _, idx := range indices {
 		if connections[idx].Backup {
 			backup = append(backup, idx)
 		} else {
@@ -486,7 +554,7 @@ func rebuildValidIndices(connections []Connection) []int {
 	if len(primary) > 0 {
 		return primary
 	}
-	return append(primary, backup...)
+	return backup
 }
 
 func (b *Balancer) statsForKey(serverKey string) *connectionStats {

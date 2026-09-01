@@ -26,11 +26,12 @@ DOMAINS = ["v.domain.com"]
 # DNS record types the client rotates over when building tunnel queries (A1,
 # anti-fingerprinting). Names are case-insensitive. The tunnel payload always
 # rides in the query name, so any of these work, and the server auto-accepts
-# every type and answers with a matching record (no server config needed):
+# every type; specialized A/AAAA data answers are opt-in server features:
 #   TXT   -> TXT chunks (default, highest capacity over recursive resolvers)
 #   NULL  -> raw frame in the answer RDATA (high capacity, direct-resolver path)
 #   HTTPS / SVCB -> frame inside a service-binding SvcParam value
 #   A     -> IPv4 A records when A_RECORD_DATA_DELIVERY is enabled server-side
+#   AAAA  -> denser IPv6 records when AAAA_RECORD_DATA_DELIVERY is enabled
 #   CNAME and all other types -> CNAME target (falls back to TXT for large frames)
 # Unset / empty = TXT only (historical behavior). Recognized:
 #   TXT, CNAME, A, AAAA, NULL, MX, NS, PTR, SRV, SVCB, CAA, NAPTR, SOA, HTTPS
@@ -152,6 +153,15 @@ LOCAL_DNS_CACHE_FLUSH_INTERVAL_SECONDS = 60.0
 #     download MTU, so faster resolvers carry proportionally more)
 # Modes 3 and 4 use runtime feedback from sends/successes.
 RESOLVER_BALANCING_STRATEGY = 3
+
+# Resolver address-family policy:
+#   "auto" (default) = actively prefer healthy IPv4 resolvers and keep every
+#                      provided IPv6 resolver warm as an automatic fallback.
+#   "dual"           = balance across healthy IPv4 and IPv6 resolvers together.
+#   "ipv4"           = use only IPv4 resolver endpoints.
+#   "ipv6"           = use only IPv6 resolver endpoints.
+# Auto mode still probes IPv6 for MTU and health, so failover needs no restart.
+RESOLVER_IP_MODE = "auto"
 
 # How DNS queries reach resolvers:
 #   "auto" (default) - probe over UDP/53 first; if NO resolver passes MTU
@@ -573,6 +583,13 @@ ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS = 90.0
 
 # Typical values: DEBUG, INFO, WARN, ERROR
 LOG_LEVEL = "INFO"
+
+# Console presentation:
+#   "auto"  = organized interactive dashboard on a real terminal, plain logs
+#             under systemd, redirection, desktop embedding, and scan-only mode.
+#   "tui"   = force the cross-platform Bubble Tea dashboard.
+#   "plain" = always use traditional line-oriented logs.
+TERMINAL_UI = "auto"
 
 # When true, the session log and the resolver-cache statistics log are both
 # written to LOG_DIR.  Enabled by default so that logs from each session are

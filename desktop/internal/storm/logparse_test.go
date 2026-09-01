@@ -219,3 +219,19 @@ func TestIsBenignLocalProxyAbortLogRejectsRealErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestParseResolverStatePreservesIPv6Endpoints(t *testing.T) {
+	state, ok := ParseResolverState("WD_RESOLVERS active=2001:4860:4860::8888,[2606:4700:4700::1111]:5353 standby=fe80::1%eth0 valid=2001:4860:4860::8888,[2606:4700:4700::1111]:5353,fe80::1%eth0")
+	if !ok {
+		t.Fatal("expected IPv6 resolver state line")
+	}
+	if len(state.ActiveResolvers) != 2 || state.ActiveResolvers[0] != "2001:4860:4860::8888" || state.ActiveResolvers[1] != "[2606:4700:4700::1111]:5353" {
+		t.Fatalf("IPv6 active resolver telemetry changed: %#v", state.ActiveResolvers)
+	}
+	if len(state.StandbyResolvers) != 1 || state.StandbyResolvers[0] != "fe80::1%eth0" {
+		t.Fatalf("scoped IPv6 standby resolver telemetry changed: %#v", state.StandbyResolvers)
+	}
+	if state.ActiveCount != 2 || state.StandbyCount != 1 || state.ValidCount != 3 {
+		t.Fatalf("unexpected IPv6 resolver counts: %#v", state)
+	}
+}

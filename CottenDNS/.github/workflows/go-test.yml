@@ -116,6 +116,15 @@ jobs:
           done
           echo "All four Android ABIs cross-compiled from main."
 
+      - name: Verify Android excludes the desktop terminal UI
+        run: |
+          set -euo pipefail
+          dependencies="$(GOOS=android GOARCH=arm64 CGO_ENABLED=0 go list -deps ./cmd/client)"
+          if grep -Eq 'cottendns-go/internal/clientui|github.com/charmbracelet/(bubbletea|lipgloss)' <<<"${dependencies}"; then
+            echo "::error::Android client unexpectedly includes desktop terminal UI dependencies"
+            exit 1
+          fi
+
   deployment-contract:
     runs-on: ubuntu-latest
 

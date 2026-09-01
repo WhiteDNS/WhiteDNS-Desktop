@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 set -eu
 
-repo="WhiteDNS/CottenDns"
+repo="TaJirax/cottenDNS"
 install_dir="${COTTENDNS_DOCKER_DIR:-/opt/cottendns-docker}"
 domain="${COTTENDNS_DOMAIN:-}"
 upgrade=false

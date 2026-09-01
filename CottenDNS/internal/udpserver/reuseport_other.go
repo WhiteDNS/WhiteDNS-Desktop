@@ -19,10 +19,10 @@ import "net"
 
 const reusePortSupported = false
 
-func listenUDPReusePort(_ *net.UDPAddr) (*net.UDPConn, error) {
+func listenUDPReusePort(_ string, _ *net.UDPAddr) (*net.UDPConn, error) {
 	return nil, errReusePortUnsupported
 }
 
-func listenTCPReusePort(_ string) (net.Listener, error) {
+func listenTCPReusePort(_, _ string) (net.Listener, error) {
 	return nil, errReusePortUnsupported
 }

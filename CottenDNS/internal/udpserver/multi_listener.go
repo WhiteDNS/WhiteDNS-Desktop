@@ -110,15 +110,32 @@ func (m *multiListener) Addr() net.Addr {
 	return m.listeners[0].Addr()
 }
 
+func (m *multiListener) Addresses() []net.Addr {
+	if m == nil {
+		return nil
+	}
+	addresses := make([]net.Addr, 0, len(m.listeners))
+	for _, listener := range m.listeners {
+		if listener != nil && listener.Addr() != nil {
+			addresses = append(addresses, listener.Addr())
+		}
+	}
+	return addresses
+}
+
 // listenTCPShared opens address as a set of SO_REUSEPORT listeners presented as
 // one, falling back to a single ordinary listener when the platform lacks
 // SO_REUSEPORT or the full set cannot be opened. A partial set is torn down
 // rather than used, so the accept queues stay evenly served.
 func (s *Server) listenTCPShared(address string, sockets int) (net.Listener, error) {
+	return s.listenTCPSharedNetwork("tcp", address, sockets)
+}
+
+func (s *Server) listenTCPSharedNetwork(network, address string, sockets int) (net.Listener, error) {
 	if reusePortSupported && sockets > 1 {
 		listeners := make([]net.Listener, 0, sockets)
 		for range sockets {
-			ln, err := listenTCPReusePort(address)
+			ln, err := listenTCPReusePort(network, address)
 			if err != nil {
 				for _, opened := range listeners {
 					_ = opened.Close()
@@ -136,5 +153,5 @@ func (s *Server) listenTCPShared(address string, sockets int) (net.Listener, err
 		}
 	}
 
-	return net.Listen("tcp", address)
+	return net.Listen(network, address)
 }

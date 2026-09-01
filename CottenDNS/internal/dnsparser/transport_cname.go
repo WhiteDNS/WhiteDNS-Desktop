@@ -58,7 +58,7 @@ func FirstQuestionQType(packet []byte) (uint16, bool) {
 //
 // answerDomain is the tunnel base domain appended as the CNAME target suffix so
 // the client can strip it before decoding.
-func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answerDomain string, packet VpnProto.Packet, baseEncode, allowARecord bool) ([]byte, error) {
+func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answerDomain string, packet VpnProto.Packet, baseEncode, allowARecord bool, allowAAAARecord ...bool) ([]byte, error) {
 	qType, ok := firstQuestionQType(questionPacket)
 	if !ok || qType == Enums.DNS_RECORD_TYPE_TXT {
 		return BuildVPNResponsePacket(questionPacket, answerName, packet, baseEncode)
@@ -86,6 +86,12 @@ func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answ
 	if allowARecord && qType == Enums.DNS_RECORD_TYPE_A {
 		if records, fits := encodeFrameToARecords(rawFrame); fits {
 			return buildARecordResponsePacket(questionPacket, answerName, records)
+		}
+	}
+
+	if len(allowAAAARecord) > 0 && allowAAAARecord[0] && qType == Enums.DNS_RECORD_TYPE_AAAA {
+		if records, fits := encodeFrameToAAAARecords(rawFrame); fits {
+			return buildAAAARecordResponsePacket(questionPacket, answerName, records)
 		}
 	}
 
@@ -205,6 +211,10 @@ func ExtractVPNResponseMatching(packet []byte, baseEncoded bool, domains []strin
 
 	// A2 supplementary channel: IPv4 A records carrying the frame.
 	if pkt, ok, err := extractARecordFrame(parsed); ok {
+		return pkt, err
+	}
+
+	if pkt, ok, err := extractAAAARecordFrame(parsed); ok {
 		return pkt, err
 	}
 

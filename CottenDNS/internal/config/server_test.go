@@ -42,6 +42,39 @@ func TestServerClientPolicyRangesAreWireSafe(t *testing.T) {
 	}
 }
 
+func TestServerAddressFormatsIPv6(t *testing.T) {
+	cfg := ServerConfig{UDPHost: "2001:db8::1", UDPPort: 53}
+	if got, want := cfg.Address(), "[2001:db8::1]:53"; got != want {
+		t.Fatalf("Address() = %q, want %q", got, want)
+	}
+}
+
+func TestServerTCPIPv6DefaultsAndValidation(t *testing.T) {
+	defaults, err := finalizeServerConfig(defaultServerConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !defaults.TCPIPv6Enabled || defaults.TCPIPv6Host != "::" {
+		t.Fatalf("TCP IPv6 defaults = enabled:%v host:%q", defaults.TCPIPv6Enabled, defaults.TCPIPv6Host)
+	}
+	invalid := defaultServerConfig()
+	invalid.TCPIPv6Host = "127.0.0.1"
+	if _, err := finalizeServerConfig(invalid); err == nil {
+		t.Fatal("expected IPv4 TCP_IPV6_HOST to be rejected")
+	}
+	invalid.TCPIPv6Enabled = false
+	if _, err := finalizeServerConfig(invalid); err != nil {
+		t.Fatalf("disabled TCP IPv6 should ignore host: %v", err)
+	}
+
+	scoped := defaultServerConfig()
+	scoped.UDPIPv6Host = "fe80::1%eth0"
+	scoped.TCPIPv6Host = "fe80::1%eth0"
+	if _, err := finalizeServerConfig(scoped); err != nil {
+		t.Fatalf("scoped IPv6 listener addresses should be accepted: %v", err)
+	}
+}
+
 func TestLoadServerConfigWithOverridesAppliesFlagPrecedence(t *testing.T) {
 	dir := t.TempDir()
 	configPath := filepath.Join(dir, "server_config.toml")

@@ -104,9 +104,11 @@ func TestUsesStreamTransportOnlyForNonUDP(t *testing.T) {
 
 func TestResolverHostWithPortReplacesResolverPort(t *testing.T) {
 	cases := map[string]string{
-		"1.1.1.1:53":  "1.1.1.1:853",
-		"1.1.1.1":     "1.1.1.1:853",
+		"1.1.1.1:53":       "1.1.1.1:853",
+		"1.1.1.1":          "1.1.1.1:853",
 		"[2001:db8::1]:53": "[2001:db8::1]:853",
+		"[2001:db8::1]":    "[2001:db8::1]:853",
+		"fe80::1%eth0":     "[fe80::1%eth0]:853",
 	}
 	for in, want := range cases {
 		if got := resolverHostWithPort(in, 853); got != want {

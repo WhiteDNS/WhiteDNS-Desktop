@@ -32,7 +32,7 @@ The app extracts engine-specific runtime binaries from `clients/masterdns-client
 
 CottenDNS is vendored at the repository root from the immutable commit recorded in `vendor/cottendns.json`. The desktop option schema is generated from the pinned CottenDNS client templates. Settings profiles store sparse overrides so native `default`, `speed`, `survival`, and `tcp-survival` preset behavior remains intact. Domain, encryption, and resolver data continue to come from the dedicated connection and resolver profiles.
 
-If you keep client binaries outside the app directory, set `WHITEDNS_CLIENTS_DIR=/absolute/path/to/clients` before launching the app.
+Resolver profiles accept IPv4, IPv6, bracketed IPv6 ports, and bounded IPv4/IPv6 CIDRs. CottenDNS defaults to IPv4 with a warm IPv6 fallback; `RESOLVER_IP_MODE` in the CottenDNS option editor can select `dual`, `ipv4`, or `ipv6` explicitly. If you keep client binaries outside the app directory, set `WHITEDNS_CLIENTS_DIR=/absolute/path/to/clients` before launching the app.
 
 The public proxy is always served by Xray-core pinned to `v26.3.27`. During packaging, `make` reuses a matching core from `.cache/xray/` or `cores/`; if missing, it downloads the requested XTLS release asset. For development overrides, set `WHITEDNS_XRAY_BIN=/absolute/path/to/xray`.
 

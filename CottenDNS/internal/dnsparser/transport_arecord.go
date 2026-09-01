@@ -6,7 +6,7 @@
 // ==============================================================================
 // transport_arecord.go — A2 supplementary delivery: carry a tunnel frame over a
 // set of IPv4 A records (an additional channel alongside TXT/CNAME, opt-in).
-// IPv6/AAAA is intentionally not used because the target networks block IPv6.
+// The denser, separately opt-in AAAA sibling lives in transport_aaaarecord.go.
 //
 // Encoding: the frame is prefixed with its 2-byte length and split into 3-byte
 // chunks; each chunk becomes one A record whose 4-byte RDATA is
@@ -30,9 +30,9 @@ import (
 const (
 	aRecordRDataLen   = 4 // IPv4 address width
 	aRecordDataPerRec = aRecordRDataLen - 1
-	aRecordMaxRecords = 256                                    // 1-byte index
-	aRecordMaxStream  = aRecordMaxRecords * aRecordDataPerRec  // 768
-	aRecordMaxFrame   = aRecordMaxStream - 2                   // minus 2-byte length prefix
+	aRecordMaxRecords = 256                                   // 1-byte index
+	aRecordMaxStream  = aRecordMaxRecords * aRecordDataPerRec // 768
+	aRecordMaxFrame   = aRecordMaxStream - 2                  // minus 2-byte length prefix
 )
 
 // encodeFrameToARecords packs rawFrame into A-record RDATAs. ok is false when

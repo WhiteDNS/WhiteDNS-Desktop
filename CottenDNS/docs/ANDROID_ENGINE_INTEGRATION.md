@@ -1,14 +1,16 @@
 # Android external-engine integration
 
 The CottenDNS client engine is owned and versioned by this repository. Android
-applications should not keep a modified copy under `third_party/`; CI should
-check out an immutable CottenDNS commit or release tag and build that source.
+applications may vendor the complete repository under `third_party/CottenDns`
+or check it out during CI. In either case, record an immutable full commit SHA
+and build exactly that source; do not maintain an untracked fork of engine files.
 
 ## CI contract
 
 1. Check out the Android application repository.
-2. Check out `WhiteDNS/CottenDns` into a temporary or sibling directory at a
-   pinned full commit SHA. Do not track a moving branch for release builds.
+2. Check out the configured CottenDNS upstream into a temporary, sibling, or
+   `third_party/CottenDns` directory at a pinned full commit SHA. Do not track a
+   moving branch for release builds.
 3. Install the Go version from `go.mod` and Android NDK `29.0.14206865`.
 4. From the CottenDNS checkout, run:
 
@@ -48,6 +50,13 @@ existing launcher contract. The linker flags provide 16 KiB page compatibility.
 
 ## Android-facing engine features
 
+- Android builds exclude `internal/clientui` and the Bubble Tea/Lip Gloss
+  dependency graph. `TERMINAL_UI` is intentionally ignored on Android; consume
+  the stable `WD_*` lines from stdout instead.
+- Emit `RESOLVER_IP_MODE = "auto"` to prefer IPv4 and use configured IPv6
+  resolvers as fallback. The accepted values are `auto`, `dual`, `ipv4`, and
+  `ipv6`. Resolver files accept bare IPv4, bare IPv6, `[IPv6]:port`, and
+  `IPv4:port` entries.
 - `FAST_CONNECT` releases startup after a safe resolver pool is ready and keeps
   scanning the remaining fleet at background priority.
 - `LEGACY_SESSION_ID` selects legacy one-byte framing per client while the
@@ -62,3 +71,24 @@ existing launcher contract. The linker flags provide 16 KiB page compatibility.
 
 Pinning the engine SHA makes debug and release builds use identical engine code
 and prevents stale prebuilt binaries from silently surviving an app merge.
+
+## Vendored-source update checklist
+
+When the Android repository stores a source snapshot, replace the entire
+`third_party/CottenDns` directory from the reviewed commit and update
+`third_party/CottenDns.UPSTREAM` in the same change. Never overlay only changed
+Go files: `go.mod`, `go.sum`, build-tagged files, scripts, and config defaults
+are part of the engine contract.
+
+After updating, run the engine's `go test ./...` and
+`scripts/build-android-client.sh all`, then run the Android renderer tests. The
+Android config renderer must explicitly output:
+
+```toml
+RESOLVER_IP_MODE = "auto"
+STARTUP_MODE = "resolvers"
+TERMINAL_UI = "plain"
+```
+
+The last value is documentation for shared configs; the Android build remains
+non-interactive even if it is omitted or changed.

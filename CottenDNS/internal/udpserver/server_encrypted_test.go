@@ -155,8 +155,20 @@ func TestDoHRequestClientIPHonorsTrustedProxyHeaders(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/dns-query", nil)
 	req.RemoteAddr = "127.0.0.1:12345"
 	req.Header.Set("X-Forwarded-For", "203.0.113.9, 10.0.0.1")
-	trusted := newTrustedProxySet([]string{"127.0.0.1"})
+	trusted := newTrustedProxySet([]string{"127.0.0.1", "10.0.0.0/8"})
 	if got := dohRequestClientIP(req, trusted); got != "203.0.113.9" {
 		t.Fatalf("client IP = %q, want 203.0.113.9", got)
+	}
+}
+
+func TestDoHRequestClientIPRejectsSpoofedLeftmostForwardedValue(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/dns-query", nil)
+	req.RemoteAddr = "[2001:db8:ffff::1]:12345"
+	// The client supplied 2001:db8:bad::1; the trusted proxy appended the
+	// actual peer 2001:db8:1234::9. Right-to-left processing must stop there.
+	req.Header.Set("X-Forwarded-For", "2001:db8:bad::1, 2001:db8:1234::9")
+	trusted := newTrustedProxySet([]string{"2001:db8:ffff::/64"})
+	if got := dohRequestClientIP(req, trusted); got != "2001:db8:1234::9" {
+		t.Fatalf("client IP = %q, want actual untrusted peer", got)
 	}
 }

@@ -10,6 +10,8 @@ package config
 import (
 	"flag"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -31,10 +33,23 @@ type ServerConfig struct {
 	UDPHost      string `toml:"UDP_HOST"`
 	UDPPort      int    `toml:"UDP_PORT"`
 	UDPReaders   int    `toml:"UDP_READERS"`
+	// UDPIPv6Enabled adds a dedicated udp6 tunnel listener on UDPIPv6Host at the
+	// same UDP port, alongside the IPv4 listener, so IPv4 and IPv6 clients are
+	// served together. Like the TCP side it never relies on platform dual-stack
+	// behavior of a socket bound to [::]. It is opened dynamically: only when the
+	// host actually has a usable IPv6 address (netutil.HasIPv6), so an IPv4-only
+	// host neither fails nor wastes a socket. Default true.
+	UDPIPv6Enabled bool   `toml:"UDP_IPV6_ENABLED"`
+	UDPIPv6Host    string `toml:"UDP_IPV6_HOST"`
 	// TCPListenerEnabled also serves DNS-over-TCP on the same host:port, so
 	// clients on networks that filter or truncate UDP/53 can fall back to TCP/53.
 	// Default true. TCPMaxConns caps concurrent TCP connections (0 = default).
-	TCPListenerEnabled        bool    `toml:"TCP_LISTENER_ENABLED"`
+	TCPListenerEnabled bool `toml:"TCP_LISTENER_ENABLED"`
+	// TCPIPv6Enabled adds an explicit tcp6 listener on TCPIPv6Host at the same
+	// DNS port. It never relies on the platform-specific dual-stack behavior of
+	// a tcp listener bound to [::], so IPv4 and IPv6 work consistently together.
+	TCPIPv6Enabled            bool    `toml:"TCP_IPV6_ENABLED"`
+	TCPIPv6Host               string  `toml:"TCP_IPV6_HOST"`
 	TCPMaxConns               int     `toml:"TCP_MAX_CONNS"`
 	TCPMaxConnsPerIP          int     `toml:"TCP_MAX_CONNS_PER_IP"`
 	TCPMaxQueriesPerConn      int     `toml:"TCP_MAX_QUERIES_PER_CONN"`
@@ -189,6 +204,7 @@ type ServerConfig struct {
 	DataEncryptionMethod              int      `toml:"DATA_ENCRYPTION_METHOD"`
 	EncryptionAutoDetect              bool     `toml:"ENCRYPTION_AUTO_DETECT"`
 	ARecordDataDelivery               bool     `toml:"A_RECORD_DATA_DELIVERY"`
+	AAAARecordDataDelivery            bool     `toml:"AAAA_RECORD_DATA_DELIVERY"`
 	EncryptionKeyFile                 string   `toml:"ENCRYPTION_KEY_FILE"`
 	// FEC (forward error correction) on the download path (tier 2 loss reducer).
 	// Opt-in; when enabled the server encodes outgoing STREAM_DATA into
@@ -257,7 +273,11 @@ func defaultServerConfig() ServerConfig {
 		ProtocolType:                      "SOCKS5",
 		UDPHost:                           "0.0.0.0",
 		UDPPort:                           53,
+		UDPIPv6Enabled:                    true,
+		UDPIPv6Host:                       "::",
 		TCPListenerEnabled:                true,
+		TCPIPv6Enabled:                    true,
+		TCPIPv6Host:                       "::",
 		TCPMaxConns:                       2048,
 		TCPMaxConnsPerIP:                  128,
 		TCPMaxQueriesPerConn:              0,
@@ -425,6 +445,22 @@ func finalizeServerConfig(cfg ServerConfig) (ServerConfig, error) {
 
 	if cfg.UDPHost == "" {
 		cfg.UDPHost = "0.0.0.0"
+	}
+	if strings.TrimSpace(cfg.UDPIPv6Host) == "" {
+		cfg.UDPIPv6Host = "::"
+	}
+	if cfg.UDPIPv6Enabled {
+		if ip, err := netip.ParseAddr(strings.TrimSpace(cfg.UDPIPv6Host)); err != nil || !ip.Unmap().Is6() {
+			return cfg, fmt.Errorf("UDP_IPV6_HOST must be an IPv6 address: %q", cfg.UDPIPv6Host)
+		}
+	}
+	if strings.TrimSpace(cfg.TCPIPv6Host) == "" {
+		cfg.TCPIPv6Host = "::"
+	}
+	if cfg.TCPIPv6Enabled {
+		if ip, err := netip.ParseAddr(strings.TrimSpace(cfg.TCPIPv6Host)); err != nil || !ip.Unmap().Is6() {
+			return cfg, fmt.Errorf("TCP_IPV6_HOST must be an IPv6 address: %q", cfg.TCPIPv6Host)
+		}
 	}
 
 	if cfg.UDPPort <= 0 || cfg.UDPPort > 65535 {
@@ -727,7 +763,7 @@ func clampOptionalServerFloat(value, minValue, maxValue float64) float64 {
 }
 
 func (c ServerConfig) Address() string {
-	return fmt.Sprintf("%s:%d", c.UDPHost, c.UDPPort)
+	return net.JoinHostPort(c.UDPHost, strconv.Itoa(c.UDPPort))
 }
 
 func (c ServerConfig) DropLogInterval() time.Duration {

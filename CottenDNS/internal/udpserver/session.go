@@ -21,6 +21,7 @@ import (
 	"cottendns-go/internal/arq"
 	Enums "cottendns-go/internal/enums"
 	"cottendns-go/internal/mlq"
+	"cottendns-go/internal/security"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
 
@@ -42,7 +43,8 @@ const (
 )
 
 type sessionRecord struct {
-	mu sync.RWMutex
+	Codec *security.Codec
+	mu    sync.RWMutex
 
 	ID uint16
 	// LegacySessionID records that this session was opened by a client of the
@@ -133,6 +135,7 @@ func getEffectivePriority(packetType uint8, basePriority int) int {
 }
 
 type sessionRuntimeView struct {
+	Codec               *security.Codec
 	ID                  uint16
 	LegacySessionID     bool
 	Cookie              uint8
@@ -145,6 +148,7 @@ type sessionRuntimeView struct {
 }
 
 type closedSessionRecord struct {
+	Codec           *security.Codec
 	Cookie          uint8
 	ResponseMode    uint8
 	LegacySessionID bool
@@ -160,6 +164,7 @@ const (
 )
 
 type sessionLookupResult struct {
+	Codec           *security.Codec
 	Cookie          uint8
 	ResponseMode    uint8
 	LegacySessionID bool
@@ -291,11 +296,18 @@ func newSessionStore(orphanQueueCap int, streamQueueCap int, options ...any) *se
 	}
 }
 
-func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8, downloadCompressionType uint8, maxPacketsPerBatch int, legacy bool) (*sessionRecord, bool, error) {
+func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8, downloadCompressionType uint8, maxPacketsPerBatch int, legacy bool, codecs ...*security.Codec) (*sessionRecord, bool, error) {
 	if len(payload) != sessionInitDataSize || !isValidSessionResponseMode(payload[0]) {
 		return nil, false, nil
 	}
 
+	var codec *security.Codec
+	if len(codecs) > 0 {
+		codec = codecs[0]
+	}
+	if payload[0]&security.DownstreamEncryptedFlag != 0 && (legacy || codec == nil || codec.Method() == 0) {
+		return nil, false, nil
+	}
 	var signature [sessionInitDataSize]byte
 	copy(signature[:], payload[:sessionInitDataSize])
 
@@ -312,7 +324,7 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 			// identical in both wire formats, so it can collide across client
 			// generations. Reusing a record of the other format would hand the
 			// client a session ID it cannot express, so only reuse on a match.
-			if nowUnixNano <= existing.reuseUntilUnixNano && existing.LegacySessionID == legacy {
+			if nowUnixNano <= existing.reuseUntilUnixNano && existing.LegacySessionID == legacy && existing.Codec == codec {
 				existing.setLastActivityUnixNano(nowUnixNano)
 				return existing, true, nil
 			}
@@ -326,6 +338,7 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 	}
 
 	record := &sessionRecord{
+		Codec:               codec,
 		ID:                  uint16(slot),
 		LegacySessionID:     legacy,
 		ResponseMode:        payload[0],
@@ -438,6 +451,7 @@ func (s *sessionStore) Lookup(sessionID uint16) (sessionLookupResult, bool) {
 		return sessionLookupResult{
 			Cookie:          record.Cookie,
 			ResponseMode:    record.ResponseMode,
+			Codec:           record.Codec,
 			LegacySessionID: record.LegacySessionID,
 			State:           sessionLookupActive,
 		}, true
@@ -449,6 +463,7 @@ func (s *sessionStore) Lookup(sessionID uint16) (sessionLookupResult, bool) {
 		return sessionLookupResult{
 			Cookie:          record.Cookie,
 			ResponseMode:    record.ResponseMode,
+			Codec:           record.Codec,
 			LegacySessionID: record.LegacySessionID,
 			State:           sessionLookupClosed,
 		}, true
@@ -466,6 +481,7 @@ func (s *sessionStore) ValidateAndTouch(sessionID uint16, cookie uint8, now time
 			Lookup: sessionLookupResult{
 				Cookie:          record.Cookie,
 				ResponseMode:    record.ResponseMode,
+				Codec:           record.Codec,
 				LegacySessionID: record.LegacySessionID,
 				State:           sessionLookupActive,
 			},
@@ -489,6 +505,7 @@ func (s *sessionStore) ValidateAndTouch(sessionID uint16, cookie uint8, now time
 			Lookup: sessionLookupResult{
 				Cookie:          record.Cookie,
 				ResponseMode:    record.ResponseMode,
+				Codec:           record.Codec,
 				LegacySessionID: record.LegacySessionID,
 				State:           sessionLookupClosed,
 			},
@@ -523,6 +540,7 @@ func (s *sessionStore) Close(sessionID uint16, now time.Time, retention time.Dur
 		s.recentClosed[sessionID] = closedSessionRecord{
 			Cookie:          record.Cookie,
 			ResponseMode:    record.ResponseMode,
+			Codec:           record.Codec,
 			LegacySessionID: record.LegacySessionID,
 			ExpiresAt:       now.Add(retention),
 		}
@@ -578,6 +596,7 @@ func (s *sessionStore) Cleanup(now time.Time, idleTimeout time.Duration, closedR
 			s.recentClosed[uint16(sessionID)] = closedSessionRecord{
 				Cookie:          record.Cookie,
 				ResponseMode:    record.ResponseMode,
+				Codec:           record.Codec,
 				LegacySessionID: record.LegacySessionID,
 				ExpiresAt:       now.Add(closedRetention),
 			}
@@ -732,7 +751,7 @@ func clampMTUCeiling(value uint16, ceiling int) uint16 {
 }
 
 func isValidSessionResponseMode(value uint8) bool {
-	return value <= mtuProbeModeBase64
+	return value&^security.DownstreamEncryptedFlag <= mtuProbeModeBase64
 }
 
 func (r *sessionRecord) setLastActivity(now time.Time) {
@@ -829,7 +848,8 @@ func (r *sessionRecord) runtimeView() sessionRuntimeView {
 		LegacySessionID:     r.LegacySessionID,
 		Cookie:              r.Cookie,
 		ResponseMode:        r.ResponseMode,
-		ResponseBase64:      r.ResponseMode == mtuProbeModeBase64,
+		Codec:               r.Codec,
+		ResponseBase64:      r.ResponseMode&^security.DownstreamEncryptedFlag == mtuProbeModeBase64,
 		DownloadCompression: r.DownloadCompression,
 		DownloadMTU:         r.DownloadMTU,
 		DownloadMTUBytes:    r.DownloadMTUBytes,

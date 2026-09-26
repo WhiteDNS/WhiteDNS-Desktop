@@ -1,6 +1,7 @@
 name: Go Test
 
 on:
+  workflow_call:
   push:
   pull_request:
 
@@ -55,7 +56,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run race-sensitive transport tests
-        run: go test -race -timeout 180s ./internal/arq ./internal/client ./internal/udpserver
+        run: go test -race -timeout 180s ./internal/arq ./internal/client ./internal/clientui ./internal/udpserver
 
   lint:
     runs-on: ubuntu-latest

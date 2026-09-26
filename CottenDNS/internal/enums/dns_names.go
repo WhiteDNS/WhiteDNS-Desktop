@@ -58,8 +58,7 @@ func DNSRecordTypeFromName(name string) (uint16, bool) {
 // must stay in sync with DNSRecordTypeFromName (the client-side parser).
 //
 // Note: this is distinct from IsSupportedTunnelDNSQuery in the dnsparser
-// package, which gates the *DNS-over-tunnel* resolver feature and deliberately
-// excludes TXT.
+// package, which gates the *DNS-over-tunnel* resolver feature.
 func IsTunnelTransportQueryType(qType uint16) bool {
 	switch qType {
 	case

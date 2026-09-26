@@ -5,6 +5,7 @@ import (
 
 	"cottendns-go/internal/compression"
 	"cottendns-go/internal/config"
+	Enums "cottendns-go/internal/enums"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
 
@@ -14,10 +15,10 @@ func TestApplySessionAcceptSupportsLegacyPayload(t *testing.T) {
 	payload := VpnProto.EncodeSessionAccept(0x5a, 0x7b,
 		compression.PackPair(compression.TypeLZ4, compression.TypeZLIB),
 		verify, policy, true)
-	c := &Client{}
-	packet := VpnProto.Packet{Payload: payload, LegacySessionID: true}
+	c := &Client{cfg: config.ClientConfig{LegacySessionID: true}}
+	packet := VpnProto.Packet{PacketType: Enums.PACKET_SESSION_ACCEPT, Payload: payload, LegacySessionID: true}
 
-	if !c.applySessionAccept(packet, []byte{mtuProbeRawResponse}, verify) {
+	if !c.applySessionAccept(packet, make([]byte, sessionInitPayloadSize), verify) {
 		t.Fatal("legacy SESSION_ACCEPT was rejected")
 	}
 	if c.sessionID != 0x5a || c.sessionCookie != 0x7b {

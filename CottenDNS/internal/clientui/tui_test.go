@@ -1,6 +1,8 @@
 package clientui
 
 import (
+	"context"
+	"github.com/charmbracelet/x/ansi"
 	"strings"
 	"testing"
 	"time"
@@ -75,5 +77,49 @@ func TestLogWriterKeepsWholeLines(t *testing.T) {
 	}
 	if got := <-w.lines; got != "two lines" {
 		t.Fatalf("second line = %q", got)
+	}
+}
+
+func TestDashboardFitsTerminalCellsAndRows(t *testing.T) {
+	for _, size := range [][2]int{{1, 1}, {20, 8}, {40, 24}, {80, 28}, {120, 28}, {120, 40}} {
+		m := model{width: size[0], height: size[1], started: time.Now(), status: client.StatusSnapshot{Phase: "connected"}, logs: []string{strings.Repeat("?", 100)}}
+		lines := strings.Split(m.View(), "\n")
+		if len(lines) > size[1] {
+			t.Fatalf("%v: %d rows", size, len(lines))
+		}
+		for _, line := range lines {
+			if ansi.StringWidth(line) > size[0] {
+				t.Fatalf("%v: overflowing line %q", size, line)
+			}
+		}
+	}
+	for _, width := range []int{0, 1, 2, 3, 4, 9} {
+		if ansi.StringWidth(truncateRunes("?????", width)) > width {
+			t.Fatalf("wide Unicode exceeds %d cells", width)
+		}
+	}
+}
+
+func TestLogWaitStopsOnCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { waitLogCmd(ctx, make(chan string))(); close(done) }()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("log command leaked after cancellation")
+	}
+}
+
+func TestLogWriterBoundsUnterminatedLines(t *testing.T) {
+	w := newLogWriter()
+	w.Write([]byte(strings.Repeat("x", 2*maxLogLineBytes)))
+	if len(w.pending) > maxLogLineBytes {
+		t.Fatal("unbounded unterminated log line")
+	}
+	w.Write([]byte("\n"))
+	if len(<-w.lines) > maxLogLineBytes {
+		t.Fatal("unbounded queued log line")
 	}
 }

@@ -63,6 +63,7 @@ type Client struct {
 	resolverAddrCache  map[string]*net.UDPAddr
 	resolverStatsMu    sync.RWMutex
 	resolverPending    map[resolverSampleKey]resolverSample
+	downstreamReplay   downstreamReplayCache
 	resolverHealthMu   sync.RWMutex
 	resolverHealth     map[string]*resolverHealthState
 	resolverRecheck    map[string]resolverRecheckState
@@ -638,7 +639,7 @@ func (c *Client) Run(ctx context.Context) error {
 				}
 
 				c.logConnectionProgress("session", 90, "attempt", sessionInitRetryFailures+1)
-				if err := c.InitializeSession(retries); err != nil {
+				if err := c.InitializeSessionContext(ctx, retries); err != nil {
 					sessionInitRetryFailures++
 					if c.rotateResolverFamilyAfterSessionFailure() {
 						c.runtimePhase.Store(clientPhaseRecovering)

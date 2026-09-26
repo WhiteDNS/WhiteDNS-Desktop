@@ -82,6 +82,12 @@ func (s *Server) handlePreparedIngress(packet []byte, prepared preparedIngress) 
 }
 
 func (s *Server) handleDecodedTunnelPacket(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, vpnPacket VpnProto.Packet) []byte {
+	return s.handleReplayProtectedPacket(packet, parsed, decision, vpnPacket, func() []byte {
+		return s.handleNewDecodedTunnelPacket(packet, parsed, decision, vpnPacket)
+	})
+}
+
+func (s *Server) handleNewDecodedTunnelPacket(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, vpnPacket VpnProto.Packet) []byte {
 
 	if vpnPacket.PacketType == Enums.PACKET_SESSION_CLOSE {
 		s.handleSessionCloseNotice(vpnPacket, time.Now())

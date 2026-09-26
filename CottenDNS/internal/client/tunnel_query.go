@@ -34,10 +34,10 @@ func normalizeRuntimeQueryTypes(codes []uint16) []uint16 {
 }
 
 // nextQueryType returns the DNS record type to use for the next tunnel query,
-// rotating round-robin over the configured set (A1). The upstream server reads
-// the tunnel payload from the QNAME labels regardless of qType, so rotation is
-// purely a query-fingerprint measure and never affects decodability. A
-// single-element set always returns that one type (e.g. the default TXT-only).
+// rotating over the healthy configured types. Upstream payloads always use the
+// QNAME; qType selects the downstream carrier and its capacity. Small carriers
+// can return control packets and short frames while larger frames stay queued
+// for a carrier that can fit them.
 func (c *Client) nextQueryType() uint16 {
 	if c == nil {
 		return Enums.DNS_RECORD_TYPE_TXT
@@ -58,11 +58,56 @@ func (c *Client) nextQueryType() uint16 {
 	return c.queryTypes[int(idx%uint32(len(c.queryTypes)))]
 }
 
+// mtuProbeQueryTypes keeps each MTU binary search on one carrier: alternating
+// carrier capacities between candidates breaks the search's monotonicity.
+// Probes bypass the runtime selector so failed size tests cannot poison its
+// delivery scores. Try another carrier only after a search fails.
+func (c *Client) mtuProbeQueryTypes(download bool) []uint16 {
+	if c == nil || len(c.queryTypes) == 0 {
+		return []uint16{Enums.DNS_RECORD_TYPE_TXT}
+	}
+	if download {
+		// Prefer a full-size carrier, but still discover a usable small MTU
+		// when only CNAME/A/AAAA survives the resolver's filtering.
+		ordered := make([]uint16, 0, len(c.queryTypes))
+		for _, t := range c.queryTypes {
+			if isBulkQueryType(t) {
+				ordered = append(ordered, t)
+			}
+		}
+		for _, t := range c.queryTypes {
+			if !isBulkQueryType(t) {
+				ordered = append(ordered, t)
+			}
+		}
+		return ordered
+	}
+	return c.queryTypes
+}
+
+func isBulkQueryType(qType uint16) bool {
+	switch qType {
+	case Enums.DNS_RECORD_TYPE_TXT, Enums.DNS_RECORD_TYPE_NULL, Enums.DNS_RECORD_TYPE_HTTPS, Enums.DNS_RECORD_TYPE_SVCB:
+		return true
+	default:
+		return false
+	}
+}
+
 func (c *Client) nextQueryTypeForPath(path string) uint16 {
 	if c != nil && c.carrier != nil && path != "" {
 		return c.carrier.nextForPath(path)
 	}
 	return c.nextQueryType()
+}
+
+// PINGs are download opportunities. Prefer a healthy full-size carrier so
+// small-carrier PONGs do not consume most polls while bulk frames stay queued.
+func (c *Client) nextQueryTypeForPacketPath(path string, packetType uint8) uint16 {
+	if c != nil && c.carrier != nil && packetType == Enums.PACKET_PING {
+		return c.carrier.nextForPathWithPreference(path, true)
+	}
+	return c.nextQueryTypeForPath(path)
 }
 
 // queryShaping snapshots the client's per-query DNS-shaping settings for the
@@ -98,6 +143,10 @@ func (c *Client) buildTunnelTXTQuestionBytesPrepared(domain preparedTunnelDomain
 
 // buildTunnelTXTQueryRaw builds an encoded tunnel query using the provided options and codec.
 func (c *Client) buildTunnelTXTQueryRaw(domain string, options VpnProto.BuildOptions) ([]byte, error) {
+	return c.buildTunnelQueryRawWithType(domain, options, c.nextQueryType())
+}
+
+func (c *Client) buildTunnelQueryRawWithType(domain string, options VpnProto.BuildOptions, qType uint16) ([]byte, error) {
 	raw, err := VpnProto.BuildRaw(options)
 	if err != nil {
 		return nil, err
@@ -106,7 +155,7 @@ func (c *Client) buildTunnelTXTQueryRaw(domain string, options VpnProto.BuildOpt
 	if err != nil {
 		return nil, err
 	}
-	return c.buildTunnelTXTQuestionBytes(domain, encoded, c.nextQueryType())
+	return c.buildTunnelTXTQuestionBytes(domain, encoded, qType)
 }
 
 func (c *Client) buildEncodedAutoWithCompressionTrace(options VpnProto.BuildOptions) ([]byte, error) {

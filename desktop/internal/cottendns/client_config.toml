@@ -30,8 +30,11 @@ DOMAINS = ["v.domain.com"]
 #   TXT   -> TXT chunks (default, highest capacity over recursive resolvers)
 #   NULL  -> raw frame in the answer RDATA (high capacity, direct-resolver path)
 #   HTTPS / SVCB -> frame inside a service-binding SvcParam value
-#   A     -> IPv4 A records when A_RECORD_DATA_DELIVERY is enabled server-side
-#   AAAA  -> denser IPv6 records when AAAA_RECORD_DATA_DELIVERY is enabled
+#   A     -> IPv4 A records (server A_RECORD_DATA_DELIVERY, on by default)
+#   AAAA  -> denser IPv6 records (server AAAA_RECORD_DATA_DELIVERY, on by default)
+# Small carriers (CNAME, A, and the other name-based types) only carry control
+# packets and small frames; bulk data rides TXT/NULL/HTTPS/AAAA. Keep at least
+# one of TXT, NULL or HTTPS in the list for full download speed.
 #   CNAME and all other types -> CNAME target (falls back to TXT for large frames)
 # Unset / empty = TXT only (historical behavior). Recognized:
 #   TXT, CNAME, A, AAAA, NULL, MX, NS, PTR, SRV, SVCB, CAA, NAPTR, SOA, HTTPS

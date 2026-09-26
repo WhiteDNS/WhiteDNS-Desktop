@@ -67,6 +67,8 @@ func (s *Server) admitIngressPacket(packet []byte) bool {
 // prepareIngressPacket performs the expensive decode/decrypt and header-width
 // resolution once. The bounded worker retains decompression and session work,
 // while avoiding a second DNS parse, domain match, codec trial, and decrypt.
+// A rejected packet still carries its parse and domain decision so the reader
+// can answer in-zone non-tunnel queries without re-parsing.
 func (s *Server) prepareIngressPacket(packet []byte) (preparedIngress, bool) {
 	if s == nil || s.domainMatcher == nil || len(s.codecs) == 0 {
 		return preparedIngress{}, false
@@ -76,8 +78,9 @@ func (s *Server) prepareIngressPacket(packet []byte) (preparedIngress, bool) {
 		return preparedIngress{}, false
 	}
 	decision := s.domainMatcher.Match(parsed)
+	rejected := preparedIngress{parsed: parsed, decision: decision}
 	if decision.Action != domainMatcher.ActionProcess {
-		return preparedIngress{}, false
+		return rejected, false
 	}
 	startIdx := int(s.preferredCodec.Load())
 	vpnPacket, codecIdx, err := VpnProto.ParseFromLabelsAnyMatching(decision.Labels, s.codecs, startIdx, s.matchesInboundPacketCandidate)
@@ -92,7 +95,7 @@ func (s *Server) prepareIngressPacket(packet []byte) (preparedIngress, bool) {
 		s.preferredCodec.Store(int32(codecIdx))
 	}
 	if err != nil {
-		return preparedIngress{}, false
+		return rejected, false
 	}
 	if codecIdx >= 0 && codecIdx < len(s.codecs) && s.codecs[codecIdx] != nil {
 		method := s.codecs[codecIdx].Method()

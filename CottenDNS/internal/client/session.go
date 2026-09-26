@@ -35,6 +35,13 @@ const (
 )
 
 func (c *Client) InitializeSession(maxAttempts int) error {
+	return c.InitializeSessionContext(context.Background(), maxAttempts)
+}
+
+func (c *Client) InitializeSessionContext(ctx context.Context, maxAttempts int) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	// Re-derive the adaptive operating point over the surviving resolver pool
 	// before (re)establishing the session, so a restart after primary-pool loss
 	// promotes backups at a viable lower MTU rather than reusing a stale one.
@@ -49,8 +56,13 @@ func (c *Client) InitializeSession(maxAttempts int) error {
 	}
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		if err := c.initializeSessionOnce(); err == nil {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := c.initializeSessionOnceContext(ctx); err == nil {
 			return nil
+		} else if ctx.Err() != nil {
+			return ctx.Err()
 		} else if errors.Is(err, ErrNoValidConnections) || errors.Is(err, ErrSessionInitBusy) {
 			return err
 		}
@@ -77,6 +89,10 @@ func (c *Client) sessionInitRaceCount() int {
 }
 
 func (c *Client) initializeSessionOnce() error {
+	return c.initializeSessionOnceContext(context.Background())
+}
+
+func (c *Client) initializeSessionOnceContext(ctx context.Context) error {
 	conns, initPayload, verifyCode, err := c.nextSessionInitRacers(c.sessionInitRaceCount())
 	if err != nil {
 		return err
@@ -84,7 +100,7 @@ func (c *Client) initializeSessionOnce() error {
 	timeout := c.mtuTestTimeout * 3
 
 	if len(conns) == 1 {
-		return c.exchangeSessionInit(conns[0], initPayload, verifyCode, timeout)
+		return c.exchangeSessionInitContext(ctx, conns[0], initPayload, verifyCode, timeout)
 	}
 
 	type initResult struct {
@@ -94,7 +110,7 @@ func (c *Client) initializeSessionOnce() error {
 	// Buffered to len(conns) so stragglers can always send their result and exit
 	// even after we have already returned on the first ACCEPT (no goroutine leak).
 	results := make(chan initResult, len(conns))
-	raceCtx, cancelRace := context.WithCancel(context.Background())
+	raceCtx, cancelRace := context.WithCancel(ctx)
 	defer cancelRace()
 	for _, conn := range conns {
 		go func(conn Connection) {
@@ -110,7 +126,12 @@ func (c *Client) initializeSessionOnce() error {
 
 	sawBusy := false
 	for i := 0; i < len(conns); i++ {
-		res := <-results
+		var res initResult
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case res = <-results:
+		}
 		if !res.ok {
 			continue
 		}
@@ -134,11 +155,18 @@ func (c *Client) initializeSessionOnce() error {
 // exchangeSessionInit runs a single-resolver SESSION_INIT (also the fallback when
 // only one valid resolver exists). Behaviour is identical to the pre-race path.
 func (c *Client) exchangeSessionInit(conn Connection, initPayload []byte, verifyCode [4]byte, timeout time.Duration) error {
+	return c.exchangeSessionInitContext(context.Background(), conn, initPayload, verifyCode, timeout)
+}
+
+func (c *Client) exchangeSessionInitContext(ctx context.Context, conn Connection, initPayload []byte, verifyCode [4]byte, timeout time.Duration) error {
 	query, err := c.buildSessionQuery(conn.Domain, Enums.PACKET_SESSION_INIT, initPayload)
 	if err != nil {
 		return ErrSessionInitFailed
 	}
-	packet, err := c.exchangeDNSOverConnection(conn, query, timeout)
+	packet, err := c.exchangeDNSOverConnectionContext(ctx, conn, query, timeout)
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err != nil {
 		return ErrSessionInitFailed
 	}
@@ -161,6 +189,10 @@ func (c *Client) exchangeSessionInit(conn Connection, initPayload []byte, verify
 // single init collector goroutine, so the state writes are unsynchronized exactly
 // as in the original sequential path.
 func (c *Client) applySessionAccept(packet VpnProto.Packet, initPayload []byte, verifyCode [4]byte) bool {
+	if packet.PacketType != Enums.PACKET_SESSION_ACCEPT || packet.SessionID != 0 ||
+		packet.LegacySessionID != c.cfg.LegacySessionID || len(initPayload) != sessionInitPayloadSize {
+		return false
+	}
 	sidLen := 2
 	if packet.LegacySessionID {
 		sidLen = 1
@@ -168,6 +200,13 @@ func (c *Client) applySessionAccept(packet VpnProto.Packet, initPayload []byte, 
 	verifyStart := sidLen + 2
 	acceptSize := verifyStart + len(verifyCode)
 	if len(packet.Payload) < acceptSize || !bytes.Equal(packet.Payload[verifyStart:acceptSize], verifyCode[:]) {
+		return false
+	}
+	sessionID := uint16(packet.Payload[0])
+	if sidLen == 2 {
+		sessionID = binary.BigEndian.Uint16(packet.Payload[:2])
+	}
+	if sessionID == 0 || (sidLen == 2 && sessionID <= 255) {
 		return false
 	}
 	if sidLen == 1 {
@@ -208,15 +247,13 @@ func (c *Client) buildSessionInitPayload() ([]byte, bool, [4]byte, error) {
 	copy(verifyCode[:], randomPart)
 
 	payload := make([]byte, sessionInitPayloadSize)
-	if c.cfg.BaseEncodeData {
-		payload[0] = mtuProbeBase64Reply
-	}
+	payload[0] = c.configuredResponseMode()
 	payload[1] = compression.PackPair(c.uploadCompression, c.downloadCompression)
 	uploadMTU, downloadMTU := c.sessionInitAdvertisedMTUs()
 	binary.BigEndian.PutUint16(payload[2:4], uint16(uploadMTU))
 	binary.BigEndian.PutUint16(payload[4:6], uint16(downloadMTU))
 	copy(payload[6:10], verifyCode[:])
-	return payload, payload[0] == mtuProbeBase64Reply, verifyCode, nil
+	return payload, c.cfg.BaseEncodeData, verifyCode, nil
 }
 
 // sessionInitAdvertisedMTUs reports measured path capacity, not the previous

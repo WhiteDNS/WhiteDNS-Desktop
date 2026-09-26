@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -49,12 +49,13 @@ type Question struct {
 }
 
 type ResourceRecord struct {
-	Name  string
-	Type  uint16
-	Class uint16
-	TTL   uint32
-	RDLen uint16
-	RData []byte
+	Name        string
+	Type        uint16
+	Class       uint16
+	TTL         uint32
+	RDLen       uint16
+	RData       []byte
+	rdataOffset int // offset in the complete message, for compressed RDATA names
 }
 
 type Packet struct {
@@ -233,12 +234,13 @@ func parseResourceRecords(data []byte, offset int, count int) ([]ResourceRecord,
 		}
 
 		records[i] = ResourceRecord{
-			Name:  name,
-			Type:  rType,
-			Class: rClass,
-			TTL:   ttl,
-			RDLen: rdLen,
-			RData: data[offset:end],
+			Name:        name,
+			Type:        rType,
+			Class:       rClass,
+			TTL:         ttl,
+			RDLen:       rdLen,
+			RData:       data[offset:end],
+			rdataOffset: offset,
 		}
 		offset = end
 	}

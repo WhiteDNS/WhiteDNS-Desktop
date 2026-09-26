@@ -85,8 +85,8 @@ func TestRuntimeDNSReadBufferIsSizedForConfiguredMTU(t *testing.T) {
 	if got := runtimeDNSReadBufferSize(4000); got != runtimeDNSReadBufferFloor {
 		t.Fatalf("default MTU buffer = %d, want cache-friendly floor %d", got, runtimeDNSReadBufferFloor)
 	}
-	if got := runtimeDNSReadBufferSize(20000); got != 22048 {
-		t.Fatalf("large MTU buffer = %d, want MTU plus framing slack", got)
+	if got := runtimeDNSReadBufferSize(20000); got < 28000 || got > RuntimeUDPReadBufferSize {
+		t.Fatalf("large MTU buffer = %d, want room for base64 TXT framing", got)
 	}
 	if got := runtimeDNSReadBufferSize(65535); got != RuntimeUDPReadBufferSize {
 		t.Fatalf("oversize buffer = %d, want DNS framing ceiling", got)

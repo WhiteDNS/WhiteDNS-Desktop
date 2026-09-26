@@ -104,3 +104,25 @@ func TestNextQueryTypeConcurrentCoversWholeSet(t *testing.T) {
 		}
 	}
 }
+
+func TestMTUProbeQueryTypesPreferBulkCarriers(t *testing.T) {
+	c := &Client{queryTypes: []uint16{
+		Enums.DNS_RECORD_TYPE_CNAME, Enums.DNS_RECORD_TYPE_TXT, Enums.DNS_RECORD_TYPE_HTTPS, Enums.DNS_RECORD_TYPE_A,
+	}}
+	want := []uint16{Enums.DNS_RECORD_TYPE_TXT, Enums.DNS_RECORD_TYPE_HTTPS, Enums.DNS_RECORD_TYPE_CNAME, Enums.DNS_RECORD_TYPE_A}
+	got := c.mtuProbeQueryTypes(true)
+	if len(got) != len(want) {
+		t.Fatalf("download probes lost a carrier: %v", got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("download probes must try bulk carriers before small fallbacks: got %v want %v", got, want)
+		}
+	}
+	var nilClient *Client
+	for _, empty := range []*Client{nilClient, {}} {
+		if got := empty.mtuProbeQueryTypes(true); len(got) != 1 || got[0] != Enums.DNS_RECORD_TYPE_TXT {
+			t.Fatalf("empty configuration should probe TXT: %v", got)
+		}
+	}
+}

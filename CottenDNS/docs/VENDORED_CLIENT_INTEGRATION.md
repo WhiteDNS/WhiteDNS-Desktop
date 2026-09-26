@@ -36,10 +36,17 @@ settings UI.
   When an older config omits `STARTUP_MODE`, a non-terminal process uses the
   resolver-file path immediately; interactive shells retain the normal prompt.
 
-No VPN protocol or session framing change is required. Resolver address family
-is a client-to-recursive-resolver transport choice, so a new vendored client can
-continue to talk to compatible older CottenDNS tunnel servers. Server-side IPv6
-listeners and abuse controls require the updated server binary.
+Resolver address family remains a client-to-recursive-resolver transport choice.
+Native keyed clients now require encrypted downstream responses, negotiated in
+an existing response-mode byte. Upgrade the server together with these clients;
+there is no automatic fallback to unauthenticated plaintext. Explicit legacy
+session mode retains its older wire contract. The AES modes authenticate both
+directions; XOR and unauthenticated ChaCha20 do not provide replay protection.
+
+CI draft releases include `CottenDNS-Android-<version>.zip` with all four
+`jniLibs/<abi>/libcottendns_client.so` files, an immutable source commit manifest,
+and checksums. Copy these into the Android app and rebuild/reinstall its APK;
+the packaged-only installer does not import a raw `.so` at runtime.
 
 ## Release gate
 

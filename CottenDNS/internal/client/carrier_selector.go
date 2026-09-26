@@ -34,9 +34,10 @@ const (
 )
 
 type carrierSelector struct {
-	types   []uint16
-	typeIdx map[uint16]int
-	cursor  atomic.Uint32
+	types      []uint16
+	typeIdx    map[uint16]int
+	cursor     atomic.Uint32
+	bulkCursor atomic.Uint32
 
 	// Per-type send/success counters, halved on each eval so stale data fades.
 	sent    []atomic.Uint64
@@ -91,13 +92,21 @@ func (s *carrierSelector) forPath(path string) *carrierSelector {
 }
 
 func (s *carrierSelector) nextForPath(path string) uint16 {
+	return s.nextForPathWithPreference(path, false)
+}
+
+func (s *carrierSelector) nextForPathWithPreference(path string, preferBulk bool) uint16 {
 	if path == "" {
-		return s.next()
+		return s.nextWithPreference(preferBulk)
 	}
-	// Keep aggregate telemetry warm while the returned decision comes from the
-	// path-specific selector.
-	_ = s.next()
-	return s.forPath(path).next()
+	// Aggregate sends must describe the carrier actually chosen on this path;
+	// independent global rotation can disagree after a path drops a carrier.
+	qType := s.forPath(path).nextWithPreference(preferBulk)
+	s.maybeEval()
+	if i, ok := s.typeIdx[qType]; ok {
+		s.sent[i].Add(1)
+	}
+	return qType
 }
 
 func (s *carrierSelector) recordSuccessForPath(path string, qType uint16) {
@@ -116,6 +125,13 @@ func (s *carrierSelector) now() time.Time {
 
 // next returns the record type for the next tunnel query and counts it as sent.
 func (s *carrierSelector) next() uint16 {
+	return s.nextWithPreference(false)
+}
+
+// Download polls prefer healthy carriers that can drain full-size frames. When
+// all such carriers fail, small carriers still receive polls, while maybeEval
+// periodically returns failed bulk carriers to the active set for exploration.
+func (s *carrierSelector) nextWithPreference(preferBulk bool) uint16 {
 	if s == nil || len(s.types) == 0 {
 		return Enums.DNS_RECORD_TYPE_TXT
 	}
@@ -126,11 +142,32 @@ func (s *carrierSelector) next() uint16 {
 	s.maybeEval()
 	active := s.active.Load()
 	if active == nil || len(*active) == 0 {
-		idx := int(s.cursor.Add(1)-1) % len(s.types)
+		idx := int((s.cursor.Add(1) - 1) % uint32(len(s.types)))
 		s.sent[idx].Add(1)
 		return s.types[idx]
 	}
-	ti := (*active)[int(s.cursor.Add(1)-1)%len(*active)]
+	if preferBulk {
+		bulkCount := 0
+		for _, ti := range *active {
+			if isBulkQueryType(s.types[ti]) {
+				bulkCount++
+			}
+		}
+		if bulkCount > 0 {
+			choice := int((s.bulkCursor.Add(1) - 1) % uint32(bulkCount))
+			for _, ti := range *active {
+				if !isBulkQueryType(s.types[ti]) {
+					continue
+				}
+				if choice == 0 {
+					s.sent[ti].Add(1)
+					return s.types[ti]
+				}
+				choice--
+			}
+		}
+	}
+	ti := (*active)[int((s.cursor.Add(1)-1)%uint32(len(*active)))]
 	s.sent[ti].Add(1)
 	return s.types[ti]
 }

@@ -789,9 +789,15 @@ top -p "$pid"
 
 ## Android and engine embedding
 
-The Go networking engine is kept in this repository. Android and desktop applications can pin CottenDNS as a vendored source snapshot, Git submodule, or CI dependency. Always use a reviewed full commit SHA rather than a moving branch.
+The Go networking engine is kept in this repository. Android applications can pin CottenDNS as a Git submodule or CI dependency and build the engine without copying it into the app repository.
 
-The engine is continuously cross-compiled with the Android NDK for arm64, armv7, amd64, and 386. Android builds exclude the desktop terminal UI dependencies. GUI wrappers should set `TERMINAL_UI = "plain"`, use `RESOLVER_IP_MODE = "auto"`, and preserve bracketed IPv6 resolver endpoints.
+Known-good engine commit:
+
+```text
+8eea49d1267b1a41441c25c75e69e6f12ad0a11f
+```
+
+The engine has been cross-compiled with CGO disabled for Android arm64, armv7, amd64, and 386. The Android wrapper should preserve the recommended defaults or pass equivalent TOML values.
 
 Example submodule update:
 
@@ -799,15 +805,11 @@ Example submodule update:
 git submodule update --init --recursive
 cd path/to/cottenDNS
 git fetch origin
-git checkout <reviewed-full-commit-sha>
+git checkout 8eea49d1267b1a41441c25c75e69e6f12ad0a11f
 cd ..
 git add path/to/cottenDNS
 git commit -m "Update CottenDNS engine"
 ```
-
-See [Android engine integration](docs/ANDROID_ENGINE_INTEGRATION.md) and the
-[WhiteDNS vendoring contract](docs/VENDORED_CLIENT_INTEGRATION.md) for the
-consumer-side files and release checks that must be updated with each pin.
 
 ## Compatibility
 

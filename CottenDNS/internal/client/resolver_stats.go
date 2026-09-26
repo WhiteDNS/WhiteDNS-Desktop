@@ -69,11 +69,13 @@ type resolverSampleKey struct {
 }
 
 type resolverSample struct {
-	serverKey  string
-	sentAt     time.Time
-	timedOut   bool
-	timedOutAt time.Time
-	evictAfter time.Time
+	questionDigest [32]byte
+	questionKnown  bool
+	serverKey      string
+	sentAt         time.Time
+	timedOut       bool
+	timedOutAt     time.Time
+	evictAfter     time.Time
 }
 
 type resolverTimeoutObservation struct {
@@ -125,6 +127,7 @@ func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr
 		dnsID:        binary.BigEndian.Uint16(packet[:2]),
 	}
 
+	questionDigest, questionKnown := resolverQuestionDigest(packet)
 	var timeoutObservations []resolverTimeoutObservation
 	c.resolverStatsMu.Lock()
 	if len(c.resolverPending) >= resolverPendingSoftCap {
@@ -134,8 +137,10 @@ func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr
 		}
 	}
 	c.resolverPending[key] = resolverSample{
-		serverKey: serverKey,
-		sentAt:    sentAt,
+		serverKey:      serverKey,
+		sentAt:         sentAt,
+		questionDigest: questionDigest,
+		questionKnown:  questionKnown,
 	}
 	c.resolverStatsMu.Unlock()
 
@@ -145,9 +150,16 @@ func (c *Client) trackResolverSend(packet []byte, resolverAddr string, localAddr
 	c.noteResolverSend(serverKey)
 }
 
-func (c *Client) trackResolverSuccess(packet []byte, addr *net.UDPAddr, localAddr string, receivedAt time.Time) {
+// claimResolverSuccessSample matches packet to its outstanding pending sample
+// by (resolverAddr, localAddr, dnsID), validates the question digest recorded
+// at send time, and atomically removes it so at most one caller can claim a
+// given response. It is the sole place that pays for the question-digest hash
+// and the resolverStatsMu lock on a successful response, shared by the plain
+// and downstream-encrypted paths so an authenticated response is not hashed
+// and locked twice on its way through handleInboundPacket.
+func (c *Client) claimResolverSuccessSample(packet []byte, addr *net.UDPAddr, localAddr string) (resolverSample, bool) {
 	if c == nil || len(packet) < 2 || addr == nil {
-		return
+		return resolverSample{}, false
 	}
 
 	key := resolverSampleKey{
@@ -156,17 +168,27 @@ func (c *Client) trackResolverSuccess(packet []byte, addr *net.UDPAddr, localAdd
 		dnsID:        binary.BigEndian.Uint16(packet[:2]),
 	}
 
+	questionDigest, questionKnown := resolverQuestionDigest(packet)
 	c.resolverStatsMu.Lock()
 	sample, ok := c.resolverPending[key]
+	if ok && sample.questionKnown && (!questionKnown || sample.questionDigest != questionDigest) {
+		ok = false
+	}
 	if ok {
 		delete(c.resolverPending, key)
 	}
 	c.resolverStatsMu.Unlock()
 
 	if !ok || sample.serverKey == "" {
-		return
+		return resolverSample{}, false
 	}
+	return sample, true
+}
 
+// applyResolverSuccess runs the bookkeeping for a sample claimed by
+// claimResolverSuccessSample: carrier delivery credit, RTT sampling, and
+// clearing any timeout mark that was raised while the response was in flight.
+func (c *Client) applyResolverSuccess(sample resolverSample, packet []byte, receivedAt time.Time) {
 	// Credit the carrier only after atomically claiming a real outstanding
 	// sample. handleInboundPacket calls this path only after decoding a tunnel
 	// frame, so empty/NODATA replies and duplicated DNS answers cannot inflate a
@@ -183,6 +205,14 @@ func (c *Client) trackResolverSuccess(packet []byte, addr *net.UDPAddr, localAdd
 	c.noteResolverSuccess(sample.serverKey, receivedAt.Sub(sample.sentAt))
 }
 
+func (c *Client) trackResolverSuccess(packet []byte, addr *net.UDPAddr, localAddr string, receivedAt time.Time) {
+	sample, ok := c.claimResolverSuccessSample(packet, addr, localAddr)
+	if !ok {
+		return
+	}
+	c.applyResolverSuccess(sample, packet, receivedAt)
+}
+
 func (c *Client) trackResolverFailure(packet []byte, addr *net.UDPAddr, localAddr string, failedAt time.Time) {
 	if c == nil || len(packet) < 2 || addr == nil {
 		return
@@ -194,8 +224,12 @@ func (c *Client) trackResolverFailure(packet []byte, addr *net.UDPAddr, localAdd
 		dnsID:        binary.BigEndian.Uint16(packet[:2]),
 	}
 
+	questionDigest, questionKnown := resolverQuestionDigest(packet)
 	c.resolverStatsMu.Lock()
 	sample, ok := c.resolverPending[key]
+	if ok && sample.questionKnown && (!questionKnown || sample.questionDigest != questionDigest) {
+		ok = false
+	}
 	if ok {
 		delete(c.resolverPending, key)
 	}
@@ -333,4 +367,18 @@ func (c *Client) evictResolverPendingLocked(evictCount int) {
 	for i := 0; i < evictCount; i++ {
 		delete(c.resolverPending, entries[i].key)
 	}
+}
+
+// discardResolverSend rolls back a failed write without erasing a newer query
+// that reused the same DNS transaction ID on the same socket.
+func (c *Client) discardResolverSend(packet []byte, resolverAddr, localAddr string, sentAt time.Time) {
+	if c == nil || len(packet) < 2 {
+		return
+	}
+	key := resolverSampleKey{resolverAddr: resolverAddr, localAddr: localAddr, dnsID: binary.BigEndian.Uint16(packet[:2])}
+	c.resolverStatsMu.Lock()
+	if sample, ok := c.resolverPending[key]; ok && sample.sentAt.Equal(sentAt) {
+		delete(c.resolverPending, key)
+	}
+	c.resolverStatsMu.Unlock()
 }

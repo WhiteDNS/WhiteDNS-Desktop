@@ -10,14 +10,16 @@
 // match for the question. CNAME RDATA is a single DNS name with a hard size
 // limit, so frames that do not fit fall back to the TXT encoding.
 //
-// The CNAME target is built uncompressed (no DNS name-compression pointers) so
-// the client can decode it directly from the answer's RDATA slice.
+// The server writes an uncompressed CNAME target. Recursive resolvers may
+// compress it, so decoding resolves names against the complete DNS message.
 // ==============================================================================
 
 package dnsparser
 
 import (
 	"encoding/binary"
+	"math"
+	"sort"
 	"strings"
 
 	baseCodec "cottendns-go/internal/basecodec"
@@ -80,43 +82,133 @@ func BuildVPNResponsePacketMatchingQuery(questionPacket []byte, answerName, answ
 		return nil, err
 	}
 
+	if response, matched, err := buildMatchingRawResponse(questionPacket, answerName, answerDomain, rawFrame, allowARecord, len(allowAAAARecord) > 0 && allowAAAARecord[0]); matched || err != nil {
+		return response, err
+	}
+	return BuildVPNResponsePacket(questionPacket, answerName, packet, baseEncode)
+}
+
+// buildMatchingRawResponse carries an already serialized frame without
+// interpreting its bytes. Encrypted responses use exactly the same carriers.
+func buildMatchingRawResponse(questionPacket []byte, answerName, answerDomain string, rawFrame []byte, allowARecord, allowAAAARecord bool) ([]byte, bool, error) {
+	qType, ok := firstQuestionQType(questionPacket)
+	if !ok || qType == Enums.DNS_RECORD_TYPE_TXT {
+		return nil, false, nil
+	}
+	matched := func(response []byte, err error) ([]byte, bool, error) {
+		return response, true, err
+	}
+
 	// A2 supplementary channel: an A query with A-record delivery enabled is
 	// answered with IPv4 A records when the frame fits the channel capacity.
 	// A records carry the frame directly and need no answer domain.
-	if allowARecord && qType == Enums.DNS_RECORD_TYPE_A {
+	// Both are also bounded by the resolver's advertised UDP size: record
+	// overhead is 4-5x the payload, so a frame the channel accepts can still
+	// produce a response the resolver truncates. Oversized frames use CNAME.
+	if allowARecord && qType == Enums.DNS_RECORD_TYPE_A && len(rawFrame) <= aFrameCapacity(answerBudget(questionPacket)) {
 		if records, fits := encodeFrameToARecords(rawFrame); fits {
-			return buildARecordResponsePacket(questionPacket, answerName, records)
+			return matched(buildARecordResponsePacket(questionPacket, answerName, records))
 		}
 	}
 
-	if len(allowAAAARecord) > 0 && allowAAAARecord[0] && qType == Enums.DNS_RECORD_TYPE_AAAA {
+	if allowAAAARecord && qType == Enums.DNS_RECORD_TYPE_AAAA && len(rawFrame) <= aaaaFrameCapacity(answerBudget(questionPacket)) {
 		if records, fits := encodeFrameToAAAARecords(rawFrame); fits {
-			return buildAAAARecordResponsePacket(questionPacket, answerName, records)
+			return matched(buildAAAARecordResponsePacket(questionPacket, answerName, records))
 		}
 	}
 
 	// NULL channel: the frame rides verbatim in the answer RDATA. Honored by
 	// default whenever the client sends a NULL query.
 	if qType == Enums.DNS_RECORD_TYPE_NULL && len(rawFrame) <= rrChannelMaxFrame {
-		return buildNULLResponsePacket(questionPacket, answerName, rawFrame)
+		return matched(buildNULLResponsePacket(questionPacket, answerName, rawFrame))
 	}
 
 	// HTTPS / SVCB channel: the frame rides in a service-binding SvcParam value.
 	if qType == Enums.DNS_RECORD_TYPE_HTTPS || qType == Enums.DNS_RECORD_TYPE_SVCB {
 		if _, fits := encodeFrameToSVCBRData(rawFrame); fits {
-			return buildSVCBResponsePacket(questionPacket, answerName, qType, rawFrame)
+			return matched(buildSVCBResponsePacket(questionPacket, answerName, qType, rawFrame))
 		}
 	}
 
 	// Otherwise match with a CNAME (needs the tunnel base domain as suffix).
-	if answerDomain != "" {
+	if answerDomain != "" && len(rawFrame) <= cnameFrameCapacity(answerDomain, answerBudget(questionPacket)) {
 		if target, fits := encodeFrameToCNAMETarget(rawFrame, answerDomain); fits {
-			return buildCNAMEResponsePacket(questionPacket, answerName, target)
+			return matched(buildCNAMEResponsePacket(questionPacket, answerName, target))
 		}
 	}
 
 	// Fall back to the TXT encoding, which chunks across multiple answer strings.
-	return BuildVPNResponsePacket(questionPacket, answerName, packet, baseEncode)
+	return nil, false, nil
+}
+
+// MatchingFrameCapacity is the largest raw frame the answer to a qType query can
+// carry in a record of a matching type, following the same order as
+// BuildVPNResponsePacketMatchingQuery. A larger frame falls back to TXT, and
+// resolvers strip a TXT answer to a non-TXT question, so the frame is lost.
+// Senders must keep frames on such a query at or below this size. It is
+// math.MaxInt for carriers that hold any frame (TXT/NULL/HTTPS/SVCB).
+func MatchingFrameCapacity(questionPacket []byte, answerDomain string, allowARecord, allowAAAARecord bool) int {
+	qType, ok := firstQuestionQType(questionPacket)
+	if !ok {
+		return math.MaxInt // the builder answers with TXT
+	}
+	cnameCap := cnameFrameCapacity(answerDomain, answerBudget(questionPacket))
+	switch qType {
+	case Enums.DNS_RECORD_TYPE_TXT, Enums.DNS_RECORD_TYPE_NULL, Enums.DNS_RECORD_TYPE_HTTPS, Enums.DNS_RECORD_TYPE_SVCB:
+		return math.MaxInt
+	case Enums.DNS_RECORD_TYPE_A:
+		if allowARecord {
+			return max(aFrameCapacity(answerBudget(questionPacket)), cnameCap)
+		}
+	case Enums.DNS_RECORD_TYPE_AAAA:
+		if allowAAAARecord {
+			return max(aaaaFrameCapacity(answerBudget(questionPacket)), cnameCap)
+		}
+	}
+	return cnameCap
+}
+
+// answerBudget is how many answer-section bytes fit in a UDP response to
+// questionPacket: the EDNS payload size it advertises (512 without EDNS) minus
+// the header, question and OPT the response echoes back. A larger response is
+// truncated by the resolver and the frame is lost.
+func answerBudget(questionPacket []byte) int {
+	if len(questionPacket) < dnsHeaderSize {
+		return 0
+	}
+	limit := 512
+	header := parseHeader(questionPacket)
+	_, _, questionEnd := extractQuestionSection(questionPacket, header)
+	// OPT owner is the root (one zero byte); its CLASS is the UDP payload size.
+	if start, n := findOPTRecordRange(questionPacket, header, questionEnd); n >= 5 && questionPacket[start] == 0 {
+		limit = max(limit, int(binary.BigEndian.Uint16(questionPacket[start+3:start+5])))
+	}
+	return limit - len(questionPacket)
+}
+
+// aFrameCapacity: each A record costs 16 wire bytes (owner pointer, fixed
+// fields, 4-byte RDATA) and carries 3 frame bytes; the stream has a 2-byte
+// length prefix.
+func aFrameCapacity(budget int) int {
+	return max(0, min(aRecordMaxFrame, budget/(2+10+aRecordRDataLen)*aRecordDataPerRec-2))
+}
+
+func aaaaFrameCapacity(budget int) int {
+	return max(0, min(aaaaRecordMaxFrame, budget/(2+10+aaaaRecordRDataLen)*aaaaRecordDataPerRec-2))
+}
+
+func cnameFrameCapacity(answerDomain string, budget int) int {
+	domainLen := len(strings.TrimSuffix(strings.ToLower(strings.TrimSpace(answerDomain)), "."))
+	if domainLen == 0 {
+		return 0
+	}
+	// The compressed owner/fixed fields cost 12 bytes; the target wire name
+	// costs two more bytes than its dotted spelling. Long questions can make
+	// this stricter than the DNS name limit on non-EDNS paths.
+	nameLimit := min(maxDNSNameLen, budget-14)
+	return sort.Search(maxDNSNameLen, func(n int) bool {
+		return encodedQNameLen(baseCodec.EncodedLenLowerBase36(n+1), domainLen) > nameLimit
+	})
 }
 
 // encodeFrameToCNAMETarget lowerbase36-encodes rawFrame and lays it out as
@@ -193,41 +285,16 @@ func buildCNAMEResponsePacket(questionPacket []byte, answerName, targetName stri
 // decoding; pass the client's configured tunnel domains. With no CNAME answer
 // it behaves exactly like ExtractVPNResponse.
 func ExtractVPNResponseMatching(packet []byte, baseEncoded bool, domains []string) (VpnProto.Packet, error) {
-	parsed, err := ParsePacket(packet)
+	parsed, err := parseTunnelResponse(packet)
 	if err != nil {
 		return VpnProto.Packet{}, err
 	}
-
-	for _, answer := range parsed.Answers {
-		if answer.Type != Enums.DNS_RECORD_TYPE_CNAME {
-			continue
-		}
-		raw, ok := decodeCNAMEFrame(answer.RData, domains)
-		if !ok {
-			return VpnProto.Packet{}, ErrTXTAnswerMalformed
+	if raw, matched, err := extractMatchingRawResponse(packet, parsed, domains); matched || err != nil {
+		if err != nil {
+			return VpnProto.Packet{}, err
 		}
 		return VpnProto.ParseInflated(raw)
 	}
-
-	// A2 supplementary channel: IPv4 A records carrying the frame.
-	if pkt, ok, err := extractARecordFrame(parsed); ok {
-		return pkt, err
-	}
-
-	if pkt, ok, err := extractAAAARecordFrame(parsed); ok {
-		return pkt, err
-	}
-
-	// NULL channel: raw frame in answer RDATA.
-	if pkt, ok, err := extractNULLFrame(parsed); ok {
-		return pkt, err
-	}
-
-	// HTTPS / SVCB channel: frame inside a service-binding SvcParam.
-	if pkt, ok, err := extractSVCBFrame(parsed); ok {
-		return pkt, err
-	}
-
 	rawAnswers := extractTXTAnswerPayloads(parsed)
 	if len(rawAnswers) == 0 {
 		return VpnProto.Packet{}, ErrTXTAnswerMissing
@@ -235,14 +302,54 @@ func ExtractVPNResponseMatching(packet []byte, baseEncoded bool, domains []strin
 	return assembleVPNResponse(rawAnswers, baseEncoded)
 }
 
+func extractMatchingRawResponse(packet []byte, parsed Packet, domains []string) ([]byte, bool, error) {
+	for _, answer := range parsed.Answers {
+		if answer.Type != Enums.DNS_RECORD_TYPE_CNAME {
+			continue
+		}
+		name, end, err := parseName(packet, answer.rdataOffset)
+		if err != nil || end != answer.rdataOffset+len(answer.RData) {
+			return nil, true, ErrTXTAnswerMalformed
+		}
+		raw, ok := decodeCNAMETarget(name, domains)
+		if !ok {
+			return nil, true, ErrTXTAnswerMalformed
+		}
+		return raw, true, nil
+	}
+	if raw, ok := decodeARecordFrame(parsed.Answers); ok {
+		return raw, true, nil
+	}
+	if raw, ok := decodeAAAARecordFrame(parsed.Answers); ok {
+		return raw, true, nil
+	}
+	for _, answer := range parsed.Answers {
+		if answer.Type == Enums.DNS_RECORD_TYPE_NULL && len(answer.RData) > 0 {
+			return answer.RData, true, nil
+		}
+	}
+	for _, answer := range parsed.Answers {
+		if answer.Type == Enums.DNS_RECORD_TYPE_HTTPS || answer.Type == Enums.DNS_RECORD_TYPE_SVCB {
+			if raw, ok := decodeSVCBFrame(answer.RData); ok {
+				return raw, true, nil
+			}
+		}
+	}
+	return nil, false, nil
+}
+
 // decodeCNAMEFrame parses the uncompressed CNAME target from rData, strips the
 // longest matching tunnel domain suffix, and lowerbase36-decodes the remaining
 // label data back into the raw VPN frame.
 func decodeCNAMEFrame(rData []byte, domains []string) ([]byte, bool) {
-	name, _, err := parseName(rData, 0)
-	if err != nil {
+	name, end, err := parseName(rData, 0)
+	if err != nil || end != len(rData) {
 		return nil, false
 	}
+	return decodeCNAMETarget(name, domains)
+}
+
+func decodeCNAMETarget(name string, domains []string) ([]byte, bool) {
 	lower := strings.ToLower(strings.TrimSuffix(name, "."))
 	if lower == "" {
 		return nil, false

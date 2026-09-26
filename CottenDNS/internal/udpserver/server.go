@@ -46,9 +46,10 @@ type Server struct {
 	cfg                      config.ServerConfig
 	log                      *logger.Logger
 	codec                    *security.Codec
-	codecs                   []*security.Codec // candidate codecs for encryption-method auto-detect
-	preferredCodec           atomic.Int32      // index into codecs to try first
-	codecAccepted            [6]atomic.Uint64  // successful ingress frames by encryption method
+	codecs                   []*security.Codec  // candidate codecs for encryption-method auto-detect
+	preferredCodec           atomic.Int32       // index into codecs to try first
+	codecAccepted            [6]atomic.Uint64   // successful ingress frames by encryption method
+	ingressReplay            ingressReplayCache // authenticated requests already dispatched
 	domainMatcher            *domainMatcher.Matcher
 	sessions                 *sessionStore
 	deferredDNSSession       *deferredSessionProcessor

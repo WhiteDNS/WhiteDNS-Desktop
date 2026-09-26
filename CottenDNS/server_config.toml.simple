@@ -451,16 +451,17 @@ ENCRYPTION_AUTO_DETECT = true
 # client must include "A" in its QUERY_TYPES) is answered with IPv4 A records
 # carrying the frame (index byte + 3 data bytes per record) instead of a CNAME.
 # This is an additional anti-fingerprinting channel alongside TXT/CNAME, not a
-# replacement: it holds up to ~766 bytes per response, and larger frames fall
-# back to CNAME/TXT automatically. Default false (off).
-A_RECORD_DATA_DELIVERY = false
+# replacement: it holds up to ~766 bytes per response, bounded by the resolver's
+# advertised UDP size, and larger frames use CNAME instead. Only clients that
+# list "A" in QUERY_TYPES are affected. Default true.
+A_RECORD_DATA_DELIVERY = true
 
-# Optional IPv6 AAAA delivery channel. An AAAA query is answered with indexed
-# AAAA records carrying 15 data bytes per record (five times the density of the
-# A-record channel). Records are reorder-safe and oversized frames fall back to
-# CNAME/TXT. This works even when the resolver hop itself uses IPv4, but remains
-# off by default because some restricted networks interfere with AAAA answers.
-AAAA_RECORD_DATA_DELIVERY = false
+# IPv6 AAAA delivery channel. An AAAA query is answered with indexed AAAA
+# records carrying 15 data bytes per record (five times the density of the
+# A-record channel). Records are reorder-safe and oversized frames use CNAME.
+# Only clients that list "AAAA" in QUERY_TYPES are affected, so a client on a
+# network that interferes with AAAA answers simply leaves it out. Default true.
+AAAA_RECORD_DATA_DELIVERY = true
 
 # Forward Error Correction on the download path (tier-2 packet-loss reducer).
 # When enabled the server encodes outgoing STREAM_DATA into Reed-Solomon blocks

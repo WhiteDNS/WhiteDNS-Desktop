@@ -15,7 +15,10 @@ NDK_HOST="${NDK_HOST:-linux-x86_64}"
 OUTPUT_DIR="${OUTPUT_DIR:-dist/android}"
 GO_BIN="${GO_BIN:-go}"
 TOOLCHAIN="${NDK_ROOT}/toolchains/llvm/prebuilt/${NDK_HOST}/bin"
+BUILD_VERSION="${BUILD_VERSION:-dev}"
 LDFLAGS='-s -w -linkmode external -extldflags "-Wl,-z,max-page-size=16384 -Wl,-z,common-page-size=16384"'
+
+LDFLAGS="${LDFLAGS} -X cottendns-go/internal/version.BuildVersion=${BUILD_VERSION}"
 
 build_abi() {
   local abi="$1"

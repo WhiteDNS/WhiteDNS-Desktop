@@ -159,9 +159,12 @@ func buildSingleTXTResponsePacket(questionPacket []byte, answerName string, answ
 }
 
 func responseAnswerNameBytes(questionPacket []byte, answerName string) ([]byte, error) {
-	rawName, parsedName, ok := extractFirstQuestionNameWire(questionPacket)
+	_, parsedName, ok := extractFirstQuestionNameWire(questionPacket)
 	if ok && sameDNSName(parsedName, answerName) {
-		return rawName, nil
+		// Point at the question name (always at offset 12) instead of writing it
+		// again. Tunnel names run 100-250 bytes, so this returns that much of the
+		// resolver's response budget to payload on every answer.
+		return []byte{0xC0, dnsHeaderSize}, nil
 	}
 	return encodeDNSNameStrict(answerName)
 }
@@ -190,7 +193,7 @@ func sameDNSName(a string, b string) bool {
 }
 
 func ExtractVPNResponse(packet []byte, baseEncoded bool) (VpnProto.Packet, error) {
-	parsed, err := ParsePacket(packet)
+	parsed, err := parseTunnelResponse(packet)
 	if err != nil {
 		return VpnProto.Packet{}, err
 	}
@@ -201,6 +204,22 @@ func ExtractVPNResponse(packet []byte, baseEncoded bool) (VpnProto.Packet, error
 	}
 
 	return assembleVPNResponse(rawAnswers, baseEncoded)
+}
+
+// Only complete successful responses may deliver a tunnel frame. Empty/error
+// replies remain distinguishable so the client can apply resolver policy.
+func parseTunnelResponse(packet []byte) (Packet, error) {
+	parsed, err := ParsePacket(packet)
+	if err != nil {
+		return Packet{}, err
+	}
+	if parsed.Header.QR != 1 || parsed.Header.OpCode != 0 || parsed.Header.TC != 0 {
+		return Packet{}, ErrInvalidAnswer
+	}
+	if parsed.Header.RCode != 0 {
+		return Packet{}, ErrTXTAnswerMissing
+	}
+	return parsed, nil
 }
 
 func DescribeResponseWithoutTunnelPayload(packet []byte) string {

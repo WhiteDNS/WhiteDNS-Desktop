@@ -351,7 +351,7 @@ func TestDequeueSessionResponseScansActiveStreams(t *testing.T) {
 
 	putTestSession(s.sessions, record)
 
-	pkt, ok := s.dequeueSessionResponse(record.ID, time.Now())
+	pkt, ok := s.dequeueSessionResponse(record.ID, time.Now(), dnsResponseUnlimited)
 	if !ok || pkt == nil {
 		t.Fatal("expected dequeue to find queued packet from active streams")
 	}
@@ -477,7 +477,7 @@ func TestDequeueSessionResponseDuplicatesLastPackedControlBlock(t *testing.T) {
 
 	putTestSession(s.sessions, record)
 
-	first, ok := s.dequeueSessionResponse(record.ID, time.Now())
+	first, ok := s.dequeueSessionResponse(record.ID, time.Now(), dnsResponseUnlimited)
 	if !ok || first == nil {
 		t.Fatalf("expected first dequeue to return a packet")
 	}
@@ -488,7 +488,7 @@ func TestDequeueSessionResponseDuplicatesLastPackedControlBlock(t *testing.T) {
 		t.Fatalf("unexpected packed payload size: got=%d want=%d", len(first.Payload), 2*VpnProto.PackedControlBlockSize)
 	}
 
-	second, ok := s.dequeueSessionResponse(record.ID, time.Now())
+	second, ok := s.dequeueSessionResponse(record.ID, time.Now(), dnsResponseUnlimited)
 	if !ok || second == nil {
 		t.Fatalf("expected duplicated dequeue to return cached packet")
 	}
@@ -496,7 +496,7 @@ func TestDequeueSessionResponseDuplicatesLastPackedControlBlock(t *testing.T) {
 		t.Fatalf("expected second dequeue to return duplicated packed block")
 	}
 
-	third, ok := s.dequeueSessionResponse(record.ID, time.Now())
+	third, ok := s.dequeueSessionResponse(record.ID, time.Now(), dnsResponseUnlimited)
 	if !ok || third == nil {
 		t.Fatalf("expected final duplicated dequeue to return cached packet")
 	}
@@ -508,7 +508,7 @@ func TestDequeueSessionResponseDuplicatesLastPackedControlBlock(t *testing.T) {
 		t.Fatalf("expected packed block duplication cache to be drained")
 	}
 
-	if _, ok := s.dequeueSessionResponse(record.ID, time.Now()); ok {
+	if _, ok := s.dequeueSessionResponse(record.ID, time.Now(), dnsResponseUnlimited); ok {
 		t.Fatalf("expected no more queued packets after cached duplicates are exhausted")
 	}
 }
@@ -916,4 +916,29 @@ func putTestSession(s *sessionStore, record *sessionRecord) {
 		s.activeIDs = make(map[uint16]struct{})
 	}
 	s.activeIDs[record.ID] = struct{}{}
+}
+
+func TestDequeueSessionResponseHoldsPacketsTooLargeForCarrier(t *testing.T) {
+	s := &Server{sessions: newSessionStore(8, 32)}
+	record := newTestSessionRecord(14)
+	record.MaxPackedBlocks = 1
+	stream := record.getOrCreateStream(1, arq.Config{}, nil, nil)
+	prio := Enums.DefaultPacketPriority(Enums.PACKET_STREAM_SYN_ACK)
+	if !stream.PushTXPacket(prio, Enums.PACKET_STREAM_SYN_ACK, 1, 0, 0, 0, 0, make([]byte, 400)) ||
+		!stream.PushTXPacket(prio, Enums.PACKET_STREAM_SYN_ACK, 2, 0, 0, 0, 0, make([]byte, 20)) {
+		t.Fatalf("expected packets to queue")
+	}
+	putTestSession(s.sessions, record)
+
+	small, ok := s.dequeueSessionResponse(record.ID, time.Now(), 100)
+	if !ok || small.SequenceNum != 2 {
+		t.Fatalf("small carrier must skip the 400-byte packet and take seq 2, got ok=%v pkt=%+v", ok, small)
+	}
+	if _, ok := s.dequeueSessionResponse(record.ID, time.Now(), 100); ok {
+		t.Fatalf("nothing else fits a 100-byte carrier")
+	}
+	big, ok := s.dequeueSessionResponse(record.ID, time.Now(), dnsResponseUnlimited)
+	if !ok || big.SequenceNum != 1 || len(big.Payload) != 400 {
+		t.Fatalf("large packet must still be queued for a large carrier, got ok=%v", ok)
+	}
 }

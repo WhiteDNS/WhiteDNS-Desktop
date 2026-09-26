@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/binary"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	DnsParser "cottendns-go/internal/dnsparser"
 	domainMatcher "cottendns-go/internal/domainmatcher"
 	Enums "cottendns-go/internal/enums"
+	"cottendns-go/internal/security"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
 
@@ -47,6 +49,10 @@ func (s *Server) tunnelBaseDomain(requestName string) string {
 
 func (s *Server) validatePostSessionPacket(questionPacket []byte, requestName string, vpnPacket VpnProto.Packet) postSessionValidation {
 	now := time.Now()
+	if lookup, known := s.sessions.Lookup(vpnPacket.SessionID); known &&
+		(lookup.LegacySessionID != vpnPacket.LegacySessionID || lookup.Codec != vpnPacket.IngressCodec) {
+		return postSessionValidation{}
+	}
 	validation := s.sessions.ValidateAndTouch(vpnPacket.SessionID, vpnPacket.SessionCookie, now)
 	if validation.Valid {
 		return postSessionValidation{
@@ -56,17 +62,17 @@ func (s *Server) validatePostSessionPacket(questionPacket []byte, requestName st
 	}
 
 	if !validation.Known {
-		mode := s.nextUnknownInvalidDropMode()
+		mode := s.nextUnknownInvalidDropMode(vpnPacket)
 		s.logInvalidSessionDrop("unknown session", vpnPacket.SessionID, vpnPacket.SessionCookie, 0, mode)
 		return postSessionValidation{
-			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, mode, vpnPacket.LegacySessionID),
+			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, mode, vpnPacket.LegacySessionID, vpnPacket.IngressCodec),
 		}
 	}
 
 	if validation.Lookup.State == sessionLookupClosed {
 		s.logInvalidSessionDrop("recently closed session", vpnPacket.SessionID, vpnPacket.SessionCookie, validation.Lookup.Cookie, validation.Lookup.ResponseMode)
 		return postSessionValidation{
-			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode, vpnPacket.LegacySessionID),
+			response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode, vpnPacket.LegacySessionID, vpnPacket.IngressCodec),
 		}
 	}
 
@@ -85,7 +91,7 @@ func (s *Server) validatePostSessionPacket(questionPacket []byte, requestName st
 	s.logInvalidSessionDrop("invalid cookie threshold", vpnPacket.SessionID, vpnPacket.SessionCookie, validation.Lookup.Cookie, validation.Lookup.ResponseMode)
 
 	return postSessionValidation{
-		response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode, vpnPacket.LegacySessionID),
+		response: s.buildInvalidSessionErrorResponse(questionPacket, requestName, vpnPacket.SessionID, validation.Lookup.ResponseMode, vpnPacket.LegacySessionID, vpnPacket.IngressCodec),
 	}
 }
 
@@ -95,7 +101,7 @@ func (s *Server) handleSessionCloseNotice(vpnPacket VpnProto.Packet, now time.Ti
 	}
 
 	lookup, known := s.sessions.Lookup(vpnPacket.SessionID)
-	if !known || lookup.State != sessionLookupActive || lookup.Cookie != vpnPacket.SessionCookie {
+	if !known || lookup.State != sessionLookupActive || lookup.Cookie != vpnPacket.SessionCookie || lookup.LegacySessionID != vpnPacket.LegacySessionID || lookup.Codec != vpnPacket.IngressCodec {
 		return
 	}
 
@@ -158,32 +164,40 @@ func invalidSessionDropLogConfig(reason string, sessionID uint16, receivedCookie
 // legacy selects the reply's wire format. There is no session record to consult
 // here (the whole point is that the session is unknown, closed, or failed its
 // cookie), so it comes from the format the rejected request itself arrived in.
-func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, requestName string, sessionID uint16, responseMode uint8, legacy bool) []byte {
+func (s *Server) buildInvalidSessionErrorResponse(questionPacket []byte, requestName string, sessionID uint16, responseMode uint8, legacy bool, codecs ...*security.Codec) []byte {
 	payload := s.nextInvalidDropPayload()
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
+	var codec *security.Codec
+	if len(codecs) > 0 {
+		codec = codecs[0]
+	}
+	response, err := s.buildTunnelResponse(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
 		SessionID:       sessionID,
 		PacketType:      Enums.PACKET_ERROR_DROP,
 		Payload:         payload[:],
 		LegacySessionID: legacy,
-	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
+	}, responseMode, codec)
 	if err != nil {
 		return nil
 	}
 	return response
 }
 
-func (s *Server) buildSessionBusyResponse(questionPacket []byte, requestName string, responseMode uint8, verifyCode []byte, legacy bool) []byte {
+func (s *Server) buildSessionBusyResponse(questionPacket []byte, requestName string, responseMode uint8, verifyCode []byte, legacy bool, codecs ...*security.Codec) []byte {
 	if len(verifyCode) < mtuProbeCodeLength {
 		return nil
 	}
+	var codec *security.Codec
+	if len(codecs) > 0 {
+		codec = codecs[0]
+	}
 	var payload [mtuProbeCodeLength]byte
 	copy(payload[:], verifyCode[:mtuProbeCodeLength])
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
+	response, err := s.buildTunnelResponse(questionPacket, requestName, s.tunnelBaseDomain(requestName), VpnProto.Packet{
 		SessionID:       0,
 		PacketType:      Enums.PACKET_SESSION_BUSY,
 		Payload:         payload[:],
 		LegacySessionID: legacy,
-	}, responseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
+	}, responseMode, codec)
 	if err != nil {
 		return nil
 	}
@@ -200,7 +214,7 @@ func (s *Server) buildSessionVPNResponse(questionPacket []byte, requestName stri
 	// upstream (pong, queued data, ack, packed control blocks), it goes back in
 	// the wire format this session was opened with.
 	packet.LegacySessionID = record.LegacySessionID
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
+	response, err := s.buildTunnelResponse(questionPacket, requestName, s.tunnelBaseDomain(requestName), packet, record.ResponseMode, record.Codec)
 	if err != nil {
 		return nil
 	}
@@ -335,7 +349,18 @@ func (s *Server) serveQueuedOrPong(questionPacket []byte, requestName string, re
 
 	sessionID := record.ID
 
-	if pkt, ok := s.dequeueSessionResponse(sessionID, now); ok {
+	// Only hand this query what its record type can carry: anything larger would
+	// fall back to a TXT answer the resolver strips, losing it until an ARQ
+	// retransmit. It stays queued for the next TXT/NULL/HTTPS/AAAA query instead.
+	capacity := DnsParser.MatchingFrameCapacity(questionPacket, s.tunnelBaseDomain(requestName), s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
+	if capacity != dnsResponseUnlimited {
+		capacity -= maxVPNFrameHeaderLen
+		if record.ResponseMode&security.DownstreamEncryptedFlag != 0 {
+			capacity -= record.Codec.CiphertextOverhead()
+		}
+	}
+
+	if pkt, ok := s.dequeueSessionResponse(sessionID, now, capacity); ok {
 		return s.buildSessionVPNResponse(questionPacket, requestName, record, *pkt)
 	}
 
@@ -346,16 +371,31 @@ func (s *Server) serveQueuedOrPong(questionPacket []byte, requestName string, re
 	})
 }
 
-func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time) (*VpnProto.Packet, bool) {
+const (
+	// maxVPNFrameHeaderLen is the largest vpnproto header: 2-byte session ID,
+	// type, stream, sequence, fragment, compression, cookie and check byte.
+	maxVPNFrameHeaderLen = 12
+	// dnsResponseUnlimited marks a carrier (TXT/NULL/HTTPS/SVCB) that holds any
+	// frame the session's download MTU allows.
+	dnsResponseUnlimited = math.MaxInt
+)
+
+// dequeueSessionResponse pops the next packet to send. capacity is the largest
+// payload the answering record type can carry; only packets that fit are taken.
+func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time, capacity int) (*VpnProto.Packet, bool) {
 	record, ok := s.sessions.Get(sessionID)
 	if !ok {
 		return nil, false
 	}
+	limited := capacity < dnsResponseUnlimited
+	fits := func(p *serverStreamTXPacket) bool { return len(p.Payload) <= capacity }
 
 	record.mu.Lock()
-	if pkt, ok := s.dequeueDuplicatedPackedControlBlock(record); ok {
-		record.mu.Unlock()
-		return pkt, true
+	if dup := record.LastPackedControlBlock; dup == nil || len(dup.Payload) <= capacity {
+		if pkt, ok := s.dequeueDuplicatedPackedControlBlock(record); ok {
+			record.mu.Unlock()
+			return pkt, true
+		}
 	}
 	rrStreamID := record.RRStreamID
 	record.mu.Unlock()
@@ -428,7 +468,22 @@ func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time) (*VpnPr
 				record.deactivateStream(uint16(id))
 				continue
 			}
-			if fecActive {
+			if limited {
+				// Small carrier: take the highest-priority packet that fits
+				// (ACKs and control first, as usual) and bypass FEC, whose
+				// shards are data-sized. ARQ still covers anything left queued.
+				popped, popOk := stream.PopAnyTXPacket(5, fits)
+				if !popOk {
+					continue
+				}
+				stream.NoteTXPacketDequeued(popped)
+				if (popped.PacketType == Enums.PACKET_STREAM_DATA || popped.PacketType == Enums.PACKET_STREAM_RESEND) &&
+					stream.ARQ != nil && !stream.ARQ.HasPendingSequence(popped.SequenceNum) {
+					putTXPacketToPool(popped)
+					continue
+				}
+				item, ok, selectedStreamID = popped, true, uint16(id)
+			} else if fecActive {
 				var popped *serverStreamTXPacket
 				popped, ok = s.fecDequeueFromStream(stream, id)
 				if ok {
@@ -457,7 +512,7 @@ func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time) (*VpnPr
 			record.mu.Lock()
 			record.RRStreamID = id + 1
 			if VpnProto.IsPackableControlPacket(item.PacketType, len(item.Payload)) && record.MaxPackedBlocks > 1 {
-				pkt := s.packControlBlocks(record, item, id, selectedStreamID)
+				pkt := s.packControlBlocks(record, item, id, selectedStreamID, capacity)
 				s.cachePackedControlBlockDuplicate(record, pkt)
 				record.mu.Unlock()
 				return pkt, true
@@ -512,8 +567,8 @@ func (s *Server) cachePackedControlBlockDuplicate(record *sessionRecord, packet 
 	record.LastPackedControlBlockRemaining = duplication - 1
 }
 
-func (s *Server) packControlBlocks(record *sessionRecord, first *serverStreamTXPacket, initialID int32, initialStreamID uint16) *VpnProto.Packet {
-	limit := record.MaxPackedBlocks
+func (s *Server) packControlBlocks(record *sessionRecord, first *serverStreamTXPacket, initialID int32, initialStreamID uint16, capacity int) *VpnProto.Packet {
+	limit := min(record.MaxPackedBlocks, capacity/VpnProto.PackedControlBlockSize)
 	if limit <= 1 {
 		pkt := vpnPacketFromTX(first, initialStreamID)
 		return &pkt
@@ -749,16 +804,20 @@ func (s *Server) nextInvalidDropPayload() [8]byte {
 	return payload
 }
 
-func (s *Server) nextUnknownInvalidDropMode() uint8 {
+func (s *Server) nextUnknownInvalidDropMode(packet VpnProto.Packet) uint8 {
 	if s == nil {
 		return mtuProbeModeRaw
 	}
 
-	if s.invalidDropMode.Add(1)&1 == 0 {
-		return mtuProbeModeRaw
+	next := s.invalidDropMode.Add(1)
+	mode := uint8(next & 1)
+	// An unknown session has no remembered response mode. Cycle both legacy
+	// and encrypted native replies so old clients and upgraded clients can
+	// recover after a server restart without an unauthenticated downgrade.
+	if !packet.LegacySessionID && packet.IngressCodec != nil && packet.IngressCodec.Method() != 0 && next&2 != 0 {
+		mode |= security.DownstreamEncryptedFlag
 	}
-
-	return mtuProbeModeBase64
+	return mode
 }
 
 func deferredSessionLaneForPacket(packet VpnProto.Packet) deferredSessionLane {
@@ -825,6 +884,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 		resolvedDownload,
 		s.cfg.MaxPacketsPerBatch,
 		vpnPacket.LegacySessionID,
+		vpnPacket.IngressCodec,
 	)
 	if err != nil {
 		if err == ErrSessionTableFull {
@@ -835,7 +895,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 					decision.RequestName,
 				)
 			}
-			return s.buildSessionBusyResponse(questionPacket, decision.RequestName, vpnPacket.Payload[0], vpnPacket.Payload[6:10], vpnPacket.LegacySessionID)
+			return s.buildSessionBusyResponse(questionPacket, decision.RequestName, vpnPacket.Payload[0], vpnPacket.Payload[6:10], vpnPacket.LegacySessionID, vpnPacket.IngressCodec)
 		}
 		return nil
 	}
@@ -871,12 +931,12 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 		record.LegacySessionID,
 	)
 
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
+	response, err := s.buildTunnelResponse(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:       0,
 		PacketType:      Enums.PACKET_SESSION_ACCEPT,
 		Payload:         responsePayload,
 		LegacySessionID: record.LegacySessionID,
-	}, record.ResponseMode == mtuProbeModeBase64, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
+	}, record.ResponseMode, record.Codec)
 	if err != nil {
 		return nil
 	}
@@ -896,7 +956,7 @@ func (s *Server) handleMTUUpRequest(questionPacket []byte, _ DnsParser.LitePacke
 		return nil
 	}
 
-	baseEncode, ok := parseMTUProbeBaseEncoding(vpnPacket.Payload[0])
+	_, ok := parseMTUProbeBaseEncoding(vpnPacket.Payload[0])
 	if !ok {
 		return nil
 	}
@@ -905,12 +965,12 @@ func (s *Server) handleMTUUpRequest(questionPacket []byte, _ DnsParser.LitePacke
 	// Match the response RR type to the probe query type (A2). The up-probe
 	// response is small, so it encodes cleanly as CNAME when the query was
 	// non-TXT, and its size does not affect upload-MTU measurement.
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
+	response, err := s.buildTunnelResponse(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:       vpnPacket.SessionID,
 		PacketType:      Enums.PACKET_MTU_UP_RES,
 		Payload:         responsePayload[:],
 		LegacySessionID: vpnPacket.LegacySessionID,
-	}, baseEncode, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
+	}, vpnPacket.Payload[0], vpnPacket.IngressCodec)
 
 	if err != nil {
 		return nil
@@ -924,7 +984,7 @@ func (s *Server) handleMTUDownRequest(questionPacket []byte, _ DnsParser.LitePac
 		return nil
 	}
 
-	baseEncode, ok := parseMTUProbeBaseEncoding(vpnPacket.Payload[0])
+	_, ok := parseMTUProbeBaseEncoding(vpnPacket.Payload[0])
 	if !ok {
 		return nil
 	}
@@ -946,7 +1006,7 @@ func (s *Server) handleMTUDownRequest(questionPacket []byte, _ DnsParser.LitePac
 	// probe sizes exceed a single CNAME and auto-fall-back to TXT inside the
 	// builder, so the download-capacity ceiling is still measured on the TXT
 	// channel that bulk data actually uses; smaller sizes match the query type.
-	response, err := DnsParser.BuildVPNResponsePacketMatchingQuery(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
+	response, err := s.buildTunnelResponse(questionPacket, decision.RequestName, decision.BaseDomain, VpnProto.Packet{
 		SessionID:       vpnPacket.SessionID,
 		PacketType:      Enums.PACKET_MTU_DOWN_RES,
 		StreamID:        vpnPacket.StreamID,
@@ -955,7 +1015,7 @@ func (s *Server) handleMTUDownRequest(questionPacket []byte, _ DnsParser.LitePac
 		TotalFragments:  vpnPacket.TotalFragments,
 		Payload:         payload,
 		LegacySessionID: vpnPacket.LegacySessionID,
-	}, baseEncode, s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
+	}, vpnPacket.Payload[0], vpnPacket.IngressCodec)
 	if err != nil {
 		return nil
 	}

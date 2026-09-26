@@ -11,10 +11,10 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/charmbracelet/x/term"
 
 	"cottendns-go/internal/client"
@@ -22,8 +22,9 @@ import (
 )
 
 const (
-	maxLogLines = 200
-	logQueueCap = 512
+	maxLogLines     = 200
+	logQueueCap     = 512
+	maxLogLineBytes = 16 * 1024
 )
 
 type tickMsg time.Time
@@ -46,7 +47,7 @@ func (w *logWriter) Write(p []byte) (int, error) {
 		if idx < 0 {
 			break
 		}
-		line := strings.TrimSuffix(w.pending[:idx], "\r")
+		line := strings.Clone(strings.TrimSuffix(w.pending[max(0, idx-maxLogLineBytes):idx], "\r"))
 		w.pending = w.pending[idx+1:]
 		select {
 		case w.lines <- line:
@@ -61,6 +62,9 @@ func (w *logWriter) Write(p []byte) (int, error) {
 			}
 		}
 	}
+	if len(w.pending) > maxLogLineBytes {
+		w.pending = strings.Clone(w.pending[len(w.pending)-maxLogLineBytes:])
+	}
 	w.mu.Unlock()
 	return len(p), nil
 }
@@ -69,7 +73,7 @@ type model struct {
 	app       *client.Client
 	ctx       context.Context
 	cancel    context.CancelFunc
-	intro     func()
+	runDone   <-chan runDoneMsg
 	logWriter *logWriter
 	logs      []string
 	width     int
@@ -86,24 +90,26 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(tickCmd(), waitLogCmd(m.logWriter.lines), runClientCmd(m.ctx, m.app, m.intro))
+	return tea.Batch(tickCmd(), waitLogCmd(m.ctx, m.logWriter.lines), waitRunDoneCmd(m.runDone))
 }
 
 func tickCmd() tea.Cmd {
 	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
-func waitLogCmd(lines <-chan string) tea.Cmd {
-	return func() tea.Msg { return logMsg(<-lines) }
+func waitLogCmd(ctx context.Context, lines <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		select {
+		case line := <-lines:
+			return logMsg(line)
+		case <-ctx.Done():
+			return nil
+		}
+	}
 }
 
-func runClientCmd(ctx context.Context, app *client.Client, intro func()) tea.Cmd {
-	return func() tea.Msg {
-		if intro != nil {
-			intro()
-		}
-		return runDoneMsg{err: app.Run(ctx)}
-	}
+func waitRunDoneCmd(done <-chan runDoneMsg) tea.Cmd {
+	return func() tea.Msg { return <-done }
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -123,6 +129,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		status := m.app.StatusSnapshot()
 		elapsed := now.Sub(m.lastAt).Seconds()
 		if elapsed > 0 {
+			m.upSpeed, m.downSpeed = 0, 0
 			if status.TXBytes >= m.lastTX {
 				m.upSpeed = float64(status.TXBytes-m.lastTX) / elapsed
 			}
@@ -141,7 +148,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.logs = append([]string(nil), m.logs[len(m.logs)-maxLogLines:]...)
 			}
 		}
-		return m, waitLogCmd(m.logWriter.lines)
+		return m, waitLogCmd(m.ctx, m.logWriter.lines)
 	case runDoneMsg:
 		m.runErr = msg.err
 		return m, tea.Quit
@@ -161,6 +168,51 @@ var (
 )
 
 func (m model) View() string {
+	if m.width <= 0 || m.height <= 0 {
+		return ""
+	}
+	view := m.dashboardView()
+	if m.width < 92 || lipgloss.Height(view) > m.height {
+		view = m.compactView()
+	}
+	lines := strings.Split(view, "\n")
+	if len(lines) > m.height {
+		lines = append(lines[:m.height-1], lines[len(lines)-1])
+	}
+	for i := range lines {
+		lines[i] = ansi.Truncate(lines[i], m.width, "")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (m model) compactView() string {
+	phase := strings.ToUpper(m.status.Phase)
+	if m.stopping {
+		phase = "SHUTTING DOWN"
+	}
+	lines := []string{
+		title.Render("CottenDNS") + " " + label.Render(version.GetVersion()),
+		phase + "  " + formatDuration(time.Since(m.started)),
+		sectionTitle("RESOLVERS") + fmt.Sprintf("  %d / %d active", m.status.ActiveResolvers, m.status.ConfiguredResolvers),
+		familyPolicyLabel(m.status.FamilyMode),
+		sectionTitle("TUNNEL") + "  " + m.status.Transport,
+		fmt.Sprintf("MTU up %d / down %d | streams %d", m.status.UploadMTU, m.status.DownloadMTU, m.status.ActiveStreams),
+		"Proxy " + m.status.ProxyAddress,
+		sectionTitle("TRAFFIC"),
+		"Up " + formatSpeed(m.upSpeed) + " | down " + formatSpeed(m.downSpeed),
+		sectionTitle("HEALTH") + fmt.Sprintf("  loss %.1f%%", float64(m.status.LossPerMille)/10),
+		fmt.Sprintf("Queues %d/%d/%d | drops rx %d tx %d", m.status.TXQueue, m.status.EncodedQueue, m.status.RXQueue, m.status.RXDrops, m.status.TXDrops),
+	}
+	if m.status.LocalDNSEnabled {
+		lines = append(lines, "DNS "+m.status.LocalDNSAddress)
+	}
+	lines = append(lines, sectionTitle("ACTIVITY"))
+	lines = append(lines, renderActivity(m.logs, max(0, min(12, m.height-len(lines)-1)), m.width)...)
+	lines = append(lines, label.Render("q / esc: quit"))
+	return strings.Join(lines, "\n")
+}
+
+func (m model) dashboardView() string {
 	width := m.width
 	if width < 42 {
 		width = 42
@@ -322,11 +374,10 @@ func tailLines(lines []string, count, width int) []string {
 }
 
 func truncateRunes(text string, width int) string {
-	if width < 4 || utf8.RuneCountInString(text) <= width {
-		return text
+	if width <= 0 {
+		return ""
 	}
-	runes := []rune(text)
-	return string(runes[:width-1]) + "…"
+	return ansi.Truncate(text, width, "?")
 }
 
 func compactLogLine(line string) string {
@@ -345,25 +396,7 @@ func compactLogLine(line string) string {
 	return strings.TrimSpace(line)
 }
 
-func stripANSI(text string) string {
-	var b strings.Builder
-	for i := 0; i < len(text); {
-		if text[i] == 0x1b && i+1 < len(text) && text[i+1] == '[' {
-			i += 2
-			for i < len(text) {
-				ch := text[i]
-				i++
-				if ch >= 0x40 && ch <= 0x7e {
-					break
-				}
-			}
-			continue
-		}
-		b.WriteByte(text[i])
-		i++
-	}
-	return b.String()
-}
+func stripANSI(text string) string { return ansi.Strip(text) }
 
 func formatBytes(n uint64) string {
 	switch {
@@ -432,9 +465,21 @@ func Run(parent context.Context, app *client.Client, intro func()) error {
 		previous = log.SwapConsoleWriter(w)
 		defer log.SwapConsoleWriter(previous)
 	}
+	done := make(chan runDoneMsg, 1)
+	finished := make(chan struct{})
+	// Cleanup must finish before restoring the console writer, including when
+	// the terminal fails to initialize or the parent cancels Bubble Tea.
+	go func() {
+		defer close(finished)
+		if intro != nil {
+			intro()
+		}
+		done <- runDoneMsg{err: app.Run(ctx)}
+	}()
+	defer func() { cancel(); <-finished }()
 	now := time.Now()
 	m := model{
-		app: app, ctx: ctx, cancel: cancel, intro: intro, logWriter: w,
+		app: app, ctx: ctx, cancel: cancel, runDone: done, logWriter: w,
 		width: 100, height: 30, started: now, lastAt: now, status: app.StatusSnapshot(),
 	}
 	result, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(parent)).Run()

@@ -128,6 +128,7 @@ func parseFromLabelsAnyMatching(labels string, codecs []*security.Codec, startId
 		nativeOK := false
 		legacyOK := false
 		if candidate, parseErr := parseWidth(raw, 0, 2); parseErr == nil && plausibleNativeSessionID(candidate) {
+			candidate.IngressCodec = codec
 			if inflate {
 				candidate, parseErr = InflatePayload(candidate)
 			}
@@ -140,6 +141,7 @@ func parseFromLabelsAnyMatching(labels string, codecs []*security.Codec, startId
 			lastErr = parseErr
 		}
 		if candidate, parseErr := parseWidth(raw, 0, 1); parseErr == nil && candidate.SessionID <= maxLegacySessionID {
+			candidate.IngressCodec = codec
 			if inflate {
 				candidate, parseErr = InflatePayload(candidate)
 			}

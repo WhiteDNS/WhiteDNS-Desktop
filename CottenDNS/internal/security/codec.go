@@ -10,6 +10,7 @@ package security
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hmac"
 	"crypto/md5"
 	"crypto/rand"
 	"crypto/sha256"
@@ -57,10 +58,89 @@ func putCryptoBuffer(bufPtr *[]byte) {
 }
 
 type Codec struct {
-	method  int
-	key     []byte
-	encrypt func(dst, src []byte) ([]byte, error)
-	decrypt func(dst, src []byte) ([]byte, error)
+	aead           cipher.AEAD
+	method         int
+	key            []byte
+	encrypt        func(dst, src []byte) ([]byte, error)
+	decrypt        func(dst, src []byte) ([]byte, error)
+	downstreamOnce sync.Once
+	downstream     *Codec
+	downstreamErr  error
+}
+
+// DownstreamEncryptedFlag uses a spare bit in the existing response-mode byte.
+// Old clients keep their original response format; upgraded encrypted clients
+// require encrypted replies during probing, setup, and established traffic.
+const DownstreamEncryptedFlag uint8 = 0x80
+
+func (c *Codec) CiphertextOverhead() int {
+	if c == nil {
+		return 0
+	}
+	switch c.method {
+	case 2:
+		return chachaNonceSize
+	case 3, 4, 5:
+		return aesNonceSize + 16
+	default:
+		return 0
+	}
+}
+
+func (c *Codec) downstreamCodec() (*Codec, error) {
+	if c == nil {
+		return nil, ErrInvalidCodecMethod
+	}
+	c.downstreamOnce.Do(func() {
+		// Direction-specific keys prevent reflecting a valid upstream query
+		// as a server reply, without adding a handshake or wire bytes.
+		h := hmac.New(sha256.New, c.key)
+		h.Write([]byte("CottenDNS downstream v1\x00"))
+		key := h.Sum(nil)[:requiredDerivedKeyLength(c.method)]
+		c.downstream, c.downstreamErr = newCodecWithKey(c.method, key)
+	})
+	return c.downstream, c.downstreamErr
+}
+
+func (c *Codec) EncryptDownstream(data []byte, context ...[]byte) ([]byte, error) {
+	codec, err := c.downstreamCodec()
+	if err != nil {
+		return nil, err
+	}
+	if codec.aead == nil {
+		return codec.Encrypt(data)
+	}
+	var aad []byte
+	if len(context) > 0 {
+		aad = context[0]
+	}
+	out := make([]byte, aesNonceSize, aesNonceSize+len(data)+codec.aead.Overhead())
+	if _, err := rand.Read(out); err != nil {
+		return nil, err
+	}
+	return codec.aead.Seal(out, out[:aesNonceSize], data, aad), nil
+}
+
+func (c *Codec) DecryptDownstream(data []byte, context ...[]byte) ([]byte, error) {
+	codec, err := c.downstreamCodec()
+	if err != nil {
+		return nil, err
+	}
+	if codec.aead == nil {
+		return codec.Decrypt(data)
+	}
+	if len(data) < aesNonceSize+codec.aead.Overhead() {
+		return nil, ErrInvalidCiphertext
+	}
+	var aad []byte
+	if len(context) > 0 {
+		aad = context[0]
+	}
+	plain, err := codec.aead.Open(nil, data[:aesNonceSize], data[aesNonceSize:], aad)
+	if err != nil {
+		return nil, ErrInvalidCiphertext
+	}
+	return plain, nil
 }
 
 func NewCodecFromConfig(cfg config.ServerConfig, rawKey string) (*Codec, error) {
@@ -115,7 +195,10 @@ func NewCodec(method int, rawKey string) (*Codec, error) {
 		return nil, ErrInvalidCodecMethod
 	}
 
-	derivedKey := deriveKey(method, rawKey)
+	return newCodecWithKey(method, deriveKey(method, rawKey))
+}
+
+func newCodecWithKey(method int, derivedKey []byte) (*Codec, error) {
 	codec := &Codec{
 		method: method,
 		key:    derivedKey,
@@ -136,6 +219,7 @@ func NewCodec(method int, rawKey string) (*Codec, error) {
 		if err != nil {
 			return nil, err
 		}
+		codec.aead = aead
 		codec.encrypt = codec.makeAESEncryptor(aead)
 		codec.decrypt = codec.makeAESDecryptor(aead)
 	default:

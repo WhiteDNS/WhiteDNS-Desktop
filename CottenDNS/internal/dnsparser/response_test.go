@@ -361,3 +361,57 @@ func encodeDNSName(name string) []byte {
 
 	return append(encoded, 0)
 }
+
+func TestBuildAuthoritativeNoDataCarriesSOA(t *testing.T) {
+	const zone = "v.example.com"
+	flagsOf := func(resp []byte) uint16 { return binary.BigEndian.Uint16(resp[2:4]) }
+
+	// In-zone probe (QNAME-minimisation style): NODATA, AA=1, RA=0, SOA in authority.
+	request := buildDNSQuery(0x4242, "abc."+zone, Enums.DNS_RECORD_TYPE_A, false)
+	parsedReq, err := ParseDNSRequestLite(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := BuildAuthoritativeNoDataFromLite(request, parsedReq, zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := flagsOf(response); f&(1<<10) == 0 || f&(1<<7) != 0 || f&0x0F != 0 {
+		t.Fatalf("want AA=1 RA=0 NOERROR, flags=%#x", f)
+	}
+	parsed, err := ParsePacket(response)
+	if err != nil {
+		t.Fatalf("ParsePacket: %v", err)
+	}
+	if len(parsed.Answers) != 0 || len(parsed.Authorities) != 1 {
+		t.Fatalf("want 0 answers/1 authority, got %d/%d", len(parsed.Answers), len(parsed.Authorities))
+	}
+	if soa := parsed.Authorities[0]; soa.Type != Enums.DNS_RECORD_TYPE_SOA || soa.Name != zone {
+		t.Fatalf("authority = %s %d, want SOA for zone", soa.Name, soa.Type)
+	}
+	rdata := len(request) + len(zone) + 2 + 10
+	if mname, _, err := parseName(response, rdata); err != nil || mname != zone {
+		t.Fatalf("MNAME = %q, %v", mname, err)
+	}
+	if rname, _, err := parseName(response, rdata+2); err != nil || rname != "hostmaster."+zone {
+		t.Fatalf("RNAME = %q, %v", rname, err)
+	}
+
+	// Apex SOA query with EDNS: SOA moves to the answer, OPT stays last.
+	request = buildDNSQuery(0x4343, "V.Example.COM", Enums.DNS_RECORD_TYPE_SOA, true)
+	parsedReq, _ = ParseDNSRequestLite(request)
+	response, err = BuildAuthoritativeNoDataFromLite(request, parsedReq, zone)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err = ParsePacket(response)
+	if err != nil {
+		t.Fatalf("ParsePacket: %v", err)
+	}
+	if len(parsed.Answers) != 1 || parsed.Answers[0].Type != Enums.DNS_RECORD_TYPE_SOA || len(parsed.Authorities) != 0 {
+		t.Fatalf("apex SOA must be answered, got an=%d ns=%d", len(parsed.Answers), len(parsed.Authorities))
+	}
+	if len(parsed.Additional) != 1 || parsed.Additional[0].Type != Enums.DNS_RECORD_TYPE_OPT {
+		t.Fatalf("OPT record must be preserved last")
+	}
+}

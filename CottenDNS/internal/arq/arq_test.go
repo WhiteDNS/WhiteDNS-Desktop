@@ -1001,10 +1001,19 @@ func TestARQ_ReceiveDataClearsQueuedNackWhenMissingDataArrives(t *testing.T) {
 	a.ReceiveData(0, []byte("packet 0"))
 	<-enqueuer.Packets
 
-	enqueuer.mu.Lock()
-	defer enqueuer.mu.Unlock()
-	if len(enqueuer.removedNackSeqs) != 1 || enqueuer.removedNackSeqs[0] != 0 {
-		t.Fatalf("expected queued NACK purge for seq 0, got %#v", enqueuer.removedNackSeqs)
+	// The ACK is pushed before the NACK purge runs, so wait for the purge
+	// rather than racing the rx goroutine.
+	var removed []uint16
+	for deadline := time.Now().Add(time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+		enqueuer.mu.Lock()
+		removed = append(removed[:0], enqueuer.removedNackSeqs...)
+		enqueuer.mu.Unlock()
+		if len(removed) != 0 {
+			break
+		}
+	}
+	if len(removed) != 1 || removed[0] != 0 {
+		t.Fatalf("expected queued NACK purge for seq 0, got %#v", removed)
 	}
 }
 

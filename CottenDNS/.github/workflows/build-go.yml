@@ -1,7 +1,13 @@
 name: Build and Release (Go)
 
 on:
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      draft:
+        description: Keep the release private for review (no container publication)
+        type: boolean
+        default: true
+        required: true
 
 permissions:
   contents: write
@@ -11,6 +17,12 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
+  validate:
+    name: Validate release source
+    uses: ./.github/workflows/go-test.yml
+    permissions:
+      contents: read
+
   preflight:
     name: Preflight - suggest secrets & generate tag
     runs-on: ubuntu-latest
@@ -37,7 +49,7 @@ jobs:
   build:
     name: Build (matrix)
     runs-on: ${{ matrix.os }}
-    needs: preflight
+    needs: [preflight, validate]
     env:
       CODE_SIGN_CERT: ${{ secrets.CODE_SIGN_CERT }}
       CODE_SIGN_CERT_PASSWORD: ${{ secrets.CODE_SIGN_CERT_PASSWORD }}
@@ -626,10 +638,43 @@ jobs:
             dist/*.zip
             dist/*.tar.gz
 
+  android:
+    name: Package Android engines
+    runs-on: ubuntu-latest
+    needs: [preflight, validate]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build and package all four Android ABIs
+        env:
+          BUILD_VERSION: ${{ needs.preflight.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          NDK_ROOT="${ANDROID_NDK_LATEST_HOME:?Android NDK missing}" \
+            OUTPUT_DIR="$PWD/dist/android/jniLibs" bash scripts/build-android-client.sh all
+          printf 'repository=%s\ncommit=%s\nversion=%s\nandroid_api=26\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$BUILD_VERSION" > dist/android/ENGINE_VERSION.txt
+          cp docs/ANDROID_ENGINE_INTEGRATION.md dist/android/README.md
+          cd dist/android
+          for abi in arm64-v8a armeabi-v7a x86_64 x86; do
+            test -s "jniLibs/$abi/libcottendns_client.so"
+          done
+          find jniLibs -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
+          zip -r "../CottenDNS-Android-${BUILD_VERSION}.zip" jniLibs ENGINE_VERSION.txt README.md SHA256SUMS.txt
+      - uses: actions/upload-artifact@v7
+        with:
+          name: build-artifacts-Android-all
+          path: dist/CottenDNS-Android-*.zip
+          if-no-files-found: error
+
   docker:
+    if: ${{ !inputs.draft }}
     name: Publish server container
     runs-on: ubuntu-latest
-    needs: preflight
+    needs: [preflight, validate]
     steps:
       - uses: actions/checkout@v6
       - uses: docker/setup-qemu-action@v3
@@ -668,7 +713,8 @@ jobs:
   release:
     name: Create Release and attach artifacts
     runs-on: ubuntu-latest
-    needs: [preflight, build, docker]
+    needs: [preflight, validate, build, android, docker]
+    if: ${{ !cancelled() && needs.validate.result == 'success' && needs.build.result == 'success' && needs.android.result == 'success' && (needs.docker.result == 'success' || needs.docker.result == 'skipped') }}
     steps:
       - name: Checkout repository (fetch tags)
         uses: actions/checkout@v6
@@ -784,6 +830,9 @@ jobs:
             release_assets/**/*.zip
             release_assets/**/*.tar.gz
             release_assets/SHA256SUMS.txt
+          draft: ${{ inputs.draft }}
+          target_commitish: ${{ github.sha }}
+          fail_on_unmatched_files: true
           tag_name: ${{ needs.preflight.outputs.release_tag }}
           name: Release ${{ needs.preflight.outputs.release_tag }}
           body: ${{ fromJson(steps.create_release.outputs.result).body }}

@@ -1,7 +1,7 @@
 // ==============================================================================
 // CottenDNS
 // Author: tajirax
-// Github: https://github.com/TaJirax/CottenDns
+// Github: https://github.com/WhiteDNS/CottenDNS
 // Year: 2026
 // ==============================================================================
 package main
@@ -66,7 +66,7 @@ func main() {
 	}
 
 	log.Infof("============================================================")
-	log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/TaJirax/CottenDns</yellow>")
+	log.Infof("<cyan>GitHub:</cyan> <yellow>https://github.com/WhiteDNS/CottenDns</yellow>")
 	log.Infof("<cyan>Telegram:</cyan> <yellow>https://t.me/whitedns</yellow>")
 	log.Infof("<cyan>Build Version:</cyan> <yellow>%s</yellow>", version.GetVersion())
 	log.Infof("============================================================")

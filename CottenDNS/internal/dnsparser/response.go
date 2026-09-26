@@ -136,6 +136,61 @@ func buildNoDataResponseLite(request []byte, parsed LitePacket) ([]byte, error) 
 	return buildResponseWithRCodeLite(request, parsed, Enums.DNSR_CODE_NO_ERROR)
 }
 
+// BuildAuthoritativeNoDataFromLite answers a query inside zone the way the
+// zone's authoritative server must: NOERROR, AA=1, RA=0 and the zone SOA in the
+// authority section (or in the answer for an apex SOA query). A delegated server
+// that returns empty non-AA replies is treated as lame by BIND and Unbound, and
+// QNAME-minimising resolvers need NODATA (never NXDOMAIN) for the partial names
+// they probe on the way to the full tunnel name.
+func BuildAuthoritativeNoDataFromLite(request []byte, parsed LitePacket, zone string) ([]byte, error) {
+	base, err := buildResponseWithRCodeLite(request, parsed, Enums.DNSR_CODE_NO_ERROR)
+	if err != nil {
+		return nil, err
+	}
+	owner, err := encodeDNSNameStrict(zone)
+	if err != nil {
+		return nil, err
+	}
+
+	questionEnd := dnsHeaderSize
+	if parsed.QuestionEndOffset >= dnsHeaderSize && parsed.QuestionEndOffset <= len(request) {
+		questionEnd = parsed.QuestionEndOffset
+	}
+	if questionEnd > 0x3FFF {
+		return nil, ErrInvalidQuestion
+	}
+
+	// Owner is written once right after the question; MNAME and RNAME point back
+	// to it, keeping the record ~60 bytes for a typical tunnel zone.
+	ownerPtr := uint16(0xC000 | questionEnd)
+	soa := make([]byte, 0, len(owner)+10+2+13+20)
+	soa = append(soa, owner...)
+	soa = binary.BigEndian.AppendUint16(soa, Enums.DNS_RECORD_TYPE_SOA)
+	soa = binary.BigEndian.AppendUint16(soa, Enums.DNSQ_CLASS_IN)
+	soa = binary.BigEndian.AppendUint32(soa, 0) // tunnel names are never reused; don't negative-cache
+	soa = binary.BigEndian.AppendUint16(soa, 2+13+20)
+	soa = binary.BigEndian.AppendUint16(soa, ownerPtr) // MNAME = zone
+	soa = append(soa, 10, 'h', 'o', 's', 't', 'm', 'a', 's', 't', 'e', 'r')
+	soa = binary.BigEndian.AppendUint16(soa, ownerPtr) // RNAME = hostmaster.zone
+	for _, v := range [5]uint32{1, 3600, 600, 86400, 0} { // serial, refresh, retry, expire, minimum
+		soa = binary.BigEndian.AppendUint32(soa, v)
+	}
+
+	response := make([]byte, 0, len(base)+len(soa))
+	response = append(response, base[:questionEnd]...)
+	response = append(response, soa...)
+	response = append(response, base[questionEnd:]...) // OPT, if any, stays last
+
+	binary.BigEndian.PutUint16(response[2:4], (binary.BigEndian.Uint16(response[2:4])|1<<10)&^(1<<7))
+	q := parsed.FirstQuestion
+	if parsed.HasQuestion && q.Type == Enums.DNS_RECORD_TYPE_SOA && sameDNSName(q.Name, zone) {
+		binary.BigEndian.PutUint16(response[6:8], 1)
+	} else {
+		binary.BigEndian.PutUint16(response[8:10], 1)
+	}
+	return response, nil
+}
+
 func getARCount(optLen int) int {
 	if optLen > 0 {
 		return 1

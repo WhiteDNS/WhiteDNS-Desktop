@@ -3,6 +3,8 @@ package client
 import (
 	"encoding/binary"
 	"testing"
+
+	"cottendns-go/internal/security"
 )
 
 func TestEncodedCharsForPayloadUsesWorstCaseUploadPacketType(t *testing.T) {
@@ -42,8 +44,8 @@ func TestBuildMTUProbePayloadWritesModeAndProbeCodeWithoutFillingTail(t *testing
 	if len(payload) != 16 {
 		t.Fatalf("unexpected payload length: got=%d want=%d", len(payload), 16)
 	}
-	if payload[0] != mtuProbeRawResponse {
-		t.Fatalf("unexpected mode byte: got=%d want=%d", payload[0], mtuProbeRawResponse)
+	if want := uint8(mtuProbeRawResponse | security.DownstreamEncryptedFlag); payload[0] != want {
+		t.Fatalf("unexpected mode byte: got=%d want=%d", payload[0], want)
 	}
 	if got := binary.BigEndian.Uint32(payload[1 : 1+mtuProbeCodeLength]); got != code {
 		t.Fatalf("unexpected probe code in payload: got=%d want=%d", got, code)

@@ -16,7 +16,9 @@ import (
 )
 
 func TestA2ARecordChannelRoundTrips(t *testing.T) {
-	query := buildQueryWithType(t, "abc."+cnameTestDomain, Enums.DNS_RECORD_TYPE_A)
+	// ~300 bytes become ~100 A records (~1.6 KB on the wire): that only fits a
+	// resolver advertising a large EDNS size, so the query carries EDNS 4096.
+	query := buildDNSQuery(1, "abc."+cnameTestDomain, Enums.DNS_RECORD_TYPE_A, true)
 
 	payload := bytes.Repeat([]byte("DATA-over-ipv4-"), 20) // ~300 bytes, fits A-record channel
 	in := VpnProto.Packet{

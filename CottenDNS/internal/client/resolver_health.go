@@ -894,37 +894,32 @@ func (c *Client) recheckResolverConnection(ctx context.Context, conn *Connection
 	}
 	defer transport.Close()
 
-	upOK := false
-	for attempt := 0; attempt < c.mtuTestRetries; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return false
+	return c.recheckResolverMTU(ctx, conn, transport)
+}
+
+func (c *Client) recheckResolverMTU(ctx context.Context, conn *Connection, transport queryExchanger) bool {
+	probe := func(download bool) bool {
+		for _, qType := range c.mtuProbeQueryTypes(download) {
+			for attempt := 0; attempt < c.mtuTestRetries; attempt++ {
+				if err := ctx.Err(); err != nil {
+					return false
+				}
+				options := mtuProbeOptions{Quiet: true, IsRetry: attempt > 0, QueryType: qType}
+				var passed bool
+				var err error
+				if download {
+					passed, _, err = c.sendDownloadMTUProbe(ctx, conn, transport, c.syncedDownloadMTU, c.syncedUploadMTU, options)
+				} else {
+					passed, _, err = c.sendUploadMTUProbe(ctx, conn, transport, c.syncedUploadMTU, options)
+				}
+				if err == nil && passed {
+					return true
+				}
+			}
 		}
-		passed, _, err := c.sendUploadMTUProbe(ctx, conn, transport, c.syncedUploadMTU, mtuProbeOptions{Quiet: true, IsRetry: attempt > 0})
-		if err == nil && passed {
-			upOK = true
-			break
-		}
-	}
-	if !upOK {
 		return false
 	}
-
-	downOK := false
-	for attempt := 0; attempt < c.mtuTestRetries; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return false
-		}
-		passed, _, err := c.sendDownloadMTUProbe(ctx, conn, transport, c.syncedDownloadMTU, c.syncedUploadMTU, mtuProbeOptions{Quiet: true, IsRetry: attempt > 0})
-		if err == nil && passed {
-			downOK = true
-			break
-		}
-	}
-	if !downOK {
-		return false
-	}
-
-	return true
+	return probe(false) && probe(true)
 }
 
 func (c *Client) applyRecheckedResolverMTU(serverKey string) bool {

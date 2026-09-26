@@ -579,7 +579,8 @@ preset is malformed before that point.
 - `CONFIG_PRESET` (`default`, `speed`, `survival`, `tcp-survival`) — paired
   operational profile; explicit TOML/CLI values still win.
 - `ENCRYPTION_AUTO_DETECT` (true) — trial-decrypt the client's cipher.
-- `A_RECORD_DATA_DELIVERY` (false) — answer A queries with A-record data.
+- `A_RECORD_DATA_DELIVERY` (true) — answer A queries with A-record data, bounded
+  by the resolver's advertised UDP size (`AAAA_RECORD_DATA_DELIVERY` likewise).
 - `FEC_DOWNLOAD_ENABLED` (false) / `FEC_BLOCK_SIZE` (4) / `FEC_PARITY` (4) —
   always-on FEC.
 - `FEC_AUTO_ENABLED` (true) / `FEC_AUTO_LOSS_THRESHOLD` (0.3) /
@@ -1415,3 +1416,108 @@ measured worst-case query ratio is 96/6,144 = 1.5625%; the duplicated-path test
 keeps three configured copies at exactly three while substituting one UDP
 canary. Moderate 25% queue occupancy still permits restoration, while 75%
 occupancy suppresses it. Focused and complete client tests pass.
+
+
+## 31. Downstream encryption, replay handling, and client carrier audit
+
+Native clients using a keyed encryption method now request encrypted replies
+with bit `0x80` in the existing response-mode byte. No additional handshake or
+mode byte is sent. This covers MTU probes, session acceptance/busy replies,
+queued data and controls, pongs, and known-session errors. The server retains
+the successfully detected codec in the session and rejects traffic that tries
+to use that session through another codec or wire format.
+
+The complete compressed downstream frame is encrypted before carrier encoding.
+Directional keys derived with HMAC-SHA256 prevent reflecting upstream ciphertext
+as a downstream frame. AES-GCM also authenticates the canonical DNS question
+(name, type and class), preventing an old reply from being attached to a fresh
+query. DNS transaction-ID changes and question-name case randomization remain
+valid. AES-GCM adds its existing 12-byte nonce and 16-byte tag to each downstream
+frame; encrypted TXT reassembly adds two bytes per chunk. MTU probes measure
+these actual costs, and small-carrier queue limits subtract encryption overhead.
+
+Compatibility requires upgrading the server before native encrypted clients.
+An upgraded client deliberately rejects plaintext replies instead of silently
+downgrading. Existing clients that do not request the flag keep their original
+reply format; explicit legacy-header clients and method 0 remain unchanged.
+XOR and unauthenticated ChaCha20 retain their historical lack of authentication;
+the authentication and replay guarantees below apply to AES-GCM methods 3-5.
+
+Authenticated upstream ciphertext is dispatched once within a bounded replay
+cache. Exact DNS retries receive the cached reply with the current transaction
+ID and question case, while a changed query cannot redispatch the same frame.
+Client fanout therefore uses fresh ciphertext for different domains or carriers,
+and reuses identical queries across equivalent paths. The server retains at
+most 8,192 entries for five minutes and caps cached reply bodies at 16 MiB.
+Reply-byte pressure drops bodies while retaining replay tombstones. Concurrent
+duplicates never block workers or evict in-flight guards. Entry eviction,
+expiration, and process restart end protection for that captured upstream frame;
+this is not persistent or unlimited-window replay protection.
+
+The client requires a matching outstanding resolver/socket/question sample
+before delivering an authenticated runtime reply, checks session identity and
+cookie before scoring or ACK generation, and deduplicates authenticated reply
+ciphertext across paths (8,192 entries/five minutes). A second legitimate path
+can still receive delivery credit. Freshly encrypted ARQ retransmissions remain
+valid and generate their normal ACKs.
+
+The response audit also fixed:
+
+- CNAME targets compressed against the full DNS message, including nested
+  owner-name pointers; truncated, non-response and error envelopes cannot
+  deliver tunnel payloads.
+- CNAME capacity calculations that ignored the resolver's UDP response budget.
+- MTU binary searches that mixed carrier capacities or skewed runtime carrier
+  statistics; searches now pin a carrier, prefer bulk carriers, and try small
+  carriers when bulk carriers fail. Resolver recovery uses the same alternatives.
+- False AAAA capacity detection through TXT fallback when address delivery is
+  disabled on the server, plus missing encryption allowance on small carriers.
+- Aggregate carrier send counts that credited a different type from the actual
+  path selection, and receive buffers too small for large base64 TXT frames.
+- Base64 session initialization after a reset and invalid session acceptance.
+
+Authoritative SOA NODATA replies leave a query pending for a real tunnel response
+or timeout. REFUSED records a resolver failure. Neither reply earns tunnel
+success credit. Regression coverage includes all seven carriers and all codecs,
+raw/base64 replies, tampering and query rewrapping, reordered TXT/address answers,
+real UDP encrypted handshakes before/after reset, dynamic server codec selection,
+small-carrier queuing, and concurrent bounded replay caches.
+
+
+## 32. Encrypted throughput, terminal lifecycle, and release core provenance
+
+The client now publishes pending DNS questions before UDP/TCP writes. A fast
+reply previously could reach a decode worker before send tracking existed and
+be rejected by the replay gate, forcing ARQ retransmission. Failed writes remove
+only their own sample, preserving a newer query that reuses the transaction ID.
+The response path atomically claims and scores each sample once; duplicate
+ciphertexts still cannot dispatch twice. Fan-out compresses a frame once and
+uses fresh encryption when the question changes. Temporary profiling counters,
+file dump goroutines and encryption-bypass environment switches are removed.
+
+Local Windows loopback measurements with AES and replay enabled (three complete
+transfers each, identical binaries/config except the send-order correction):
+
+| Workload | Before send-order correction | After correction |
+|---|---:|---:|
+| 32 MiB download | 20.53 MiB/s | 46.77 MiB/s |
+| 128 MiB download | 41.78 MiB/s | 39.05 MiB/s |
+
+The smaller runs are highly sensitive to scheduling and retransmission delay;
+these measurements do not establish a twofold sustained CPU speedup. Longer
+runs show roughly 40 MiB/s with encryption and replay active. A deterministic
+reply-during-write test covers the actual ordering failure independently of
+benchmark noise. Production performance also depends on resolver capacity,
+loss, MTU and RTT; loopback throughput is not an Internet guarantee.
+
+TCP/DoT queue admission applies cancellation-aware backpressure instead of
+silently dropping full-queue frames. Session initialization respects cancellation
+for both single and raced resolver exchanges. The TUI bounds rows and display
+cells on small terminals, bounds partial log lines, cancels blocked log readers,
+and waits for client cleanup before restoring console logging.
+
+Release CI defaults to draft, validates source before packaging, targets the
+exact dispatched commit, and does not publish containers for draft builds.
+Android artifacts include all four ABI executables, version injection, checksums
+and the full source commit. Desktop/Android consumers must use that same reviewed
+snapshot and regenerate their platform helpers together with their source pins.

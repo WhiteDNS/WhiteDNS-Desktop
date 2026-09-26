@@ -152,6 +152,12 @@ func (m *tcpDataManager) Send(serverKey string, addr *net.UDPAddr, packet []byte
 	if m == nil || addr == nil || len(packet) == 0 {
 		return
 	}
+	m.mu.Lock()
+	ctx, dead := m.ctx, m.dead
+	m.mu.Unlock()
+	if dead || ctx == nil || ctx.Err() != nil {
+		return
+	}
 	job := tcpDataJob{serverKey: serverKey, addr: addr, packet: append([]byte(nil), packet...), now: now}
 	queue := m.dataQ
 	if priority <= Enums.PacketPriorityHigh {
@@ -159,8 +165,7 @@ func (m *tcpDataManager) Send(serverKey string, addr *net.UDPAddr, packet []byte
 	}
 	select {
 	case queue <- job:
-	default:
-		m.client.txAdmissionDrops.Add(1)
+	case <-ctx.Done():
 	}
 }
 
@@ -195,18 +200,20 @@ func (m *tcpDataManager) sendJob(job tcpDataJob) {
 	}
 
 	dc.writeMu.Lock()
+	sentAt := time.Now()
+	m.client.trackResolverSend(job.packet, job.addr.String(), dc.localAddr, job.serverKey, sentAt)
 	_ = dc.conn.SetWriteDeadline(time.Now().Add(tcpDataWriteTimeout))
 	werr := writeTCPDNSFramed(dc.conn, job.packet)
 	dc.writeMu.Unlock()
 
 	if werr != nil {
+		m.client.discardResolverSend(job.packet, job.addr.String(), dc.localAddr, sentAt)
 		m.client.streamWriteFailures.Add(1)
 		dc.close()
 		m.remove(dc)
 		return
 	}
 
-	m.client.trackResolverSend(job.packet, job.addr.String(), dc.localAddr, job.serverKey, job.now)
 	m.client.txTotalBytes.Add(uint64(len(job.packet)))
 }
 

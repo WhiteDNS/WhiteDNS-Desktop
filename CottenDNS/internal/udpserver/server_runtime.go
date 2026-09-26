@@ -259,6 +259,16 @@ func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, queues ingress
 		prepared, ok := s.prepareIngressPacket(buffer[:n])
 		if !ok {
 			s.ingressRejectedPackets.Add(1)
+			// In-zone queries that are not tunnel frames (QNAME-minimisation
+			// probes, CNAME-target chases, apex SOA/NS checks) still need an
+			// answer, or resolvers time out and mark the delegation dead. It is a
+			// small fixed reply sent inline, so it never touches the queues.
+			// Out-of-zone noise stays unanswered: we are not a reflector.
+			if zone := prepared.decision.BaseDomain; zone != "" {
+				if response := s.zoneNoDataResponse(buffer[:n], prepared.parsed, zone); response != nil {
+					_, _ = conn.WriteToUDP(response, addr)
+				}
+			}
 			s.packetPool.Put(buffer)
 			continue
 		}
@@ -395,7 +405,7 @@ func (s *Server) dnsWorker(ctx context.Context, queues ingressQueues, workerID i
 }
 
 func (s *Server) processIngressRequest(req request, workerID int) {
-	response := s.safeHandlePreparedIngress(req.buf[:req.size], req.prepared)
+	response := markAuthoritative(s.safeHandlePreparedIngress(req.buf[:req.size], req.prepared))
 	if len(response) != 0 {
 		if _, err := req.conn.WriteToUDP(response, req.addr); err != nil {
 			s.log.Debugf(
@@ -426,7 +436,7 @@ func (s *Server) safeHandlePacket(packet []byte) (response []byte) {
 		}
 	}()
 
-	return s.handlePacket(packet)
+	return markAuthoritative(s.handlePacket(packet))
 }
 
 func (s *Server) safeHandlePreparedIngress(packet []byte, prepared preparedIngress) (response []byte) {

@@ -85,10 +85,10 @@ func TestServeTCPDNSMessages_EmptyResponseKeepsConnOpen(t *testing.T) {
 	client, server := net.Pipe()
 	defer client.Close()
 
-	calls := 0
+	// Pipelined queries are handled concurrently, so decide by content rather
+	// than call order.
 	handler := func(q []byte) []byte {
-		calls++
-		if calls == 1 {
+		if q[0] == 0x01 {
 			return nil // no tunnel response -> connection must stay open
 		}
 		return []byte{0x99}

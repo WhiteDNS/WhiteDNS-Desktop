@@ -18,7 +18,6 @@ import (
 	"net"
 	"time"
 
-	"cottendns-go/internal/dnsparser"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
 
@@ -37,7 +36,14 @@ const (
 )
 
 func runtimeDNSReadBufferSize(maxDownloadMTU int) int {
-	size := maxDownloadMTU + 2048 // DNS framing, TXT chunks and encryption slack.
+	// Base64 TXT is the widest bulk carrier: each 189 ciphertext bytes needs
+	// a two-byte chunk header, up to 255 base64 bytes and 13 DNS RR bytes.
+	// Include the largest VPN header, AEAD overhead and question/OPT budget.
+	if maxDownloadMTU >= RuntimeUDPReadBufferSize {
+		return RuntimeUDPReadBufferSize
+	}
+	frame := max(0, maxDownloadMTU) + VpnProto.MaxHeaderRawSize() + 28
+	size := 512 + ((frame+188)/189)*268
 	if size < runtimeDNSReadBufferFloor {
 		size = runtimeDNSReadBufferFloor
 	}
@@ -356,7 +362,7 @@ func (c *Client) exchangeDNSOverConnection(conn Connection, query []byte, timeou
 		c.putUDPConn(conn.ResolverLabel, udpConn)
 	}
 
-	packet, err := dnsparser.ExtractVPNResponseMatching(response, c.responseMode == mtuProbeBase64Reply, c.cfg.Domains)
+	packet, err := c.extractVPNResponse(response, c.cfg.BaseEncodeData)
 	if err != nil {
 		return VpnProto.Packet{}, err
 	}
@@ -393,6 +399,6 @@ func (c *Client) exchangeDNSOverConnectionContext(ctx context.Context, conn Conn
 		if res.err != nil {
 			return VpnProto.Packet{}, res.err
 		}
-		return dnsparser.ExtractVPNResponseMatching(res.response, c.responseMode == mtuProbeBase64Reply, c.cfg.Domains)
+		return c.extractVPNResponse(res.response, c.cfg.BaseEncodeData)
 	}
 }

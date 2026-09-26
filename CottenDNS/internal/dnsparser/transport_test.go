@@ -203,11 +203,16 @@ func TestBuildVPNResponsePacketPreservesOriginalQuestionCaseInAnswerName(t *test
 		t.Fatalf("unexpected parsed answer name: got=%q want=%q", parsed.Answers[0].Name, "anhfwjau21.aa.com")
 	}
 
+	// The owner is a pointer to the question name, which keeps the original
+	// 0x20 wire casing byte for byte.
 	rawMixedCase := encodeDNSName("ANHfwjAU21.aa.CoM")
 	questionEnd := dnsHeaderSize + len(rawMixedCase) + 4
 	answerStart := questionEnd
-	if !bytes.Equal(response[answerStart:answerStart+len(rawMixedCase)], rawMixedCase) {
-		t.Fatal("answer owner name must preserve original question wire casing")
+	if !bytes.Equal(response[answerStart:answerStart+2], []byte{0xC0, dnsHeaderSize}) {
+		t.Fatal("answer owner must point at the question name")
+	}
+	if !bytes.Equal(response[dnsHeaderSize:dnsHeaderSize+len(rawMixedCase)], rawMixedCase) {
+		t.Fatal("question must preserve original wire casing")
 	}
 }
 

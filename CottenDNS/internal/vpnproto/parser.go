@@ -61,6 +61,11 @@ var packetFlags = buildPacketFlags()
 // Payload starts immediately after the header check byte.
 
 type Packet struct {
+	// Downstream ciphertext identity is local metadata, never serialized.
+	DownstreamCiphertextHash [32]byte
+	HasDownstreamCiphertext  bool
+	// IngressCodec identifies the successful upstream decoder, never serialized.
+	IngressCodec  *security.Codec
 	SessionID     uint16
 	PacketType    uint8
 	SessionCookie uint8
@@ -102,7 +107,9 @@ func ParseFromLabels(labels string, codec *security.Codec) (Packet, error) {
 		return Packet{}, err
 	}
 
-	return Parse(raw)
+	packet, err := Parse(raw)
+	packet.IngressCodec = codec
+	return packet, err
 }
 
 func Parse(data []byte) (Packet, error) {

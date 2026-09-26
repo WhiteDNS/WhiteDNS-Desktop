@@ -10,6 +10,7 @@ RELEASE_ASSET_PREFIX ?= WhiteDNS-Desktop
 ROOT_DIR := ..
 MASTERDNS_DIR := $(ROOT_DIR)/MasterDnsVPN
 COTTENDNS_DIR := $(ROOT_DIR)/CottenDNS
+COTTENDNS_VERSION := $(shell sed -n 's/.*"commit": "\([^"]*\)".*/\1/p' "$(ROOT_DIR)/vendor/cottendns.json")
 WAILS ?= wails
 GO_BUILD_CACHE ?= $(CURDIR)/.cache/go-build
 GO_ENV_FILE ?= $(CURDIR)/.cache/go-env
@@ -536,7 +537,8 @@ cottendns-client-target:
 	helper="cottendns-client-$(TARGET_GOOS)-$(TARGET_GOARCH)"; \
 	if [ "$(TARGET_GOOS)" = "windows" ]; then helper="$$helper.exe"; fi; \
 	mkdir -p clients "$(GO_BUILD_CACHE)"; \
-	(cd "$(COTTENDNS_DIR)" && GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -buildvcs=false -trimpath -ldflags "$(HELPER_GO_LDFLAGS)" -o "../desktop/clients/$$helper" ./cmd/client); \
+	test -n "$(COTTENDNS_VERSION)" || { echo "Missing CottenDNS source pin" >&2; exit 1; }; \
+	(cd "$(COTTENDNS_DIR)" && GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -buildvcs=false -trimpath -ldflags "$(HELPER_GO_LDFLAGS) -X cottendns-go/internal/version.BuildVersion=$(COTTENDNS_VERSION)" -o "../desktop/clients/$$helper" ./cmd/client); \
 	chmod 755 "clients/$$helper"; \
 	printf 'Built %s\n' "clients/$$helper"
 

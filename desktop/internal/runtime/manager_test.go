@@ -1373,3 +1373,37 @@ package main
 		}
 	}
 	`
+
+func TestEmbeddedCottenDNSReplacesPreviouslyExtractedCore(t *testing.T) {
+	tempDir := t.TempDir()
+	name := helperPlatformNameForEngine(model.ImportTypeCottenDNS)
+	runtimeDir := filepath.Join(tempDir, "runtime")
+	oldPath := filepath.Join(runtimeDir, "helper", name)
+	if err := os.MkdirAll(filepath.Dir(oldPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(oldPath, []byte("old core"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(buildFakeMasterDNSHelper(t, tempDir))
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := NewManager(Options{
+		RuntimeDir: runtimeDir,
+		EmbeddedClientsFS: fstest.MapFS{
+			"clients/" + name: &fstest.MapFile{Data: raw, Mode: 0o755},
+		},
+	}, Callbacks{})
+	extracted, ok := manager.extractEmbeddedClientForEngine(name, model.ImportTypeCottenDNS)
+	if !ok || extracted != oldPath {
+		t.Fatalf("new bundled core was not extracted: %q, %v", extracted, ok)
+	}
+	got, err := os.ReadFile(extracted)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(raw) {
+		t.Fatal("old extracted core survived the app update")
+	}
+}

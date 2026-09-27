@@ -273,3 +273,5 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: release-assets/*
+          # Ship as a draft so release notes can be reviewed before it goes public.
+          draft: true

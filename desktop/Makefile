@@ -1,7 +1,7 @@
 SHELL := /bin/sh
 
 APP_NAME := WhiteDNS Desktop
-DEFAULT_VERSION := 1.2.1
+DEFAULT_VERSION := 1.2.2
 VERSION_FROM_ARGS := $(shell set -- $(MAKECMDGOALS); while [ "$$1" != "" ]; do if [ "$$1" = "--version" ]; then shift; if [ "$$1" != "" ]; then printf '%s' "$$1"; fi; exit; fi; shift; done)
 VERSION ?= $(if $(VERSION_FROM_ARGS),$(VERSION_FROM_ARGS),$(DEFAULT_VERSION))
 APP_VERSION := $(strip $(VERSION))
@@ -368,9 +368,28 @@ macos-app-bundle:
 	@if [ -f "build/appicon.icns" ]; then cp "build/appicon.icns" "$(MACOS_APP_RESOURCES_DIR)/appicon.icns"; fi
 	rm -f "build/bin/$(APP_NAME)"
 
+# The Windows exe stays standalone: helpers and Xray are embedded and the app
+# needs no files beside it. Real version info replaces the Wails placeholders
+# ("1.0.0", "Copyright.........") which are themselves a reputation signal.
 package-windows: validate-version prepare-package
 	$(MAKE) prepare-embedded-client TARGET_GOOS=windows TARGET_GOARCH="$(WINDOWS_CLIENT_ARCH)"
 	$(MAKE) prepare-embedded-core TARGET_GOOS=windows TARGET_GOARCH="$(WINDOWS_CLIENT_ARCH)"
+	mkdir -p build/windows
+	@file_version=$$(printf '%s' "$(APP_VERSION)" | sed 's/[^0-9.].*//'); \
+	{ \
+		printf '%s\n' '{'; \
+		printf '%s\n' '  "fixed": { "file_version": "'"$$file_version"'" },'; \
+		printf '%s\n' '  "info": { "0409": {'; \
+		printf '%s\n' '    "ProductVersion": "$(APP_VERSION)",'; \
+		printf '%s\n' '    "CompanyName": "WhiteDNS",'; \
+		printf '%s\n' '    "FileDescription": "$(APP_NAME)",'; \
+		printf '%s\n' '    "LegalCopyright": "Copyright (c) 2026 WhiteDNS",'; \
+		printf '%s\n' '    "ProductName": "$(APP_NAME)",'; \
+		printf '%s\n' '    "OriginalFilename": "$(APP_NAME).exe",'; \
+		printf '%s\n' '    "Comments": "WhiteDNS Desktop DNS tunnel client"'; \
+		printf '%s\n' '  } }'; \
+		printf '%s\n' '}'; \
+	} > build/windows/info.json
 	GOCACHE="$(GO_BUILD_CACHE)" $(WAILS) build -clean $(WAILS_RELEASE_FLAGS) $(WAILS_OPTIONAL_UPX_FLAGS) -platform $(WINDOWS_PLATFORMS)
 	$(MAKE) package-assets
 
@@ -416,7 +435,7 @@ stage-artifacts:
 				'If your Windows Settings page says 64-bit but your processor is Intel or AMD, this is the correct package.' \
 				'' \
 				'Do not use the ARM64 package unless this PC is specifically Windows on ARM, such as Snapdragon/Surface Pro X.' \
-				> "build/releases/$(PLATFORM)/README-Windows.txt"; \
+				>"build/releases/$(PLATFORM)/README-Windows.txt"; \
 			;; \
 		*windows-arm64*) \
 			printf '%s\n' \
@@ -426,7 +445,7 @@ stage-artifacts:
 				'This ARM64 executable will show "This app cannot run on your PC" on normal Intel/AMD 64-bit Windows.' \
 				'' \
 				'For most 64-bit Windows 10/11 PCs, download the Windows x64 package instead.' \
-				> "build/releases/$(PLATFORM)/README-Windows.txt"; \
+				>"build/releases/$(PLATFORM)/README-Windows.txt"; \
 			;; \
 		*linux*) \
 			printf '%s\n' \
@@ -472,7 +491,7 @@ archive-artifacts: validate-version
 package-helper: dns-clients xray-core package-assets
 
 package-assets:
-	@printf 'Runtime helpers and proxy cores are embedded in the app binary\n'
+	@printf 'Runtime helpers and proxy cores are packaged with the app\n'
 
 test: test-backend test-frontend
 

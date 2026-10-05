@@ -165,6 +165,9 @@ func TestDownloadMTUFallsBackToWorkingSmallCarrier(t *testing.T) {
 			return nil, err
 		}
 		size := int(binary.BigEndian.Uint16(request.Payload[1+mtuProbeCodeLength:]))
+		if size < VpnProto.MinMTUDownloadProbePayload {
+			return nil, errors.New("server rejects undersized probe payload")
+		}
 		payload := make([]byte, size)
 		copy(payload, request.Payload[1:1+mtuProbeCodeLength])
 		binary.BigEndian.PutUint16(payload[mtuProbeCodeLength:], uint16(size))

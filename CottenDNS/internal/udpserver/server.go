@@ -36,7 +36,7 @@ const (
 	mtuProbeMetaLength  = mtuProbeCodeLength + 2
 	mtuProbeUpMinSize   = 1 + mtuProbeCodeLength
 	mtuProbeDownMinSize = mtuProbeUpMinSize + 2
-	mtuProbeMinDownSize = 30
+	mtuProbeMinDownSize = VpnProto.MinMTUDownloadProbePayload
 	mtuProbeMaxDownSize = 4096
 )
 

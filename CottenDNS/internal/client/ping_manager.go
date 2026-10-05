@@ -160,8 +160,16 @@ func (p *PingManager) pingLoop() {
 
 		now := time.Now()
 		nowNano := now.UnixNano()
-		interval := p.nextInterval(nowNano)
+		// Timing mask: no fixed heartbeat rhythm.
+		interval := stretchDuration(p.nextInterval(nowNano), p.client.cfg.QueryTimingJitter)
 		lastPing := p.lastPingSentAt.Load()
+		if p.client.queryLimiter != nil {
+			// Under a query cap any outgoing query already polls the server for
+			// downstream data, so a ping on top would only burn budget.
+			if last := p.lastNonPingSentAt.Load(); last > lastPing {
+				lastPing = last
+			}
+		}
 
 		if nowNano-lastPing >= int64(interval) {
 			if p.client.SessionReady() {

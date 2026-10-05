@@ -133,15 +133,20 @@ func (p *resolverPacer) success(key string) {
 // moved to the back, so selection prefers resolvers with headroom but still falls
 // back to paced ones rather than dropping the packet. Order within each group is
 // preserved (so the underlying balancer strategy still applies).
+// Resolvers/domains that are out of query-rate-limit budget count as paced too,
+// so per-resolver/per-domain caps spread load instead of waiting on one target.
 func (c *Client) orderByPacing(candidates []Connection) []Connection {
-	if c.pacer == nil || !c.pacer.enabled || len(candidates) < 2 {
+	pacerOn := c.pacer != nil && c.pacer.enabled
+	limitOn := c.queryLimiter.perTarget()
+	if (!pacerOn && !limitOn) || len(candidates) < 2 {
 		return candidates
 	}
 	now := c.now()
 	ready := make([]Connection, 0, len(candidates))
 	var paced []Connection
 	for _, conn := range candidates {
-		if c.pacer.paced(conn.Key, now) {
+		if (pacerOn && c.pacer.paced(conn.Key, now)) ||
+			(limitOn && c.queryLimiter.delay(conn.Resolver, conn.Domain) > 0) {
 			paced = append(paced, conn)
 		} else {
 			ready = append(ready, conn)

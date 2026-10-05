@@ -207,6 +207,14 @@ v.example.com.   300  IN  NS  ns.example.com.
 
 Replace `203.0.113.10` with the VPS public IP. The first record points the nameserver name to the VPS; the second delegates the tunnel subdomain to that nameserver. Do **not** proxy either record through a CDN. A short tunnel name is preferable because every extra domain byte reduces usable DNS payload.
 
+On Cloudflare, these are **delegation records**, not a limit on tunnel query
+record types. `NS` sends queries for the tunnel subdomain to CottenDNS; `A`
+and/or `AAAA` locate that nameserver. `NULL`, `TXT`, `HTTPS`, `MX`, and other
+record types cannot replace `NS` delegation. Select tunnel carriers in the
+client's `QUERY_TYPES` instead, for example `["TXT", "NULL", "HTTPS", "SVCB"]`.
+You do not create one Cloudflare record for each carrier. See
+[DNS record types and Cloudflare setup](docs/DNS_RECORD_TYPES.md).
+
 Wait for propagation, then verify from a machine with `dig`:
 
 ```bash

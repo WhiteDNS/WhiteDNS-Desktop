@@ -141,6 +141,11 @@ func (c *Client) exchangeUDPQueryWithConn(conn *net.UDPConn, packet []byte, time
 }
 
 func (c *Client) sendOneWayDNSQuery(resolver Connection, packet []byte, deadline time.Time) error {
+	limitCtx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	if !c.queryLimiter.wait(limitCtx, resolver.Resolver, resolver.Domain) {
+		return limitCtx.Err()
+	}
 	if c.usesStreamTransport() {
 		// Best-effort one-shot over the active stream transport (e.g. the
 		// session-close burst). DoH has no one-way form, so it reuses the normal
@@ -338,6 +343,7 @@ func (t *udpQueryTransport) Close() error {
 // packet, over the client's active transport (UDP, or DNS-over-TCP in TCP mode).
 func (c *Client) exchangeDNSOverConnection(conn Connection, query []byte, timeout time.Duration) (VpnProto.Packet, error) {
 	var response []byte
+	c.queryLimiter.wait(context.Background(), conn.Resolver, conn.Domain)
 
 	if c.usesStreamTransport() {
 		transport, err := c.newQueryTransport(conn.ResolverLabel)
@@ -375,6 +381,9 @@ func (c *Client) exchangeDNSOverConnection(conn Connection, query []byte, timeou
 // exchanges immediately instead of keeping sockets and HTTP streams alive until
 // their full timeout.
 func (c *Client) exchangeDNSOverConnectionContext(ctx context.Context, conn Connection, query []byte, timeout time.Duration) (VpnProto.Packet, error) {
+	if !c.queryLimiter.wait(ctx, conn.Resolver, conn.Domain) {
+		return VpnProto.Packet{}, ctx.Err()
+	}
 	transport, err := c.newQueryTransport(conn.ResolverLabel)
 	if err != nil {
 		return VpnProto.Packet{}, err

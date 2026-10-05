@@ -805,6 +805,8 @@ func optionGroup(key string) string {
 		return "Logging and startup"
 	case strings.HasPrefix(key, "DNS_") || strings.HasPrefix(key, "QNAME_") || strings.HasPrefix(key, "EDNS_"):
 		return "DNS query shaping"
+	case strings.HasPrefix(key, "QUERY_RATE_") || key == "QUERY_TIMING_JITTER":
+		return "Query rate limit and timing mask"
 	default:
 		return "Timeouts and queues"
 	}

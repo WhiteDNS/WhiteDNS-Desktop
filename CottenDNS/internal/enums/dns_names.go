@@ -227,6 +227,10 @@ func PacketTypeName(packetType uint8) string {
 		return "PACKET_SESSION_BUSY"
 	case PACKET_FEC_SHARD:
 		return "PACKET_FEC_SHARD"
+	case PACKET_DOMAIN_LIST_REQ:
+		return "PACKET_DOMAIN_LIST_REQ"
+	case PACKET_DOMAIN_LIST_RES:
+		return "PACKET_DOMAIN_LIST_RES"
 	case PACKET_STREAM_DATA_NACK:
 		return "PACKET_STREAM_DATA_NACK"
 	case PACKET_ERROR_DROP:

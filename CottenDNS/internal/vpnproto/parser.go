@@ -321,6 +321,8 @@ func buildPacketFlags() [256]uint8 {
 		Enums.PACKET_ERROR_DROP,
 		Enums.PACKET_MTU_UP_REQ,
 		Enums.PACKET_MTU_DOWN_RES,
+		Enums.PACKET_DOMAIN_LIST_REQ,
+		Enums.PACKET_DOMAIN_LIST_RES,
 	}
 
 	for _, packetType := range validOnly {

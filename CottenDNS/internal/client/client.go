@@ -229,6 +229,13 @@ type Client struct {
 	// queryLimiter is the optional global DNS query rate cap (nil = off).
 	queryLimiter *queryRateLimiter
 
+	// Domain rotation (domain_rotation.go). domainsMu guards standbyDomains
+	// and writes to cfg.Domains; failedFullScans is Run-loop only.
+	domainsMu          sync.Mutex
+	standbyDomains     []string
+	failedFullScans    int
+	domainListAnswered atomic.Bool
+
 	// Local Proxy Daemons
 	tcpListener *TCPListener
 	dnsListener *DNSListener
@@ -542,6 +549,7 @@ func New(cfg config.ClientConfig, log *logger.Logger, codec *security.Codec) *Cl
 
 	c.carrier = newCarrierSelector(c.queryTypes, c.now)
 	c.pingManager = newPingManager(c)
+	c.initDomainRotation()
 	return c
 }
 
@@ -626,7 +634,7 @@ func (c *Client) Run(ctx context.Context) error {
 						c.notifySessionCloseBurst(time.Second)
 						c.StopAsyncRuntime()
 						return nil
-					case <-time.After(5 * time.Second):
+					case <-time.After(c.failedScanRetryDelay()):
 					}
 					continue
 				}
@@ -640,12 +648,13 @@ func (c *Client) Run(ctx context.Context) error {
 						c.notifySessionCloseBurst(time.Second)
 						c.StopAsyncRuntime()
 						return nil
-					case <-time.After(5 * time.Second):
+					case <-time.After(c.failedScanRetryDelay()):
 					}
 					continue
 				}
 
 				c.successMTUChecks = true
+				c.failedFullScans = 0
 				c.ShortPrintBanner()
 			}
 
@@ -701,6 +710,7 @@ func (c *Client) Run(ctx context.Context) error {
 				}
 
 				c.ensureLocalDNSCachePersistence(ctx)
+				c.requestDomainList(ctx)
 			}
 
 			select {

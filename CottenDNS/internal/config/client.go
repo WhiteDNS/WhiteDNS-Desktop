@@ -32,6 +32,11 @@ type ClientConfig struct {
 	ConfigPreset              string   `toml:"CONFIG_PRESET"`
 	ProtocolType              string   `toml:"PROTOCOL_TYPE"`
 	Domains                   []string `toml:"DOMAINS"`
+	// StandbyDomains (domain rotation) are tunnel domains on the same server
+	// that are never queried until the active ones stop working, so a firewall
+	// watching traffic cannot block them in advance. Tried in order, one at a
+	// time, after a full scan finds no working path.
+	StandbyDomains []string `toml:"STANDBY_DOMAINS"`
 	ListenIP                  string   `toml:"LISTEN_IP"`
 	ListenPort                int      `toml:"LISTEN_PORT"`
 	SOCKS5Auth                bool     `toml:"SOCKS5_AUTH"`
@@ -876,6 +881,7 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 	if len(cfg.Domains) == 0 {
 		return cfg, fmt.Errorf("DOMAINS must contain at least one domain")
 	}
+	cfg.StandbyDomains = AppendNewDomains(nil, cfg.StandbyDomains, cfg.Domains)
 
 	cfg.ResolversFilePath = strings.TrimSpace(cfg.ResolversFilePath)
 
@@ -970,6 +976,27 @@ func normalizeClientDomains(domains []string) []string {
 	})
 
 	return normalized
+}
+
+// AppendNewDomains appends each normalized candidate not already in list or
+// exclude, keeping order (standby domains are tried in the order given).
+func AppendNewDomains(list, candidates, exclude []string) []string {
+	seen := make(map[string]struct{}, len(list)+len(exclude))
+	for _, d := range append(append([]string(nil), list...), exclude...) {
+		seen[d] = struct{}{}
+	}
+	for _, d := range candidates {
+		d = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(d)), ".")
+		if d == "" {
+			continue
+		}
+		if _, dup := seen[d]; dup {
+			continue
+		}
+		seen[d] = struct{}{}
+		list = append(list, d)
+	}
+	return list
 }
 
 func defaultString(value string, fallback string) string {

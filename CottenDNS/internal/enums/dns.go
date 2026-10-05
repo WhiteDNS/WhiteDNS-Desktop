@@ -82,6 +82,13 @@ const (
 	// data units inside the recovered block carry their own stream/seq).
 	PACKET_FEC_SHARD = 0x38 // 56
 
+	// Domain rotation: the client asks once per session which other tunnel
+	// domains this server answers on (ADVERTISE_DOMAINS); the reply payload is
+	// a newline-separated list. Session-scoped, no stream/seq header. Servers
+	// that predate it answer the request with NODATA, so it is safe to send.
+	PACKET_DOMAIN_LIST_REQ = 0x39 // 57
+	PACKET_DOMAIN_LIST_RES = 0x3A // 58
+
 	// Generic error packets
 	PACKET_ERROR_DROP = 0xFF // 255
 )

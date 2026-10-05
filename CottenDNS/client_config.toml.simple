@@ -23,6 +23,15 @@
 # All domains must be handled by the same server. Do not use different domains across multiple servers.
 DOMAINS = ["v.domain.com"]
 
+# Domain rotation. Backup tunnel domains on the SAME server, never queried while
+# DOMAINS work, so the firewall cannot see and block them in advance. After two
+# full scans in a row find no working path, the client switches to the next one
+# (the failed domains go to the back of the list). Domains the server advertises
+# (server ADVERTISE_DOMAINS) are learned automatically, saved next to this file
+# as learned_domains_<id>.txt, and added after these. Empty = none configured.
+# Example: STANDBY_DOMAINS = ["v2.domain.com", "t.other.net"]
+STANDBY_DOMAINS = []
+
 # DNS record types the client rotates over when building tunnel queries (A1,
 # anti-fingerprinting). Names are case-insensitive. The tunnel payload always
 # rides in the query name. The server accepts every listed type, but the

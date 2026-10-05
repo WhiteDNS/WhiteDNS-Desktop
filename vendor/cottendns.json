@@ -1,6 +1,6 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS.git",
-  "commit": "d48d002e1452e564cb12ab721b1d2fea7fe56848",
+  "commit": "f4a22770dcbfb72f5332be0bdf28cb9c3e26a9a9",
   "directory": "CottenDNS",
   "update": "Replace CottenDNS with `git archive <reviewed-full-sha>` and update this file in the same commit. Never vendor a dirty working tree."
 }

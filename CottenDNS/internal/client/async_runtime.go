@@ -707,6 +707,8 @@ func (c *Client) asyncEncodeWorker(ctx context.Context, id int) {
 					serverKey: resolverConn.Key,
 					packet:    dnsPacket,
 					priority:  Enums.DefaultPacketPriority(task.packetType),
+					resolver:  resolverConn.Resolver,
+					domain:    domain,
 				})
 			}
 
@@ -755,9 +757,17 @@ func (c *Client) asyncWriterWorker(ctx context.Context, id int, sockets tunnelSo
 				return
 			}
 			now := time.Now()
-			for _, frame := range task.frames {
+			for i, frame := range task.frames {
 				if frame.addr == nil || len(frame.packet) == 0 {
 					continue
+				}
+				// The dispatcher already claimed the first frame's slot; extra
+				// duplicate frames pay their own here.
+				if i > 0 && c.queryLimiter != nil {
+					if !c.queryLimiter.wait(ctx, frame.resolver, frame.domain) {
+						return
+					}
+					now = time.Now()
 				}
 				if useStream {
 					// TCP/DoT/DoH: route through the persistent per-resolver

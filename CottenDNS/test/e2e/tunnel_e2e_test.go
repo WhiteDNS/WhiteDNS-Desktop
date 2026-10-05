@@ -184,6 +184,15 @@ func TestTunnelEndToEndFECDownload(t *testing.T) {
 	runTunnelEcho(t, 1, 1, "FEC_DOWNLOAD_ENABLED = true\nFEC_BLOCK_SIZE = 4\nFEC_PARITY = 4\n", "", "")
 }
 
+// Each carrier must work alone; rotation must not hide a broken record type.
+func TestTunnelEndToEndSingleCarriers(t *testing.T) {
+	for _, carrier := range []string{"TXT", "NULL", "HTTPS", "SVCB", "CNAME", "A", "AAAA", "MX", "NS", "PTR", "SRV", "CAA", "NAPTR", "SOA"} {
+		t.Run(carrier, func(t *testing.T) {
+			runTunnelEcho(t, 3, 3, "", fmt.Sprintf("[%q]", carrier), "")
+		})
+	}
+}
+
 func TestTunnelEndToEndNewTransportChannels(t *testing.T) {
 	// Client rotates over the new NULL and HTTPS response channels (plus TXT and
 	// CNAME). The server must auto-accept every query type and answer with the
@@ -368,7 +377,7 @@ DOWNLOAD_PACKET_DUPLICATION_COUNT = 1
 UPLOAD_SETUP_PACKET_DUPLICATION_COUNT = 1
 DOWNLOAD_SETUP_PACKET_DUPLICATION_COUNT = 1
 MIN_UPLOAD_MTU = 80
-MIN_DOWNLOAD_MTU = 4000
+MIN_DOWNLOAD_MTU = 16
 MAX_UPLOAD_MTU = 142
 MAX_DOWNLOAD_MTU = 4000
 MTU_TEST_RETRIES_RESOLVERS = 0

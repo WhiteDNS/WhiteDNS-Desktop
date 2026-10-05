@@ -2318,6 +2318,7 @@ func TestARQ_DataRetransmitDoesNotAdvanceRetryOrRTOWhenEnqueueRejected(t *testin
 		CreatedAt:       now.Add(-time.Second),
 		LastSentAt:      now.Add(-time.Second),
 		Retries:         2,
+		Dispatched:      true,
 		CurrentRTO:      200 * time.Millisecond,
 		CompressionType: 0,
 	}

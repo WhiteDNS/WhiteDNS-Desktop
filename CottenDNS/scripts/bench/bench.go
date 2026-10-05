@@ -16,9 +16,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	Enums "cottendns-go/internal/enums"
 )
 
 var (
+	queryTypes     = flag.String("query-types", "TXT", "Comma-separated tunnel query types, e.g. TXT,NULL,HTTPS,SVCB")
+	directionFlag  = flag.String("direction", "both", "Direction: both, upload, or download")
+	downloadMTU    = flag.Int("download-mtu", 1200, "Maximum download MTU; smaller carriers negotiate down")
+	queryTypesTOML string
 	runs           = flag.Int("runs", 3, "Number of runs for each direction")
 	payloadMiB     = flag.Int("bytes", 100*1024*1024, "Payload size in bytes (default 100MiB)")
 	forceBuild     = flag.Bool("force-build", true, "Force rebuilding binaries")
@@ -26,6 +32,7 @@ var (
 	clientPort     = flag.Int("client-port", 18080, "Port for the CottenDns client listener")
 	serverPort     = flag.Int("server-port", 5300, "Port for the CottenDns server UDP listener")
 	pathController = flag.String("path-controller", "unified", "Client path controller: unified or legacy")
+	clientExtra    = flag.String("client-extra", "", `Extra TOML appended to the client config, e.g. "QUERY_RATE_LIMIT_PER_SECOND = 5"`)
 
 	// Standalone / slipstream-like flags
 	optMode         = flag.String("mode", "", "Standalone mode: 'sink', 'source', 'send', 'recv'")
@@ -75,6 +82,22 @@ func main() {
 	if *pathController != "unified" && *pathController != "legacy" {
 		log.Fatalf("Invalid -path-controller %q (want unified or legacy)", *pathController)
 	}
+	if *runs < 1 || *payloadMiB < 1 || *optChunkSize < 1 || *optPrefaceBytes < 0 || *downloadMTU < 16 || *downloadMTU > 4000 {
+		log.Fatal("Invalid runs, bytes, chunk-size, preface-bytes, or download-mtu")
+	}
+	if *directionFlag != "both" && *directionFlag != "upload" && *directionFlag != "download" {
+		log.Fatal("Invalid -direction")
+	}
+	names := []string{}
+	for _, name := range strings.Split(*queryTypes, ",") {
+		code, ok := Enums.DNSRecordTypeFromName(name)
+		if !ok {
+			log.Fatalf("Unsupported query type %q", name)
+		}
+		names = append(names, Enums.DNSRecordTypeName(code))
+	}
+	encodedTypes, _ := json.Marshal(names)
+	queryTypesTOML = string(encodedTypes)
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	if *optMode != "" {
@@ -86,6 +109,8 @@ func main() {
 	fmt.Printf("📂 Working Dir: %s\n", benchDir)
 	fmt.Printf("💾 Payload: %.2f MiB | Runs: %d | Controller: %s\n\n",
 		float64(*payloadMiB)/(1024*1024), *runs, *pathController)
+
+	fmt.Printf("Carrier types: %s | Maximum download MTU: %d | AES-GCM enabled\n", queryTypesTOML, *downloadMTU)
 
 	if err := setupDirs(); err != nil {
 		log.Fatalf("Failed to setup directories: %v", err)
@@ -100,13 +125,20 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	fmt.Println("📡 Benchmarking Exfiltration (Upload)...")
-	exfilResults := runBenchmark(ctx, "exfil")
-
-	fmt.Println("\n📡 Benchmarking Download...")
-	downloadResults := runBenchmark(ctx, "download")
-
+	var exfilResults, downloadResults []BenchResult
+	if *directionFlag != "download" {
+		fmt.Println("Benchmarking upload...")
+		exfilResults = runBenchmark(ctx, "exfil")
+	}
+	if *directionFlag != "upload" {
+		fmt.Println("Benchmarking download...")
+		downloadResults = runBenchmark(ctx, "download")
+	}
 	printSummary(exfilResults, downloadResults)
+	if (*directionFlag != "download" && len(exfilResults) != *runs) || (*directionFlag != "upload" && len(downloadResults) != *runs) {
+		log.Fatal("Incomplete benchmark: at least one run failed")
+	}
+
 }
 
 func runStandalone() {
@@ -177,7 +209,7 @@ func runBenchmark(ctx context.Context, direction string) []BenchResult {
 
 func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, error) {
 	// 1. Setup Target Server with dynamic port
-	targetReceived := make(chan struct{})
+	targetReceived := make(chan error, 1)
 	ln, targetPort, err := startTargetServer(int64(*payloadMiB), direction, targetReceived)
 	if err != nil {
 		return BenchResult{}, err
@@ -246,7 +278,7 @@ func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, 
 	if err := serverCmd.Start(); err != nil {
 		return BenchResult{}, err
 	}
-	defer serverCmd.Process.Kill()
+	defer func() { _ = serverCmd.Process.Kill(); _ = serverCmd.Wait() }()
 
 	if err := waitForFile(keyFile, 15*time.Second); err != nil {
 		fmt.Printf("\n[ERROR] Server startup failed. Log:\n%s\n", serverLog.String())
@@ -267,6 +299,8 @@ func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, 
 	ENCRYPTION_KEY = "%s"
 	RESOLVER_BALANCING_STRATEGY = 1
 	PATH_CONTROLLER_MODE = "%s"
+	QUERY_TYPES = %s
+	TERMINAL_UI = "plain"
 	COMPARABLE_PATH_STRIPING = true
 	DATA_ENCRYPTION_METHOD = 3
 	UPLOAD_PACKET_DUPLICATION_COUNT = 1
@@ -274,9 +308,9 @@ func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, 
 	UPLOAD_SETUP_PACKET_DUPLICATION_COUNT = 1
 	DOWNLOAD_SETUP_PACKET_DUPLICATION_COUNT = 1
 	MIN_UPLOAD_MTU = 80
-	MIN_DOWNLOAD_MTU = 4000
+	MIN_DOWNLOAD_MTU = 16
 	MAX_UPLOAD_MTU = 142
-	MAX_DOWNLOAD_MTU = 4000
+	MAX_DOWNLOAD_MTU = %d
 	MTU_TEST_RETRIES_RESOLVERS = 0
 	MTU_TEST_TIMEOUT_RESOLVERS = 1.0
 	MTU_TEST_PARALLELISM_RESOLVERS = 1
@@ -321,7 +355,8 @@ func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, 
 	ARQ_MAX_CONTROL_RETRIES = 300
 	ARQ_DATA_NACK_INITIAL_DELAY_SECONDS = 0.35
 	ARQ_DATA_NACK_REPEAT_SECONDS = 0.8
-	`, *clientPort, encryptionKey, *pathController)), 0644)
+	%s
+	`, *clientPort, encryptionKey, *pathController, queryTypesTOML, *downloadMTU, *clientExtra)), 0644)
 
 	absClientBin, _ := filepath.Abs(filepath.Join(binDir, "client.exe"))
 	clientCmd := exec.Command(absClientBin, "--config", clientCfg)
@@ -332,7 +367,7 @@ func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, 
 	if err := clientCmd.Start(); err != nil {
 		return BenchResult{}, err
 	}
-	defer clientCmd.Process.Kill()
+	defer func() { _ = clientCmd.Process.Kill(); _ = clientCmd.Wait() }()
 
 	if err := waitForPattern(clientLog, "TCP Proxy server is listening", 30*time.Second); err != nil {
 		fmt.Printf("\n[ERROR] Client startup failed. Log:\n%s\n", clientLog.String())
@@ -350,7 +385,10 @@ func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, 
 	}
 
 	select {
-	case <-targetReceived:
+	case err := <-targetReceived:
+		if err != nil {
+			return BenchResult{}, fmt.Errorf("target transfer: %w", err)
+		}
 	case <-time.After(15 * time.Second):
 		return BenchResult{}, fmt.Errorf("target server did not confirm reception")
 	}
@@ -363,7 +401,7 @@ func runOnce(ctx context.Context, direction string, runIndex int) (BenchResult, 
 	}, nil
 }
 
-func startTargetServer(expectedBytes int64, direction string, targetReceived chan struct{}) (net.Listener, int, error) {
+func startTargetServer(expectedBytes int64, direction string, targetReceived chan error) (net.Listener, int, error) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, 0, err
@@ -371,12 +409,11 @@ func startTargetServer(expectedBytes int64, direction string, targetReceived cha
 	port := ln.Addr().(*net.TCPAddr).Port
 
 	go func() {
-		defer close(targetReceived)
 		serverMode := "sink"
 		if direction == "download" {
 			serverMode = "source"
 		}
-		RunServerWithListener(context.Background(), serverMode, ln, expectedBytes, *optChunkSize, *optPrefaceBytes)
+		targetReceived <- RunServerWithListener(context.Background(), serverMode, ln, expectedBytes, *optChunkSize, *optPrefaceBytes)
 	}()
 
 	return ln, port, nil
@@ -555,6 +592,7 @@ func transfer(ctx context.Context, mode string, conn net.Conn, totalBytes int64,
 	for i := range buf {
 		buf[i] = 'a'
 	}
+	expected := bytes.Repeat([]byte{'a'}, chunks)
 
 	// Handle preface
 	if mode == "sink" || mode == "recv" {
@@ -613,33 +651,42 @@ func transfer(ctx context.Context, mode string, conn net.Conn, totalBytes int64,
 			if start.IsZero() {
 				start = time.Now()
 			}
-			n, err := conn.Read(buf)
-			if err != nil {
-				if err == io.EOF {
-					break
-				}
-				return BenchResult{}, err
+			n, err := conn.Read(buf[:min(int64(len(buf)), remaining)])
+			if !bytes.Equal(buf[:n], expected[:n]) {
+				return BenchResult{}, fmt.Errorf("received corrupt payload at byte %d", total)
 			}
 			total += int64(n)
 			remaining -= int64(n)
+			if err != nil && remaining > 0 {
+				if err == io.EOF {
+					err = io.ErrUnexpectedEOF
+				}
+				return BenchResult{}, fmt.Errorf("read payload after %d/%d bytes: %w", total, totalBytes, err)
+			}
+
 		}
 	}
 
-	elapsed := time.Since(start)
-	if total == 0 {
-		return BenchResult{}, fmt.Errorf("no data transferred")
+	if total != totalBytes {
+		return BenchResult{}, fmt.Errorf("incomplete transfer: got %d want %d", total, totalBytes)
 	}
-
-	// Special case: if exfil (sink mode at target), send ACK
 	switch mode {
 	case "sink":
-		conn.Write([]byte("OK"))
+		if _, err := conn.Write([]byte("OK")); err != nil {
+			return BenchResult{}, err
+		}
 	case "send":
-		// Wait for ACK
 		ack := make([]byte, 2)
-		conn.SetReadDeadline(time.Now().Add(10 * time.Second))
-		conn.Read(ack)
+		conn.SetReadDeadline(time.Now().Add(45 * time.Second))
+		if _, err := io.ReadFull(conn, ack); err != nil {
+			return BenchResult{}, fmt.Errorf("receiver acknowledgement: %w", err)
+		}
+		if string(ack) != "OK" {
+			return BenchResult{}, fmt.Errorf("invalid receiver acknowledgement: %q", ack)
+		}
 	}
+	// Upload ends after the receiver confirms the entire payload, not a socket write.
+	elapsed := time.Since(start)
 
 	return BenchResult{
 		Elapsed: elapsed,

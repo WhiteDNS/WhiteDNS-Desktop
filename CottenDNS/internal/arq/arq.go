@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -103,6 +103,7 @@ type adaptiveRTOState struct {
 }
 
 type rtxJob struct {
+	item            *arqDataItem
 	sn              uint16
 	data            []byte
 	compressionType uint8
@@ -2169,6 +2170,7 @@ func (a *ARQ) checkRetransmits() {
 		}
 
 		jobs = append(jobs, rtxJob{
+			item:            info,
 			sn:              sn,
 			data:            info.Data,
 			compressionType: info.CompressionType,
@@ -2195,27 +2197,36 @@ func (a *ARQ) checkRetransmits() {
 			packetType = uint8(Enums.PACKET_STREAM_RESEND)
 		}
 
-		ok := a.enqueuer.PushTXPacket(
-			priority,
-			packetType,
-			j.sn, 0, 0, j.compressionType, 0, j.data,
-		)
-		if !ok {
+		// Publish retry state before enqueue: a fast consumer may dequeue and
+		// arm its timer before PushTXPacket returns. Never overwrite that mark.
+		a.mu.Lock()
+		info := a.sndBuf[j.sn]
+		if info != j.item || info == nil || a.closed {
+			a.mu.Unlock()
 			continue
 		}
-
-		a.mu.Lock()
-		info, exists := a.sndBuf[j.sn]
-		if exists {
-			dataFloor := a.currentDataBaseRTO()
-			info.LastSentAt = now
-			info.Dispatched = false
-			info.Retries++
-			info.SampleEligible = false
-			grownRTO := time.Duration(float64(info.CurrentRTO) * dataRetransmitRTOGrowthFactor)
-			info.CurrentRTO = clampDuration(grownRTO, dataFloor, a.maxRTO)
-		}
+		previousSent, previousDispatched := info.LastSentAt, info.Dispatched
+		previousRetries, previousRTO := info.Retries, info.CurrentRTO
+		info.LastSentAt = now
+		info.Dispatched = false
+		info.Retries++
+		info.SampleEligible = false
+		grownRTO := time.Duration(float64(info.CurrentRTO) * dataRetransmitRTOGrowthFactor)
+		info.CurrentRTO = clampDuration(grownRTO, a.currentDataBaseRTO(), a.maxRTO)
 		a.mu.Unlock()
+
+		ok := a.enqueuer.PushTXPacket(priority, packetType, j.sn, 0, 0, j.compressionType, 0, j.data)
+		if !ok {
+			a.mu.Lock()
+			// Keep a concurrent dequeue/ACK or replacement sequence intact.
+			if a.sndBuf[j.sn] == info && !info.Dispatched && info.LastSentAt.Equal(now) {
+				info.LastSentAt = previousSent
+				info.Dispatched = previousDispatched
+				info.Retries = previousRetries
+				info.CurrentRTO = previousRTO
+			}
+			a.mu.Unlock()
+		}
 	}
 
 	a.recomputeRetransmitHint()

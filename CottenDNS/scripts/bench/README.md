@@ -6,10 +6,14 @@ This directory contains the core benchmarking tools for CottenDNS, now enhanced 
 
 ### 1. `bench.go` (Go-based Orchestrator and Benchmarker)
 
-The primary tool for end-to-end performance testing. It builds the server and client, orchestrates a local tunnel, and measures throughput using **First-Byte Timing**.
+The primary tool for end-to-end performance testing. It builds the server and client, orchestrates a local tunnel, and measures complete payload transfers with monotonic timing.
 
 #### High-Precision Timing
-Unlike simple timers, `bench.go` starts its measurement only when the **first byte** of the actual payload is sent or received. This ensures that connection establishment and handshake overheads do not skew the results, providing a true measure of tunnel throughput.
+The timer starts immediately before the first payload I/O, after the local TCP
+connection opens. Receive timing includes waiting for the first payload.
+Upload timing ends only after the receiver confirms the complete payload with
+`OK`. Short transfers, corrupt payloads, and incomplete acknowledgements fail
+the run; an incomplete set of requested runs exits nonzero.
 
 #### Usage (Full Orchestration)
 
@@ -23,11 +27,14 @@ go run scripts/bench/bench.go -runs 3 -bytes 10485760
 | Flag | Description | Default |
 |------|-------------|---------|
 | `-runs` | Number of runs for each direction | 3 |
-| `-bytes` | Total payload size in bytes | 10MiB |
+| `-bytes` | Total payload size in bytes | 100MiB |
 | `-force-build` | Rebuild server and client binaries | true |
 | `-client-port` | Port for the local client listener | 18080 |
 | `-server-port` | Port for the UDP server listener | 5300 |
 | `-path-controller` | Compare `unified` or rollback `legacy` client behavior | unified |
+| `-query-types` | Comma-separated query types to test in isolation or rotation | TXT |
+| `-direction` | `both`, `upload`, or `download` | both |
+| `-download-mtu` | Maximum download MTU; discovery may negotiate a smaller value | 1200 |
 
 ---
 
@@ -68,6 +75,20 @@ go run scripts/bench/bench.go -mode send -addr 127.0.0.1:9090 -json
 
 ## Methodology
 
-1. **First-Byte Start**: The timer starts on the first successful `Read` or `Write` of the payload.
+1. **First-Byte Start**: The timer starts just before the first payload `Read` or `Write`.
 2. **ACK Synchronization**: For "Exfil" scenarios, the sink sends an "OK" acknowledgment to ensure all data has cleared the tunnel before the timer stops.
 3. **Monotonic Timing**: Uses Go's monotonic clock for sub-millisecond precision.
+
+## DNS carrier comparisons
+
+Use `-query-types NULL`, `-query-types HTTPS`, or another supported type. Run
+one type at a time to avoid masking failures with a working alternative.
+The maximum download MTU is common across runs; actual negotiated capacity
+is smaller for A/AAAA/CNAME-based carriers. Use `-download-mtu 4000` to reproduce
+the older bulk-carrier benchmark ceiling.
+
+This is a loopback measurement, not a Cloudflare or Internet throughput claim.
+Keep encryption enabled and use several sufficiently long runs. Payloads are
+deterministic `a` bytes, validated by the receiver; compression is disabled in
+the orchestrated tunnel. Runtime logs are replaced by the next invocation, so
+copy logs out if needed. Run invocations sequentially.

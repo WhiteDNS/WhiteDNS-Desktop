@@ -163,6 +163,17 @@ dispatchLoop:
 			continue dispatchLoop
 		}
 
+		// Query rate limit: hold packets in the stream TX queue (which dedupes
+		// ARQ retransmits) until a slot is free, instead of piling them up in
+		// the channels behind it. Re-pick afterwards: the queue or the best
+		// resolver may have changed while waiting.
+		if d := c.queryLimiter.delay(conns[0].Resolver, conns[0].Domain); d > 0 {
+			if !sleepCtx(ctx, d) {
+				return
+			}
+			continue dispatchLoop
+		}
+
 		var item *clientStreamTXPacket
 		var ok bool
 		if selected != nil {
@@ -191,6 +202,15 @@ dispatchLoop:
 			!c.shouldTransmitQueuedStreamPacket(selected, item) {
 			selected.ReleaseTXPacket(item)
 			continue dispatchLoop
+		}
+
+		// Claim the slot (normally free after the delay check above; another
+		// path such as a health recheck may have taken it in between).
+		if !c.queryLimiter.wait(ctx, conns[0].Resolver, conns[0].Domain) {
+			if selected != nil {
+				selected.ReleaseTXPacket(item)
+			}
+			return
 		}
 
 		finalPacketType, finalPayload, wasPacked := c.packControlBlocks(item, selected, selectedID, selectedStreamID, entries)

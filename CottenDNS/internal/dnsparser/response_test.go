@@ -415,3 +415,57 @@ func TestBuildAuthoritativeNoDataCarriesSOA(t *testing.T) {
 		t.Fatalf("OPT record must be preserved last")
 	}
 }
+
+func TestBuildAuthoritativeNSAnswersApex(t *testing.T) {
+	const zone = "v.example.com"
+	request := buildDNSQuery(0x5151, "V.Example.com", Enums.DNS_RECORD_TYPE_NS, true)
+	parsedReq, err := ParseDNSRequestLite(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !IsApexNSQuery(parsedReq, zone) {
+		t.Fatal("apex NS query (0x20 case) not recognised")
+	}
+	for _, other := range []struct {
+		name  string
+		qtype uint16
+	}{{"abc." + zone, Enums.DNS_RECORD_TYPE_NS}, {zone, Enums.DNS_RECORD_TYPE_A}} {
+		p, _ := ParseDNSRequestLite(buildDNSQuery(1, other.name, other.qtype, false))
+		if IsApexNSQuery(p, zone) {
+			t.Fatalf("%s/%d wrongly treated as apex NS", other.name, other.qtype)
+		}
+	}
+
+	response, err := BuildAuthoritativeNSFromLite(request, parsedReq, []string{"ns1.example.com", "ns2.example.net"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f := binary.BigEndian.Uint16(response[2:4]); f&(1<<10) == 0 || f&(1<<7) != 0 || f&0x0F != 0 {
+		t.Fatalf("want AA=1 RA=0 NOERROR, flags=%#x", f)
+	}
+	parsed, err := ParsePacket(response)
+	if err != nil {
+		t.Fatalf("ParsePacket: %v", err)
+	}
+	if len(parsed.Answers) != 2 || len(parsed.Additional) != 1 {
+		t.Fatalf("want 2 answers + OPT, got %d/%d", len(parsed.Answers), len(parsed.Additional))
+	}
+	for i, want := range []string{"ns1.example.com", "ns2.example.net"} {
+		a := parsed.Answers[i]
+		if a.Type != Enums.DNS_RECORD_TYPE_NS || !sameDNSName(a.Name, zone) {
+			t.Fatalf("answer %d = %s/%d", i, a.Name, a.Type)
+		}
+		if got := decodeRDataName(t, a.RData); got != want {
+			t.Fatalf("answer %d target %q, want %q", i, got, want)
+		}
+	}
+}
+
+func decodeRDataName(t *testing.T, rdata []byte) string {
+	t.Helper()
+	name, _, err := parseName(rdata, 0)
+	if err != nil {
+		t.Fatalf("decode NS target: %v", err)
+	}
+	return name
+}

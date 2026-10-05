@@ -20,6 +20,25 @@
 # Must match client DOMAINS.
 DOMAIN = ["v.domain.com"]
 
+# Domain rotation. Tunnel domains (each must also be in DOMAIN and delegated to
+# this server) that connected clients learn and keep as standby. When a client's
+# configured domains get blocked, it switches to a standby one, so users keep a
+# connection without needing a new profile. A client asks once per session and
+# gets as many as fit one reply, in random order.
+# Anyone with the shared key can ask, so list only domains you are ready to see
+# blocked; keep the rest unadvertised until you need them. Empty = off.
+# Example: ADVERTISE_DOMAINS = ["v2.domain.com", "t.other.net"]
+ADVERTISE_DOMAINS = []
+
+# Nameserver names your registrar/parent zone delegates DOMAIN to (the NS
+# records you created, e.g. "ns.domain.com"). When set, a query for a DOMAIN's
+# own NS records is answered with these, like any real authoritative server;
+# otherwise it gets an empty answer, which an active prober can notice.
+# Use EXACTLY the names from your delegation: resolvers may trust this answer
+# over the parent's. Names inside a DOMAIN are ignored. Empty = off.
+# Example: ZONE_NS = ["ns.domain.com"]
+ZONE_NS = []
+
 # How this server should handle new connections.
 # Allowed values:
 # "SOCKS5" = the client/program chooses the destination for each connection.

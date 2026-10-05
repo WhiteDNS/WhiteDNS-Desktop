@@ -191,6 +191,49 @@ func BuildAuthoritativeNoDataFromLite(request []byte, parsed LitePacket, zone st
 	return response, nil
 }
 
+// IsApexNSQuery reports whether the query asks for the zone's own NS records.
+func IsApexNSQuery(parsed LitePacket, zone string) bool {
+	q := parsed.FirstQuestion
+	return parsed.HasQuestion && q.Type == Enums.DNS_RECORD_TYPE_NS && sameDNSName(q.Name, zone)
+}
+
+// BuildAuthoritativeNSFromLite answers an apex NS query with the given
+// nameserver names, AA=1, like the delegated server a prober expects to find.
+// The names must be exactly the ones the parent zone delegates to: resolvers may
+// prefer the child's NS set over the parent's.
+func BuildAuthoritativeNSFromLite(request []byte, parsed LitePacket, nameservers []string) ([]byte, error) {
+	base, err := buildResponseWithRCodeLite(request, parsed, Enums.DNSR_CODE_NO_ERROR)
+	if err != nil {
+		return nil, err
+	}
+	questionEnd := parsed.QuestionEndOffset
+	if questionEnd < dnsHeaderSize || questionEnd > len(base) {
+		return nil, ErrInvalidQuestion
+	}
+
+	var answers []byte
+	for _, ns := range nameservers {
+		target, err := encodeDNSNameStrict(ns)
+		if err != nil {
+			return nil, err
+		}
+		answers = binary.BigEndian.AppendUint16(answers, 0xC000|dnsHeaderSize) // owner = question name
+		answers = binary.BigEndian.AppendUint16(answers, Enums.DNS_RECORD_TYPE_NS)
+		answers = binary.BigEndian.AppendUint16(answers, Enums.DNSQ_CLASS_IN)
+		answers = binary.BigEndian.AppendUint32(answers, 86400)
+		answers = binary.BigEndian.AppendUint16(answers, uint16(len(target)))
+		answers = append(answers, target...)
+	}
+
+	response := make([]byte, 0, len(base)+len(answers))
+	response = append(response, base[:questionEnd]...)
+	response = append(response, answers...)
+	response = append(response, base[questionEnd:]...) // OPT, if any, stays last
+	binary.BigEndian.PutUint16(response[2:4], (binary.BigEndian.Uint16(response[2:4])|1<<10)&^(1<<7))
+	binary.BigEndian.PutUint16(response[6:8], uint16(len(nameservers)))
+	return response, nil
+}
+
 func getARCount(optLen int) int {
 	if optLen > 0 {
 		return 1

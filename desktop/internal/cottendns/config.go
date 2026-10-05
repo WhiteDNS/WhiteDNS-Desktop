@@ -787,7 +787,7 @@ func optionGroup(key string) string {
 		return "Local proxy"
 	case strings.HasPrefix(key, "LOCAL_DNS_") || strings.HasPrefix(key, "DNS_RESPONSE_"):
 		return "Local DNS"
-	case strings.HasPrefix(key, "RESOLVER_") || key == "QUERY_TYPES":
+	case strings.HasPrefix(key, "RESOLVER_") || key == "QUERY_TYPES" || key == "STANDBY_DOMAINS":
 		return "Resolvers and transport"
 	case strings.Contains(key, "DUPLICATION") || strings.HasPrefix(key, "STREAM_RESOLVER_") || strings.HasPrefix(key, "RECHECK_") || strings.HasPrefix(key, "AUTO_DISABLE_"):
 		return "Delivery and failover"

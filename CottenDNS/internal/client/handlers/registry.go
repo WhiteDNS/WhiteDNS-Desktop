@@ -40,6 +40,9 @@ type ClientContext interface {
 	HandleDNSQueryAck(packet VpnProto.Packet) error
 	HandleDNSQueryRes(packet VpnProto.Packet) error
 
+	// Domain rotation
+	HandleDomainListRes(packet VpnProto.Packet) error
+
 	// SOCKS5 Management
 	HandleSocksConnected(packet VpnProto.Packet) error
 	HandleSocksFailure(packet VpnProto.Packet) error

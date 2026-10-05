@@ -127,6 +127,16 @@ func (c *Client) exchangeUDPQueryWithConn(conn *net.UDPConn, packet []byte, time
 		}
 
 		if n >= 2 && binary.BigEndian.Uint16(buffer[:2]) == expectedID {
+			// A forged NXDOMAIN raced in by an on-path censor would end this
+			// exchange (MTU probe, session init, recheck) before the real answer
+			// lands and drop a working resolver. Skip it as the live tunnel does
+			// (RESOLVER_IGNORE_INJECTED_NXDOMAIN); the deadline still catches a
+			// path that is really dead.
+			if n >= 4 && c.rcodeIsInjectedNoise(buffer[3]&0x0F) {
+				addr, _ := conn.RemoteAddr().(*net.UDPAddr)
+				c.noteInjectedResolverNoise(addr)
+				continue
+			}
 			// Copy matched response out so the pooled buffer can be recycled.
 			result := make([]byte, n)
 			copy(result, buffer[:n])

@@ -10,6 +10,7 @@ package udpserver
 import (
 	"encoding/binary"
 	"fmt"
+	"strings"
 
 	"cottendns-go/internal/compression"
 	DnsParser "cottendns-go/internal/dnsparser"
@@ -50,15 +51,44 @@ func (s *Server) buildNoDataResponseLiteLogged(packet []byte, parsed DnsParser.L
 func (s *Server) zoneNoDataResponse(packet []byte, parsed DnsParser.LitePacket, zone string) []byte {
 	var response []byte
 	var err error
-	if zone == "" {
+	switch {
+	case zone == "":
 		response, err = DnsParser.BuildRefusedResponseFromLite(packet, parsed)
-	} else {
+	case len(s.zoneNS) > 0 && DnsParser.IsApexNSQuery(parsed, zone):
+		response, err = DnsParser.BuildAuthoritativeNSFromLite(packet, parsed, s.zoneNS)
+	default:
 		response, err = DnsParser.BuildAuthoritativeNoDataFromLite(packet, parsed, zone)
 	}
 	if err != nil {
 		return nil
 	}
 	return response
+}
+
+// outOfZoneNameservers keeps the ZONE_NS names that are not inside one of our
+// zones. An in-zone nameserver needs glue (its address) that this server does
+// not know, and answering with it would send resolvers to a name we cannot
+// resolve, so it is dropped rather than risk the delegation.
+func outOfZoneNameservers(zones, nameservers []string) []string {
+	var out []string
+	for _, ns := range nameservers {
+		ns = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(ns)), ".")
+		if ns == "" || !strings.Contains(ns, ".") {
+			continue
+		}
+		inZone := false
+		for _, zone := range zones {
+			zone = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(zone)), ".")
+			if ns == zone || strings.HasSuffix(ns, "."+zone) {
+				inZone = true
+				break
+			}
+		}
+		if !inZone {
+			out = append(out, ns)
+		}
+	}
+	return out
 }
 
 // markAuthoritative sets AA and clears RA on a response the server generated.

@@ -64,6 +64,8 @@ func (s *Server) dispatchPostSessionPacket(vpnPacket VpnProto.Packet, sessionRec
 		return s.handleStreamCloseWriteRequest(vpnPacket)
 	case Enums.PACKET_STREAM_RST:
 		return s.handleStreamRSTRequest(vpnPacket)
+	case Enums.PACKET_DOMAIN_LIST_REQ:
+		return s.handleDomainListRequest(vpnPacket, sessionRecord)
 	default:
 		return false
 	}

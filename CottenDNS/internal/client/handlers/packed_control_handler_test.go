@@ -49,6 +49,9 @@ func (m *packedTestClientContext) HandleDNSQueryAck(packet VpnProto.Packet) erro
 func (m *packedTestClientContext) HandleDNSQueryRes(packet VpnProto.Packet) error {
 	return nil
 }
+func (m *packedTestClientContext) HandleDomainListRes(packet VpnProto.Packet) error {
+	return nil
+}
 func (m *packedTestClientContext) HandleSocksConnected(packet VpnProto.Packet) error {
 	m.handledConnects++
 	return nil

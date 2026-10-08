@@ -25,18 +25,18 @@ import (
 )
 
 type ClientConfig struct {
-	ConfigDir                 string   `toml:"-"`
-	ConfigPath                string   `toml:"-"`
-	ResolversFilePath         string   `toml:"-"`
-	explicitRX_TX_Workers     bool     `toml:"-"`
-	ConfigPreset              string   `toml:"CONFIG_PRESET"`
-	ProtocolType              string   `toml:"PROTOCOL_TYPE"`
-	Domains                   []string `toml:"DOMAINS"`
+	ConfigDir             string   `toml:"-"`
+	ConfigPath            string   `toml:"-"`
+	ResolversFilePath     string   `toml:"-"`
+	explicitRX_TX_Workers bool     `toml:"-"`
+	ConfigPreset          string   `toml:"CONFIG_PRESET"`
+	ProtocolType          string   `toml:"PROTOCOL_TYPE"`
+	Domains               []string `toml:"DOMAINS"`
 	// StandbyDomains (domain rotation) are tunnel domains on the same server
 	// that are never queried until the active ones stop working, so a firewall
 	// watching traffic cannot block them in advance. Tried in order, one at a
 	// time, after a full scan finds no working path.
-	StandbyDomains []string `toml:"STANDBY_DOMAINS"`
+	StandbyDomains            []string `toml:"STANDBY_DOMAINS"`
 	ListenIP                  string   `toml:"LISTEN_IP"`
 	ListenPort                int      `toml:"LISTEN_PORT"`
 	SOCKS5Auth                bool     `toml:"SOCKS5_AUTH"`
@@ -318,6 +318,13 @@ type ClientConfig struct {
 	// punishing resolvers the censor is forging failures for. Set false to
 	// restore the legacy behavior of counting every NXDOMAIN as a failure.
 	ResolverIgnoreInjectedNXDOMAIN bool `toml:"RESOLVER_IGNORE_INJECTED_NXDOMAIN"`
+	// ResolverIgnoreInjectedNXDOMAINInProbes extends that to MTU probes,
+	// session init and health rechecks: an NXDOMAIN there is skipped and the
+	// client waits for the real answer until the probe timeout. Default false:
+	// on networks where the censor forges NXDOMAIN and drops the real answer,
+	// every such resolver then costs MTU_TEST_RETRIES x MTU_TEST_TIMEOUT instead
+	// of failing at once, which stalls scans over large resolver lists.
+	ResolverIgnoreInjectedNXDOMAINInProbes bool `toml:"RESOLVER_IGNORE_INJECTED_NXDOMAIN_IN_PROBES"`
 }
 
 type ClientConfigOverrides struct {

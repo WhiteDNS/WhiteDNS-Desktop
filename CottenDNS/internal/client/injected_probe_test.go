@@ -48,11 +48,12 @@ func TestProbeExchangeSkipsForgedNXDOMAIN(t *testing.T) {
 	query := make([]byte, 12)
 	binary.BigEndian.PutUint16(query[0:2], 0xBEEF)
 
+	// Probe skipping is opt-in: the tunnel-wide flag alone must not enable it.
 	for _, tc := range []struct {
-		ignore    bool
-		wantRCode byte
-	}{{true, 0}, {false, 3}} {
-		c := New(config.ClientConfig{Domains: []string{"a.io"}, ResolverIgnoreInjectedNXDOMAIN: tc.ignore}, nil, nil)
+		ignore, inProbes bool
+		wantRCode        byte
+	}{{true, true, 0}, {true, false, 3}, {false, true, 3}} {
+		c := New(config.ClientConfig{Domains: []string{"a.io"}, ResolverIgnoreInjectedNXDOMAIN: tc.ignore, ResolverIgnoreInjectedNXDOMAINInProbes: tc.inProbes}, nil, nil)
 		conn, err := net.DialUDP("udp", nil, addr)
 		if err != nil {
 			t.Fatal(err)

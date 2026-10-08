@@ -274,6 +274,14 @@ QUERY_TIMING_JITTER = 0.0
 # counting every NXDOMAIN as a failure.
 RESOLVER_IGNORE_INJECTED_NXDOMAIN = true
 
+# Also skip NXDOMAIN during MTU probes, session init and health rechecks, and
+# wait for the real answer until the probe timeout. Helps only where the censor
+# races a forged NXDOMAIN AND the real answer still arrives. Where the real
+# answer is dropped, every such resolver then costs MTU_TEST_RETRIES x
+# MTU_TEST_TIMEOUT instead of failing at once, so scans over large resolver
+# lists stall. Default false.
+RESOLVER_IGNORE_INJECTED_NXDOMAIN_IN_PROBES = false
+
 # QNAME reshaping: target maximum DNS label length (1..63) when laying the tunnel
 # payload into the query name. 63 (default) packs the payload into the fewest,
 # longest labels for maximum capacity. A smaller value (e.g. 32) produces

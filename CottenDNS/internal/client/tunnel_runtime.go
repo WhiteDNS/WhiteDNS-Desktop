@@ -131,8 +131,9 @@ func (c *Client) exchangeUDPQueryWithConn(conn *net.UDPConn, packet []byte, time
 			// exchange (MTU probe, session init, recheck) before the real answer
 			// lands and drop a working resolver. Skip it as the live tunnel does
 			// (RESOLVER_IGNORE_INJECTED_NXDOMAIN); the deadline still catches a
-			// path that is really dead.
-			if n >= 4 && c.rcodeIsInjectedNoise(buffer[3]&0x0F) {
+			// path that is really dead. Opt-in (..._IN_PROBES): when the real
+			// answer never comes, each skip costs a full probe timeout.
+			if n >= 4 && c.cfg.ResolverIgnoreInjectedNXDOMAINInProbes && c.rcodeIsInjectedNoise(buffer[3]&0x0F) {
 				addr, _ := conn.RemoteAddr().(*net.UDPAddr)
 				c.noteInjectedResolverNoise(addr)
 				continue

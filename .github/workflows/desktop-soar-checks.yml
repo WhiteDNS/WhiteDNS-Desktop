@@ -5,6 +5,9 @@ on:
     branches: [main]
 permissions:
   contents: read
+concurrency:
+  group: desktop-acceptance-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   acceptance:
     runs-on: ubuntu-24.04
@@ -49,3 +52,17 @@ jobs:
         with:
           name: desktop-soar-interface
           path: ${{ runner.temp }}/desktop-screenshots
+
+  windows-udp-recovery:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.9'
+          cache-dependency-path: Soar/go.sum
+      - name: Test native Windows Soar wrapper
+        run: go -C Soar test ./... -count=1 -timeout=180s
+      - name: Repeat Windows UDP path-loss regression
+        run: go -C Soar test -run '^TestConservativeHTTPSRecoversAfterOneDNSPathIsBlocked$' -count=12 -timeout=180s

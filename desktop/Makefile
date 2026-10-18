@@ -505,7 +505,8 @@ package-assets:
 	cp ../CottenDNS/LICENSE build/bin/licenses/CottenDNS-LICENSE.txt
 	cp ../StormDNS/LICENSE build/bin/licenses/StormDNS-LICENSE.txt
 	cp "$$(go env GOROOT)/LICENSE" build/bin/licenses/Go-LICENSE.txt
-	@for module in golang.org/x/crypto golang.org/x/sys; do \
+	@set -e; for module in golang.org/x/crypto golang.org/x/sys; do \
+		(cd ../Soar && go mod download "$$module"); \
 		dir=$$(cd ../Soar && go list -m -f '{{.Dir}}' "$$module"); \
 		cp "$$dir/LICENSE" "build/bin/licenses/$$(basename "$$module")-LICENSE.txt"; \
 	done

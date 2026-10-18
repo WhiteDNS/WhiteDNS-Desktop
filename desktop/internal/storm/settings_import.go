@@ -25,6 +25,9 @@ func ParseSettingsProfileTOML(rawText, suggestedName string, importType string) 
 	profile.ID = ""
 	profile.Name = cleanImportedSettingsName(suggestedName)
 	profile.ImportType = detectSettingsImportType(rawText, importType)
+	if profile.ImportType == model.ImportTypeSoar {
+		return model.SettingsProfile{}, fmt.Errorf("Soar settings come from a soar:// link, subscription, or full backup; MasterDNS TOML does not apply")
+	}
 	if profile.ImportType == model.ImportTypeCottenDNS {
 		options, parseErr := cottendns.ParseOptions(rawText)
 		if parseErr != nil {

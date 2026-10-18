@@ -604,7 +604,7 @@ func (a *App) ImportSettingsProfileToml(rawText, suggestedName string, importTyp
 func (a *App) DeleteSettingsProfile(id string) (model.AppState, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if id == model.DefaultSettingsProfileID || id == model.MasterDNSSettingsProfileID || id == model.DefaultCottenDNSSettingsID {
+	if id == model.DefaultSettingsProfileID || id == model.MasterDNSSettingsProfileID || id == model.DefaultCottenDNSSettingsID || id == model.DefaultSoarSettingsID {
 		return a.state, fmt.Errorf("built-in setting profile cannot be deleted")
 	}
 	a.state.SettingsProfiles = slices.DeleteFunc(a.state.SettingsProfiles, func(profile model.SettingsProfile) bool {
@@ -893,7 +893,7 @@ func (a *App) ExportClientToml() (string, error) {
 	if !ok {
 		return "", fmt.Errorf("settings profile is missing")
 	}
-	return storm.RenderExportClientTOML(settings), nil
+	return a.ExportSettingsProfileToml(settings)
 }
 
 func (a *App) ExportConnectionProfileLink(profile model.ConnectionProfile) (string, error) {
@@ -908,6 +908,9 @@ func (a *App) ExportAllConnectionProfileLinks() (string, error) {
 }
 
 func (a *App) ExportSettingsProfileToml(profile model.SettingsProfile) (string, error) {
+	if profile.ImportType == model.ImportTypeSoar {
+		return "", fmt.Errorf("Soar uses JSON; export its connection link or a full backup instead of MasterDNS TOML")
+	}
 	return storm.RenderExportClientTOML(profile), nil
 }
 

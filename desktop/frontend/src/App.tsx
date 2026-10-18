@@ -1944,7 +1944,7 @@ function DashboardPage({
       title="Command Center"
       actions={
         <>
-          <Button
+          <Button disabled={selectedConnection?.importType === "soar"}
             variant="outline"
             onClick={() =>
               onRun(async () => {
@@ -4351,7 +4351,7 @@ function SettingsPage({
         title="Runtime Settings"
         actions={
           <>
-            <Button variant="outline" onClick={exportToml}>
+            <Button variant="outline" disabled={selected.importType === "soar"} onClick={exportToml}>
               <FileText />
               Export TOML
             </Button>
@@ -4441,13 +4441,13 @@ function SettingsPage({
                       </td>
                       <td className="min-w-0 px-3 py-3">
                         <span className="block truncate font-mono text-xs">
-                          U {minUploadMTU}-{maxUploadMTU} · D {minDownloadMTU}-{maxDownloadMTU}
+                          {profile.importType === "soar" ? "In connection profile" : `U ${minUploadMTU}-${maxUploadMTU} · D ${minDownloadMTU}-${maxDownloadMTU}`}
                         </span>
                       </td>
                       <td className="px-3 py-3 font-mono text-xs">
-                        U{uploadDuplication} / D{downloadDuplication}
+                        {profile.importType === "soar" ? "—" : `U${uploadDuplication} / D${downloadDuplication}`}
                       </td>
-                      <td className="px-3 py-3 uppercase">{logLevel || "WARN"}</td>
+                      <td className="px-3 py-3 uppercase">{profile.importType === "soar" ? "—" : logLevel || "WARN"}</td>
                     </tr>
                   );
                 })}
@@ -4481,7 +4481,7 @@ function SettingsPage({
             </Tabs>
           </div>
           <DialogFooter className="sm:justify-between">
-            {draft.id !== "settings-default" && draft.id !== "settings-master-preset" && draft.id !== "settings-cottendns-preset" && Boolean(draft.id) ? (
+            {draft.id !== "settings-default" && draft.id !== "settings-master-preset" && draft.id !== "settings-cottendns-preset" && draft.id !== "settings-soar-preset" && Boolean(draft.id) ? (
               <Button type="button" variant="destructive" onClick={deleteSettingsDraft} className="sm:mr-auto">
                 <Trash2 />
                 Delete
@@ -4522,7 +4522,7 @@ function SettingsPage({
               label="Import type"
               value={importType}
               onChange={setImportType}
-              options={importTypeOptions}
+              options={importTypeOptions.filter(([value]) => value !== "soar")}
               description="Marker comments in exported TOML override this selection."
             />
             <TextAreaField

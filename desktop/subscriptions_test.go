@@ -109,3 +109,16 @@ func TestSubscriptionImportRollsBackOnSaveFailure(t *testing.T) {
 		t.Fatal("failed save left partial subscription")
 	}
 }
+
+func TestSoarDoesNotUseMasterTOMLOrDeleteBuiltInProxy(t *testing.T) {
+	app := &App{state: model.DefaultAppState()}
+	if _, err := app.ExportSettingsProfileToml(model.DefaultSoarSettingsProfile()); err == nil {
+		t.Fatal("exported Soar as MasterDNS TOML")
+	}
+	if _, err := app.ImportSettingsProfileToml("LISTEN_PORT = 10887", "Soar", model.ImportTypeSoar); err == nil {
+		t.Fatal("imported MasterDNS TOML as Soar")
+	}
+	if _, err := app.DeleteSettingsProfile(model.DefaultSoarSettingsID); err == nil {
+		t.Fatal("deleted built-in Soar proxy")
+	}
+}

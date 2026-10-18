@@ -1,6 +1,6 @@
 # Soar and subscription guide
 
-Desktop 1.3.0 supports the same `soar://` profile schema and pinned Soar engine as WhiteDNS Android 1.6.8. A compatible WhiteDNS Soar panel can supply a full HTTPS subscription or an individual profile link. Existing MasterDNS, StormDNS and CottenDNS profiles keep their engines.
+Desktop 1.3.1 supports the same `soar://` profile schema and pinned Soar engine as WhiteDNS Android 1.6.8. A compatible WhiteDNS Soar panel can supply a full HTTPS subscription or an individual profile link. Existing MasterDNS, StormDNS and CottenDNS profiles keep their engines.
 
 ## Import and refresh
 

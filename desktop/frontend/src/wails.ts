@@ -37,6 +37,8 @@ type WailsNotificationOptions = {
 
 type AppApi = {
   GetAppState(): Promise<AppState>;
+  ImportSubscription(url: string, allowHTTP: boolean): Promise<AppState>;
+  RefreshSubscriptions(onlyDue: boolean): Promise<AppState>;
   CheckFirewallStatus(): Promise<FirewallStatus>;
   GetSystemLANIP(): Promise<string>;
   SaveConnectionProfile(profile: ConnectionProfile): Promise<AppState>;
@@ -139,6 +141,8 @@ export const backend = {
   checkFirewallStatus: () => app().CheckFirewallStatus(),
   getSystemLANIP: () => app().GetSystemLANIP(),
   saveConnectionProfile: (profile: ConnectionProfile) => app().SaveConnectionProfile(profile),
+  importSubscription: (url: string, allowHTTP: boolean) => app().ImportSubscription(url,allowHTTP),
+  refreshSubscriptions: (onlyDue: boolean) => app().RefreshSubscriptions(onlyDue),
   importConnectionProfiles: (rawText: string, importType: string) => app().ImportConnectionProfiles(rawText, importType),
   deleteConnectionProfile: (id: string) => app().DeleteConnectionProfile(id),
   deleteConnectionProfiles: (ids: string[]) => app().DeleteConnectionProfiles(ids),

@@ -49,6 +49,7 @@ type App struct {
 	configDir string
 
 	mu                         sync.Mutex
+	subscriptionMu             sync.Mutex
 	state                      model.AppState
 	parallelMu                 sync.Mutex
 	parallelState              model.ParallelTestState
@@ -144,6 +145,7 @@ func runtimeManagerOptions(runtimeDir string) runtimemgr.Options {
 		RuntimeDir:        runtimeDir,
 		MasterDNSSource:   findMasterDNSSourceDir(),
 		CottenDNSSource:   findCottenDNSSourceDir(),
+		SoarSource:        findDNSSourceDir("Soar"),
 		ClientsDir:        findClientsDir(),
 		XrayCoresDir:      findXrayCoresDir(),
 		EmbeddedClientsFS: clientAssets,
@@ -194,6 +196,11 @@ func (a *App) SaveConnectionProfile(profile model.ConnectionProfile) (model.AppS
 	}
 	profile.ImportType = model.NormalizeImportType(profile.ImportType)
 	profile = model.NormalizeConnectionProfileDomains(profile)
+	if profile.ImportType == model.ImportTypeSoar {
+		if err := model.ValidateSoarProfile(profile); err != nil {
+			return a.state, err
+		}
+	}
 	profile.EncryptionKey = strings.TrimSpace(profile.EncryptionKey)
 	if profile.EncryptionMethod < 0 || profile.EncryptionMethod > 5 {
 		profile.EncryptionMethod = 1
@@ -240,11 +247,13 @@ func (a *App) ImportConnectionProfiles(rawText string, importType string) (model
 		if imported[idx].ResolverProfileID == "" {
 			imported[idx].ResolverProfileID = a.state.SelectedResolverProfileID
 		}
+		attachImportedResolvers(&a.state, &imported[idx])
 		a.state.ConnectionProfiles = append(a.state.ConnectionProfiles, imported[idx])
 	}
 	if !a.connectionSelectionLockedLocked() {
 		a.state.SelectedConnectionProfileID = imported[len(imported)-1].ID
 		a.selectSettingsForEngineLocked(imported[len(imported)-1].ImportType)
+		a.state.SelectedResolverProfileID = imported[len(imported)-1].ResolverProfileID
 	}
 
 	next, err := a.saveLocked()
@@ -639,6 +648,18 @@ func (a *App) selectSettingsForEngineLocked(engine string) {
 		if profile.ID == a.state.SelectedSettingsProfileID && model.NormalizeImportType(profile.ImportType) == engine {
 			return
 		}
+	}
+	if engine == model.ImportTypeSoar {
+		for _, p := range a.state.SettingsProfiles {
+			if p.ID == model.DefaultSoarSettingsID {
+				a.state.SelectedSettingsProfileID = p.ID
+				return
+			}
+		}
+		p := model.DefaultSoarSettingsProfile()
+		a.state.SettingsProfiles = append(a.state.SettingsProfiles, p)
+		a.state.SelectedSettingsProfileID = p.ID
+		return
 	}
 	preferredID := model.MasterDNSSettingsProfileID
 	if engine == model.ImportTypeCottenDNS {
@@ -1330,6 +1351,8 @@ func dnsEngineDisplayName(engine string) string {
 		return "StormDNS"
 	case model.ImportTypeCottenDNS:
 		return "CottenDNS"
+	case model.ImportTypeSoar:
+		return "Soar"
 	default:
 		return "MasterDNS"
 	}
@@ -1357,7 +1380,11 @@ func findDNSSourceDir(directoryName string) string {
 		)
 	}
 	for _, candidate := range candidates {
-		if _, err := os.Stat(filepath.Join(candidate, "cmd", "client", "main.go")); err == nil {
+		entry := filepath.Join(candidate, "cmd", "client", "main.go")
+		if directoryName == "Soar" {
+			entry = filepath.Join(candidate, "main.go")
+		}
+		if _, err := os.Stat(entry); err == nil {
 			abs, _ := filepath.Abs(candidate)
 			return abs
 		}

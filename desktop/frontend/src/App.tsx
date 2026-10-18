@@ -1,3 +1,4 @@
+import { SoarFields, defaultSoarSettings } from "./SoarFields";
 import {
   Activity,
   AlertCircle,
@@ -208,6 +209,7 @@ const importTypeOptions: Array<[ImportType, string]> = [
   ["masterdns", "MasterDNS"],
   ["stormdns", "StormDNS"],
   ["cottendns", "CottenDNS"],
+  ["soar", "Soar"],
 ];
 const connectionProfileFilterOptions: Array<[ConnectionProfileFilter, string]> = [
   ["all", "All"],
@@ -280,12 +282,12 @@ function normalizeRuntimeLogEntry(value: RuntimeLogEntry | string): RuntimeLogEn
 }
 
 function normalizeImportType(value?: string): ImportType {
-  return value === "stormdns" || value === "cottendns" ? value : "masterdns";
+  return value === "stormdns" || value === "cottendns" || value === "soar" ? value : "masterdns";
 }
 
 function importTypeLabel(value?: string): string {
   const normalized = normalizeImportType(value);
-  return normalized === "stormdns" ? "StormDNS" : normalized === "cottendns" ? "CottenDNS" : "MasterDNS";
+  return normalized === "soar" ? "Soar" : normalized === "stormdns" ? "StormDNS" : normalized === "cottendns" ? "CottenDNS" : "MasterDNS";
 }
 
 function normalizeConnectionProfile(profile: ConnectionProfile): ConnectionProfile {
@@ -1067,7 +1069,12 @@ function App() {
     void initializeNotifications();
     backend
       .getAppState()
-      .then(applyState)
+      .then((initial) => {
+        applyState(initial);
+        if (initial.connectionProfiles.some((p) => p.subscription) && !profileSelectionLocked(initial.runtime)) {
+          void backend.refreshSubscriptions(true).then(applyState).catch(() => {});
+        }
+      })
       .catch((err) => showError(messageFromError(err)));
     backend
       .getValidatorState()
@@ -1576,7 +1583,7 @@ function AppSidebar({
             </div>
             <div className="min-w-0 group-data-[collapsible=icon]:hidden">
               <div className="truncate text-sm leading-snug font-medium">WhiteDNS</div>
-              <p className="truncate text-sm leading-normal text-muted-foreground">v1.2.5</p>
+              <p className="truncate text-sm leading-normal text-muted-foreground">v1.3.0</p>
             </div>
           </div>
           <ThemeSettingsMenu
@@ -2005,6 +2012,7 @@ function DashboardPage({
                   <ConnectActionButtons
                     disabled={connectDisabled}
                     parallelDisabled={connectDisabled}
+                    showParallel={selectedConnection?.importType !== "soar"}
                     parallelRunning={parallelRunning}
                     status={runtime.status}
                     label={connectionActionLabel}
@@ -2618,6 +2626,7 @@ function ConnectionInfoBar({
 }
 
 function ConnectActionButtons({
+  showParallel = true,
   disabled,
   parallelDisabled,
   parallelRunning,
@@ -2627,6 +2636,7 @@ function ConnectActionButtons({
   onParallelTest,
   onCancelParallelTest,
 }: {
+  showParallel?: boolean;
   disabled: boolean;
   parallelDisabled: boolean;
   parallelRunning: boolean;
@@ -2661,7 +2671,7 @@ function ConnectActionButtons({
         <Power className="size-5" />
         {label}
       </Button>
-      <Tooltip>
+      {showParallel && <Tooltip>
         <TooltipTrigger asChild>
           <Button
             size="lg"
@@ -2684,7 +2694,7 @@ function ConnectActionButtons({
         >
           {secondaryDescription}
         </TooltipContent>
-      </Tooltip>
+      </Tooltip>}
     </div>
   );
 }
@@ -3029,6 +3039,8 @@ function ConnectionsPage({
   const [draft, setDraft] = useState(selected);
   const [editorOpen, setEditorOpen] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
+  const [subscriptionBusy, setSubscriptionBusy] = useState(false);
+  const [allowHTTP, setAllowHTTP] = useState(false);
   const [importText, setImportText] = useState("");
   const [importType, setImportType] = useState<ImportType>("masterdns");
   const [exportText, setExportText] = useState("");
@@ -3045,7 +3057,10 @@ function ConnectionsPage({
   const runtimeBusy = state.runtime.status !== "disconnected" && state.runtime.status !== "failed";
   const missingDomain = connectionDomains(draft).length === 0;
   const missingKey = !draft.encryptionKey.trim();
-  const importDisabled = !importText.trim();
+  const isSubscription = /^https?:\/\//i.test(importText.trim());
+  const isHTTPSubscription = /^http:\/\//i.test(importText.trim());
+  const importDisabled = !importText.trim() || subscriptionBusy || (isSubscription && isProfileLocked) || (isHTTPSubscription && !allowHTTP);
+  const subscriptions = state.connectionProfiles.filter((p) => p.subscription).filter((p,i,all) => all.findIndex((q) => q.subscription?.url === p.subscription?.url) === i);
   const hasExportableConnections = state.connectionProfiles.some(isExportableConnection);
   const testedCount = Object.keys(testResults).length;
   const reachableCount = Object.values(testResults).filter((result) => result.ok).length;
@@ -3162,6 +3177,14 @@ function ConnectionsPage({
   async function importProfiles() {
     onError("");
     try {
+      if (isSubscription) {
+        setSubscriptionBusy(true);
+        try {
+          onState(await backend.importSubscription(importText.trim(), allowHTTP));
+          setImportText("");setImportOpen(false);setAllowHTTP(false);onSuccess("Subscription imported.");
+        } finally {setSubscriptionBusy(false);}
+        return;
+      }
       const result = await backend.importConnectionProfiles(importText, importType);
       onState(result.state);
       setImportText("");
@@ -3338,7 +3361,7 @@ function ConnectionsPage({
             </Button>
             <Button variant="outline" onClick={() => setImportOpen(true)}>
               <Download />
-              Import
+              {subscriptionBusy ? "Downloading…" : "Import"}
             </Button>
             <Button variant="outline" onClick={openNewConnectionProfile}>
               <Plus />
@@ -3347,6 +3370,20 @@ function ConnectionsPage({
           </>
         }
       >
+        {subscriptions.length > 0 && <div className="mb-4 space-y-3 rounded-lg border bg-card p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-sm font-semibold">Subscriptions</h2>
+          <Button variant="outline" disabled={subscriptionBusy || isProfileLocked} onClick={async () => {
+            setSubscriptionBusy(true);onError("");
+            try {onState(await backend.refreshSubscriptions(false));onSuccess("Subscriptions refreshed.");}catch(e){onError(messageFromError(e));}finally{setSubscriptionBusy(false);}
+          }}>{subscriptionBusy ? "Refreshing…" : "Refresh subscriptions"}</Button></div>
+          <p className="text-xs text-muted-foreground">Due subscriptions refresh when the app opens while disconnected. Failed downloads keep saved profiles. Disconnect to refresh manually.</p>
+          {subscriptions.map((p) => {const sub=p.subscription!;return <div key={p.id} className="flex flex-wrap justify-between gap-2 border-t pt-2 text-xs">
+            <span className="font-medium">{p.name}</span><span>{new URL(sub.url).hostname}</span>
+            <span>{formatBytes(sub.upload + sub.download)} / {sub.total ? formatBytes(sub.total) : "Unlimited"}</span>
+            <span>Expires: {sub.expiresAt ? new Date(sub.expiresAt).toLocaleString() : "Never"}</span>
+            <span className="text-muted-foreground">Updated: {new Date(sub.updatedAt).toLocaleString()}</span>
+          </div>})}
+        </div>}
         <div className="overflow-hidden rounded-lg border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/30 px-3 py-2.5">
             <div className="flex items-center gap-4 text-xs">
@@ -3515,7 +3552,7 @@ function ConnectionsPage({
                             {importTypeLabel(profile.importType)}
                           </Badge>
                           <Badge variant="outline" className="shrink-0 text-[10px] px-1.5">
-                            {encryptionMethodLabel(profile.encryptionMethod)}
+                            {profile.importType === "soar" ? "ChaCha20-Poly1305" : encryptionMethodLabel(profile.encryptionMethod)}
                           </Badge>
                           {selectedProfile && (
                             <Badge variant="outline" className="shrink-0 text-[10px] px-1.5">
@@ -3577,7 +3614,7 @@ function ConnectionsPage({
         <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-4xl">
           <DialogHeader>
             <DialogTitle>{draft.id ? draft.name : "New connection"}</DialogTitle>
-            <DialogDescription>MasterDNS/StormDNS route</DialogDescription>
+            <DialogDescription>{draft.importType === "soar" ? "Lantern Soar DNS tunnel" : "DNS tunnel connection"}</DialogDescription>
           </DialogHeader>
           <div className="min-h-0 overflow-y-auto pr-1">
             <FieldGroup className="grid gap-4 md:grid-cols-2">
@@ -3585,7 +3622,7 @@ function ConnectionsPage({
               <SelectField
                 label="Import type"
                 value={normalizeImportType(draft.importType)}
-                onChange={(nextImportType) => setDraft({ ...draft, importType: nextImportType })}
+                onChange={(nextImportType) => setDraft({ ...draft, importType: nextImportType, soarSettings: nextImportType === "soar" ? draft.soarSettings || defaultSoarSettings : draft.soarSettings })}
                 options={importTypeOptions}
               />
               <TextAreaField
@@ -3596,18 +3633,18 @@ function ConnectionsPage({
                   setDraft({ ...draft, domain: domains[0] || "", domains: value.split(/\r?\n/) });
                 }}
                 placeholder={"v1.example.com\nv2.example.com"}
-                description="One domain per line. Every domain must point to the same DNS tunnel server. CottenDNS can spread duplicate packets across them."
+                description={draft.importType === "soar" ? "Use the single account domain supplied by the Soar server." : "One domain per line. Every domain must point to the same DNS tunnel server. CottenDNS can spread duplicate packets across them."}
                 error={missingDomain ? "At least one DNS tunnel domain is required." : undefined}
                 className="min-h-28 font-mono text-sm md:col-span-2"
               />
               <SecretField
-                label="Encryption key"
+                label={draft.importType === "soar" ? "Server public key (Ed25519, base64)" : "Encryption key"}
                 value={draft.encryptionKey}
                 onChange={(encryptionKey) => setDraft({ ...draft, encryptionKey })}
                 error={missingKey ? "Encryption key is required." : undefined}
                 revealable
               />
-              <SelectField
+              {draft.importType !== "soar" && <SelectField
                 label="Encryption"
                 value={draft.encryptionMethod}
                 onChange={(encryptionMethod) => setDraft({ ...draft, encryptionMethod: Number(encryptionMethod) })}
@@ -3620,13 +3657,14 @@ function ConnectionsPage({
                   [5, "AES-256-GCM"],
                 ]}
               />
-              <SelectField
+              }<SelectField
                 label="Resolver profile"
                 value={draft.resolverProfileId || state.selectedResolverProfileId}
                 onChange={(resolverProfileId) => setDraft({ ...draft, resolverProfileId: String(resolverProfileId) })}
                 options={state.resolverProfiles.map((profile) => [profile.id, profile.name])}
               />
             </FieldGroup>
+            {draft.importType === "soar" && <SoarFields value={draft.soarSettings || defaultSoarSettings} onChange={(soarSettings) => setDraft({ ...draft, soarSettings })} />}
           </div>
           <DialogFooter className="sm:justify-between">
             {draft.id !== "default" && Boolean(draft.id) ? (
@@ -3654,22 +3692,24 @@ function ConnectionsPage({
         <DialogContent className="max-h-[calc(100svh-2rem)] overflow-hidden sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Import Connections</DialogTitle>
-            <DialogDescription>Paste one or more MasterDNS, StormDNS, or CottenDNS profile links. Each profile may contain multiple domains.</DialogDescription>
+            <DialogDescription>Paste an HTTPS subscription URL, or Soar, MasterDNS, StormDNS or CottenDNS profile links.</DialogDescription>
           </DialogHeader>
           <TextAreaField
             label="Profiles"
             value={importText}
             onChange={setImportText}
-            placeholder={"masterdns://...\nstormdns://...\ncottendns://..."}
+            placeholder={"https://panel.example.com/sub/...\nsoar://...\nmasterdns://..."}
             className="h-[min(45svh,18rem)] min-h-0 resize-none overflow-auto font-mono text-xs"
           />
-          <SelectField
+          {isHTTPSubscription && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={allowHTTP} onChange={(e) => setAllowHTTP(e.target.checked)} disabled={subscriptionBusy} />Allow unencrypted HTTP for this source. Its URL and keys can be exposed; HTTPS is recommended.</label>}
+          {isSubscription && isProfileLocked && <p className="text-sm text-destructive">Disconnect before importing subscriptions.</p>}
+          {!isSubscription && <SelectField
             label="Import type"
             value={importType}
             onChange={setImportType}
             options={importTypeOptions}
             description="Used when pasted links do not carry an explicit type marker."
-          />
+          />}
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)}>
               Cancel
@@ -3686,7 +3726,7 @@ function ConnectionsPage({
         <DialogContent className="max-h-[calc(100svh-2rem)] grid-rows-[auto_minmax(0,1fr)_auto] overflow-hidden sm:max-w-2xl">
           <DialogHeader>
             <DialogTitle>{exportTitle}</DialogTitle>
-            <DialogDescription>Copy these MasterDNS/StormDNS profile links for import on another device.</DialogDescription>
+            <DialogDescription>Copy these profile links for import on another device. Subscription credentials are excluded.</DialogDescription>
           </DialogHeader>
           <Textarea
             readOnly
@@ -4170,7 +4210,9 @@ function SettingsPage({
   const importDisabled = !importText.trim();
   const cottenDnsDraft = normalizeImportType(draft.importType) === "cottendns";
   const defaultSettingsDraft = draft.id === "settings-default";
-  const visibleSettingsSections = cottenDnsDraft
+  const visibleSettingsSections = normalizeImportType(draft.importType) === "soar"
+    ? settingsSections.filter((item) => item.id === "general" || item.id === "proxy")
+    : cottenDnsDraft
     ? settingsSections.filter((item) => item.id === "general" || item.id === "proxy" || item.id === "cottendns")
     : settingsSections.filter((item) => item.id !== "cottendns");
   const activeSettingsSection = visibleSettingsSections.some((item) => item.id === section) ? section : "general";
@@ -4706,7 +4748,7 @@ function SettingsFields({
               ]}
             />
           )}
-          {normalizeImportType(draft.importType) !== "cottendns" && <SelectField
+          {normalizeImportType(draft.importType) !== "cottendns" && normalizeImportType(draft.importType) !== "soar" && <SelectField
             label="Log level"
             value={draft.logLevel}
             onChange={(logLevel) => onDraft({ ...draft, logLevel: String(logLevel) })}
@@ -4717,7 +4759,7 @@ function SettingsFields({
               ["ERROR", "ERROR"],
             ]}
           />}
-          {normalizeImportType(draft.importType) !== "cottendns" && (
+          {normalizeImportType(draft.importType) !== "cottendns" && normalizeImportType(draft.importType) !== "soar" && (
             <ToggleField label="Base encode data" checked={draft.baseEncodeData} onChange={(baseEncodeData) => onDraft({ ...draft, baseEncodeData })} />
           )}
         </SettingsFieldSet>
@@ -4749,15 +4791,15 @@ function SettingsFields({
             <NumberField label="Public proxy port" value={draft.listenPort} onChange={(listenPort) => onDraft({ ...draft, listenPort })} />
           </SettingsFieldSet>
 
-          {!isCottenDNS && <SettingsFieldSet legend="MasterDNS/StormDNS upstream">
+          {!isCottenDNS && <SettingsFieldSet legend={draft.importType === "soar" ? "Soar upstream" : "MasterDNS/StormDNS upstream"}>
             <TextField
-              label="MasterDNS/StormDNS listen IP"
+              label="Internal DNS engine listen IP"
               value={draft.stormDnsListenIp}
               onChange={(stormDnsListenIp) => onDraft({ ...draft, stormDnsListenIp })}
               description="Internal listener used behind Xray."
             />
             <NumberField
-              label="MasterDNS/StormDNS listen port"
+              label="Internal DNS engine listen port"
               value={draft.stormDnsListenPort}
               onChange={(stormDnsListenPort) => onDraft({ ...draft, stormDnsListenPort })}
             />
@@ -4771,8 +4813,10 @@ function SettingsFields({
                 <SecretField label="Proxy password" value={draft.socksPassword} onChange={(socksPassword) => onDraft({ ...draft, socksPassword })} />
               </>
             )}
+            {draft.importType !== "soar" && <>
             <NumberField label="Local handshake timeout" value={draft.localHandshakeTimeoutSeconds} step="0.1" onChange={(localHandshakeTimeoutSeconds) => onDraft({ ...draft, localHandshakeTimeoutSeconds })} />
             <NumberField label="UDP associate timeout" value={draft.socksUdpAssociateReadTimeoutSeconds} step="0.1" onChange={(socksUdpAssociateReadTimeoutSeconds) => onDraft({ ...draft, socksUdpAssociateReadTimeoutSeconds })} />
+            </>}
           </SettingsFieldSet>}
         </div>
       );
@@ -6770,6 +6814,7 @@ function TextAreaField({
     <Field>
       <FieldLabel>{label}</FieldLabel>
       <Textarea
+        aria-label={label}
         value={value}
         placeholder={placeholder}
         className={className}

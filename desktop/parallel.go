@@ -135,6 +135,10 @@ func (a *App) StartParallelTest(presetIDs []string) (model.ParallelTestState, er
 		return a.GetParallelTestState(), fmt.Errorf("stop the active connection before parallel testing")
 	}
 	baseState := profiles.NormalizeState(a.state)
+	if selected, ok := storm.SelectedConnection(baseState); ok && selected.ImportType == model.ImportTypeSoar {
+		a.mu.Unlock()
+		return a.GetParallelTestState(), fmt.Errorf("MasterDNS preset tests do not apply to Soar; use Soar tuning in the connection profile")
+	}
 	if _, err := storm.BuildLaunchConfig(baseState); err != nil {
 		a.mu.Unlock()
 		return a.GetParallelTestState(), err

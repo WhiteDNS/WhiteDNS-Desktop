@@ -1,7 +1,9 @@
 SHELL := /bin/sh
+# Go 1.26.1 can corrupt memory during overlapped UDP I/O on Windows (golang/go#77975).
+export GOTOOLCHAIN ?= go1.26.9
 
 APP_NAME := WhiteDNS Desktop
-DEFAULT_VERSION := 1.2.5
+DEFAULT_VERSION := 1.3.0
 VERSION_FROM_ARGS := $(shell set -- $(MAKECMDGOALS); while [ "$$1" != "" ]; do if [ "$$1" = "--version" ]; then shift; if [ "$$1" != "" ]; then printf '%s' "$$1"; fi; exit; fi; shift; done)
 VERSION ?= $(if $(VERSION_FROM_ARGS),$(VERSION_FROM_ARGS),$(DEFAULT_VERSION))
 APP_VERSION := $(strip $(VERSION))
@@ -228,6 +230,7 @@ prepare-embedded-client:
 	@: > clients/.keep
 	$(MAKE) masterdns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
 	$(MAKE) cottendns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
+	$(MAKE) soar-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
 
 prepare-embedded-macos-clients:
 	$(MAKE) prepare-embedded-client TARGET_GOOS=darwin TARGET_GOARCH="$(MACOS_CLIENT_ARCH)"
@@ -491,6 +494,22 @@ archive-artifacts: validate-version
 package-helper: dns-clients xray-core package-assets
 
 package-assets:
+	mkdir -p build/bin/licenses
+	cp ../THIRD_PARTY_NOTICES.md build/bin/THIRD_PARTY_NOTICES.md
+	cp ../Soar/third_party/soar/LICENSE build/bin/licenses/Soar-LICENSE.txt
+	cp ../Soar/third_party/soar/WHITEDNS_CHANGES.md build/bin/licenses/Soar-WHITEDNS-CHANGES.md
+	cp ../MasterDnsVPN/LICENSE build/bin/licenses/MasterDNS-LICENSE.txt
+	cp ../CottenDNS/LICENSE build/bin/licenses/CottenDNS-LICENSE.txt
+	cp ../StormDNS/LICENSE build/bin/licenses/StormDNS-LICENSE.txt
+	cp "$$(go env GOROOT)/LICENSE" build/bin/licenses/Go-LICENSE.txt
+	@for module in golang.org/x/crypto golang.org/x/sys; do \
+		dir=$$(cd ../Soar && go list -m -f '{{.Dir}}' "$$module"); \
+		cp "$$dir/LICENSE" "build/bin/licenses/$$(basename "$$module")-LICENSE.txt"; \
+	done
+	@if [ -d "$(MACOS_APP_RESOURCES_DIR)" ]; then \
+		cp build/bin/THIRD_PARTY_NOTICES.md "$(MACOS_APP_RESOURCES_DIR)/THIRD_PARTY_NOTICES.md"; \
+		cp -R build/bin/licenses "$(MACOS_APP_RESOURCES_DIR)/"; \
+	fi
 	@printf 'Runtime helpers and proxy cores are packaged with the app\n'
 
 test: test-backend test-frontend
@@ -509,7 +528,7 @@ test-stormdns: test-masterdns
 test-cottendns:
 	cd $(COTTENDNS_DIR) && go test ./...
 
-dns-clients: masterdns-client cottendns-client
+dns-clients: masterdns-client cottendns-client soar-client
 
 masterdns-client: stormdns-client
 
@@ -625,3 +644,16 @@ ifneq ($(VERSION_FROM_ARGS),)
 $(VERSION_FROM_ARGS):
 	@:
 endif
+
+.PHONY: soar-client soar-client-target
+soar-client:
+	$(MAKE) soar-client-target TARGET_GOOS=$(GOOS_VALUE) TARGET_GOARCH=$(GOARCH_VALUE)
+
+soar-client-target:
+	@set -e; \
+	if [ -z "$(TARGET_GOOS)" ] || [ -z "$(TARGET_GOARCH)" ]; then printf 'Target OS and arch required\n' >&2; exit 1; fi; \
+	helper="soar-client-$(TARGET_GOOS)-$(TARGET_GOARCH)"; \
+	if [ "$(TARGET_GOOS)" = "windows" ]; then helper="$$helper.exe"; fi; \
+	mkdir -p clients "$(GO_BUILD_CACHE)"; \
+	(cd ../Soar && CGO_ENABLED=0 GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -mod=readonly -trimpath -buildvcs=false -ldflags "$(HELPER_GO_LDFLAGS)" -o "../desktop/clients/$$helper" .); \
+	chmod 755 "clients/$$helper"

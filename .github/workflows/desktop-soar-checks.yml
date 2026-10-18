@@ -1,0 +1,51 @@
+name: Desktop Soar and subscriptions checks
+on:
+  pull_request:
+  push:
+    branches: [main, feature/soar-subscriptions]
+permissions:
+  contents: read
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.9'
+          cache-dependency-path: |
+            desktop/go.sum
+            Soar/go.sum
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+      - name: Build frontend
+        run: npm ci --prefix desktop/frontend && npm run build --prefix desktop/frontend
+      - name: Test desktop state, import and runtime with race detector
+        run: go -C desktop test -race -tags webkit2_41 ./... -count=1 -timeout=240s
+      - name: Test pinned Soar engine
+        run: |
+          go -C Soar test ./... -count=1 -timeout=120s
+          go -C Soar/third_party/soar test ./... -count=1 -timeout=180s
+      - name: Install browser test tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/browser-check" --no-package-lock playwright@1.58.2
+          "$RUNNER_TEMP/browser-check/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Check subscription and Soar interface
+        env:
+          DESKTOP_PLAYWRIGHT: ${{ runner.temp }}/browser-check/node_modules/playwright
+          DESKTOP_UI_FIXTURE: ${{ runner.temp }}/desktop-ui-fixture.json
+          DESKTOP_SCREENSHOTS: ${{ runner.temp }}/desktop-screenshots
+        run: |
+          go -C desktop test -tags webkit2_41 -run '^TestWriteSoarUIFixture$' -count=1
+          node desktop/frontend/scripts/soar-ui-test.cjs
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: desktop-soar-interface
+          path: ${{ runner.temp }}/desktop-screenshots

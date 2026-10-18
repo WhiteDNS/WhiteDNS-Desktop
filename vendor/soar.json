@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/getlantern/soar",
+  "version": "v0.2.3",
+  "wrapper_repository": "https://github.com/WhiteDNS/WhiteDNS-Android",
+  "wrapper_ref": "1.6.8",
+  "wrapper_commit": "29a97156c25f5e1838be115a7e6398070f6300d7",
+  "directory": "Soar",
+  "notes": "Same pinned engine and transport fixes as official Android 1.6.8. See Soar/third_party/soar/WHITEDNS_CHANGES.md and LICENSE."
+}

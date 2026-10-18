@@ -25,3 +25,7 @@ StormDNS: see the vendored `StormDNS` source and its license.
 Wails: https://github.com/wailsapp/wails (MIT). Xray-core: https://github.com/XTLS/Xray-core (MPL-2.0), downloaded unmodified by the packaging scripts from its pinned official release.
 
 Frontend and other Go dependency licenses remain those of their respective authors; exact versions are recorded in the lock files and Go module files.
+
+## Resolver datasets
+
+The Iranian resolver/range snapshots come from KevinNet DNS, commit a331430 (2026-05-26), under the MIT License. The complete attribution and permission notice is retained in `Soar/data/THIRD_PARTY.md` and included in release packages as `licenses/Soar-DATA-NOTICES.md`.

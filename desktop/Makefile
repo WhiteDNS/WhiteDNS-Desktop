@@ -3,7 +3,7 @@ SHELL := /bin/sh
 export GOTOOLCHAIN ?= go1.26.9
 
 APP_NAME := WhiteDNS Desktop
-DEFAULT_VERSION := 1.3.0
+DEFAULT_VERSION := 1.3.1
 VERSION_FROM_ARGS := $(shell set -- $(MAKECMDGOALS); while [ "$$1" != "" ]; do if [ "$$1" = "--version" ]; then shift; if [ "$$1" != "" ]; then printf '%s' "$$1"; fi; exit; fi; shift; done)
 VERSION ?= $(if $(VERSION_FROM_ARGS),$(VERSION_FROM_ARGS),$(DEFAULT_VERSION))
 APP_VERSION := $(strip $(VERSION))
@@ -501,6 +501,7 @@ package-assets:
 	cp "$$(go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v2)/LICENSE" build/bin/licenses/Wails-LICENSE.txt
 	cp ../Soar/third_party/soar/LICENSE build/bin/licenses/Soar-LICENSE.txt
 	cp ../Soar/third_party/soar/WHITEDNS_CHANGES.md build/bin/licenses/Soar-WHITEDNS-CHANGES.md
+	cp ../Soar/data/THIRD_PARTY.md build/bin/licenses/Soar-DATA-NOTICES.md
 	cp ../MasterDnsVPN/LICENSE build/bin/licenses/MasterDNS-LICENSE.txt
 	cp ../CottenDNS/LICENSE build/bin/licenses/CottenDNS-LICENSE.txt
 	cp ../StormDNS/LICENSE build/bin/licenses/StormDNS-LICENSE.txt

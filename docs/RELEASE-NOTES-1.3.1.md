@@ -1,4 +1,4 @@
-# WhiteDNS Desktop 1.3.0
+# WhiteDNS Desktop 1.3.1
 
 ## Soar on desktop
 

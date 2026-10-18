@@ -70,7 +70,7 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 	}
 	requestedEngine := model.NormalizeImportType(connection.ImportType)
 	engine := requestedEngine
-	if requestedEngine != model.ImportTypeCottenDNS {
+	if requestedEngine != model.ImportTypeCottenDNS && requestedEngine != model.ImportTypeSoar {
 		engine = model.ImportTypeMasterDNS
 	}
 	settings.ImportType = engine
@@ -111,6 +111,14 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 	if err != nil {
 		return LaunchConfig{}, err
 	}
+	clientConfig := renderLaunchClientTOML(connection, settings, masterDNSSettings, engine)
+	if engine == model.ImportTypeSoar {
+		var err error
+		clientConfig, err = renderSoarConfig(connection, masterDNSSettings)
+		if err != nil {
+			return LaunchConfig{}, err
+		}
+	}
 	return LaunchConfig{
 		Engine:             engine,
 		Connection:         connection,
@@ -124,7 +132,7 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 		SetSystemProxy:     settings.SingBoxSetSystemProxy,
 		PublicListenIP:     publicIP,
 		PublicListenPort:   publicPort,
-		ClientTOML:         renderLaunchClientTOML(connection, settings, masterDNSSettings, engine),
+		ClientTOML:         clientConfig,
 		Resolvers:          resolversText,
 		ResolversPath:      resolversPath,
 	}, nil

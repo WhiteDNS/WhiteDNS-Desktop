@@ -2,6 +2,8 @@ module whitedns-desktop
 
 go 1.23.0
 
+toolchain go1.26.9
+
 require (
 	github.com/wailsapp/wails/v2 v2.12.0
 	tunnelcheck/engine v0.0.0

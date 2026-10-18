@@ -37,6 +37,8 @@ type Options struct {
 	MasterDNSSource          string
 	CottenDNSSource          string
 	BinaryPath               string
+	SoarBinaryPath           string
+	SoarSource               string
 	CottenDNSBinaryPath      string
 	XrayBinaryPath           string
 	XrayCoresDir             string
@@ -218,6 +220,9 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		return fmt.Errorf("resolver file is unavailable: %s", resolversFile)
 	}
 	sharedResolvers := m.readSharedValidResolvers()
+	if engine == model.ImportTypeSoar {
+		sharedResolvers = nil
+	}
 	if len(sharedResolvers) > 0 {
 		if !resolversOwned {
 			raw, readErr := os.ReadFile(resolversFile)
@@ -231,11 +236,11 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		resolverPayload = mergeResolverText(resolverPayload, sharedResolvers)
 	}
 	mtuScanControlFile := ""
-	if engine != model.ImportTypeCottenDNS {
+	if engine == model.ImportTypeMasterDNS {
 		mtuScanControlFile = filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+"."+engine+".mtu-scan-control")
 	}
 	clientTOML := cfg.ClientTOML
-	if engine != model.ImportTypeCottenDNS {
+	if engine == model.ImportTypeMasterDNS {
 		clientTOML = storm.RenderRuntimeClientTOML(cfg.Connection, masterSettings, mtuResolverStateFile)
 	}
 	if err := os.WriteFile(configFile, []byte(clientTOML), 0o600); err != nil {
@@ -320,7 +325,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	m.mu.Unlock()
 
 	m.startTrafficMonitor(active, cmd.Process.Pid)
-	if engine != model.ImportTypeCottenDNS {
+	if engine == model.ImportTypeMasterDNS {
 		m.startMTUResolverStateMonitor(active)
 	}
 	go m.drainOutput(active, stdout)
@@ -386,9 +391,9 @@ func (m *Manager) SetResolverMTUScanPaused(paused bool) error {
 		m.mu.Unlock()
 		return errors.New("runtime is not running")
 	}
-	if active.engine == model.ImportTypeCottenDNS {
+	if active.engine != model.ImportTypeMasterDNS {
 		m.mu.Unlock()
-		return errors.New("CottenDNS does not expose runtime MTU scan pause control")
+		return fmt.Errorf("%s does not use MasterDNS runtime MTU scan pause controls", dnsEngineDisplayName(active.engine))
 	}
 	controlFile := active.mtuScanControlFile
 	m.mu.Unlock()
@@ -416,7 +421,7 @@ func (m *Manager) SetResolverMTUScanPaused(paused bool) error {
 }
 
 func masterDNSLaunchEnv(cfg storm.LaunchConfig, mtuScanControlFile string) []string {
-	if normalizeDNSEngine(cfg.Engine) == model.ImportTypeCottenDNS {
+	if normalizeDNSEngine(cfg.Engine) != model.ImportTypeMasterDNS {
 		return nil
 	}
 	env := []string{"WHITEDNS_MTU_SCAN_CONTROL_FILE=" + mtuScanControlFile}
@@ -445,6 +450,10 @@ func (m *Manager) resolveBinaryForEngine(ctx context.Context, engine string) (st
 	if engine == model.ImportTypeCottenDNS {
 		binaryOverride = m.options.CottenDNSBinaryPath
 		sourceDir = strings.TrimSpace(m.options.CottenDNSSource)
+	}
+	if engine == model.ImportTypeSoar {
+		binaryOverride = m.options.SoarBinaryPath
+		sourceDir = strings.TrimSpace(m.options.SoarSource)
 	}
 	if binaryOverride != "" {
 		if isExecutableFile(binaryOverride) {
@@ -493,7 +502,11 @@ func (m *Manager) resolveBinaryForEngine(ctx context.Context, engine string) (st
 	buildCtx, cancel := context.WithTimeout(ctx, m.options.BuildTimeout)
 	defer cancel()
 	m.log("Building " + engineName + " helper from source")
-	cmd := exec.CommandContext(buildCtx, "go", "build", "-buildvcs=false", "-o", out, "./cmd/client")
+	pkg := "./cmd/client"
+	if engine == model.ImportTypeSoar {
+		pkg = "."
+	}
+	cmd := exec.CommandContext(buildCtx, "go", "build", "-buildvcs=false", "-o", out, pkg)
 	hideConsoleWindow(cmd)
 	cmd.Dir = sourceDir
 	output, err := cmd.CombinedOutput()
@@ -1625,6 +1638,10 @@ func findClientBinaryInDirForEngine(dir string, engine string) (string, bool) {
 			if !strings.Contains(lower, "cottendns") {
 				continue
 			}
+		} else if normalizeDNSEngine(engine) == model.ImportTypeSoar {
+			if !strings.Contains(lower, "soar") {
+				continue
+			}
 		} else if !strings.Contains(lower, "masterdns") && !strings.Contains(lower, "masterdnsvpn") {
 			continue
 		}
@@ -1675,6 +1692,9 @@ func helperPlatformNameForEngine(engine string) string {
 	if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
 		prefix = "cottendns-client-"
 	}
+	if normalizeDNSEngine(engine) == model.ImportTypeSoar {
+		prefix = "soar-client-"
+	}
 	name := prefix + goruntime.GOOS + "-" + goruntime.GOARCH
 	if goruntime.GOOS == "windows" {
 		name += ".exe"
@@ -1713,6 +1733,9 @@ func helperNameCandidatesForEngine(engine string) []string {
 	if goruntime.GOARCH == "amd64" {
 		archLabel = "AMD64"
 	}
+	if engine == model.ImportTypeSoar {
+		return []string{platformName, "soar-client" + exe}
+	}
 	if engine == model.ImportTypeCottenDNS {
 		return []string{
 			platformName,
@@ -1734,6 +1757,9 @@ func helperNameCandidatesForEngine(engine string) []string {
 }
 
 func normalizeDNSEngine(engine string) string {
+	if model.NormalizeImportType(engine) == model.ImportTypeSoar {
+		return model.ImportTypeSoar
+	}
 	if model.NormalizeImportType(engine) == model.ImportTypeCottenDNS {
 		return model.ImportTypeCottenDNS
 	}
@@ -1741,6 +1767,9 @@ func normalizeDNSEngine(engine string) string {
 }
 
 func dnsEngineDisplayName(engine string) string {
+	if normalizeDNSEngine(engine) == model.ImportTypeSoar {
+		return "Soar"
+	}
 	if normalizeDNSEngine(engine) == model.ImportTypeCottenDNS {
 		return "CottenDNS"
 	}

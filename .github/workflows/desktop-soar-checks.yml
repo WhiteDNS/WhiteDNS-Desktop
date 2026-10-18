@@ -2,7 +2,7 @@ name: Desktop Soar and subscriptions checks
 on:
   pull_request:
   push:
-    branches: [main, feature/soar-subscriptions]
+    branches: [main]
 permissions:
   contents: read
 jobs:

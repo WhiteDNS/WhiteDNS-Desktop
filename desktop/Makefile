@@ -496,6 +496,9 @@ package-helper: dns-clients xray-core package-assets
 package-assets:
 	mkdir -p build/bin/licenses
 	cp ../THIRD_PARTY_NOTICES.md build/bin/THIRD_PARTY_NOTICES.md
+	cp ../LICENSE.MD build/bin/licenses/WhiteDNS-LICENSE.txt
+	cp ../vendor/licenses/Xray-LICENSE.txt build/bin/licenses/Xray-LICENSE.txt
+	cp "$$(go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v2)/LICENSE" build/bin/licenses/Wails-LICENSE.txt
 	cp ../Soar/third_party/soar/LICENSE build/bin/licenses/Soar-LICENSE.txt
 	cp ../Soar/third_party/soar/WHITEDNS_CHANGES.md build/bin/licenses/Soar-WHITEDNS-CHANGES.md
 	cp ../MasterDnsVPN/LICENSE build/bin/licenses/MasterDNS-LICENSE.txt

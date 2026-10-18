@@ -6,7 +6,6 @@ on:
   push:
     branches:
       - WhiteDns
-      - feature/soar-subscriptions
 
 permissions:
   contents: read

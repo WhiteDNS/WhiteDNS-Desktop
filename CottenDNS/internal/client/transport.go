@@ -4,7 +4,7 @@
 // Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
-// transport.go — resolver query transport abstraction. The synchronous query
+// transport.go â€” resolver query transport abstraction. The synchronous query
 // paths (MTU probing, session init, health rechecks) talk to a resolver through
 // a queryExchanger so they work identically over UDP or DNS-over-TCP/53. The
 // active transport is chosen client-wide: RESOLVER_TRANSPORT = udp | tcp | auto,
@@ -44,6 +44,8 @@ const (
 	transportTCP
 	transportDoT
 	transportDoH
+	transportDoH3
+	transportDoQ
 )
 
 func (t resolverTransport) String() string {
@@ -54,6 +56,10 @@ func (t resolverTransport) String() string {
 		return "DoT"
 	case transportDoH:
 		return "DoH"
+	case transportDoH3:
+		return "DoH/HTTP3"
+	case transportDoQ:
+		return "DoQ"
 	default:
 		return "UDP/53"
 	}
@@ -70,6 +76,10 @@ func resolverTransportFromName(name string) resolverTransport {
 		return transportDoT
 	case "doh":
 		return transportDoH
+	case "doh3":
+		return transportDoH3
+	case "doq":
+		return transportDoQ
 	default:
 		return transportUDP
 	}
@@ -94,15 +104,15 @@ func (c *Client) usesStreamTransport() bool {
 // the client's active transport.
 func (c *Client) newQueryTransport(resolverLabel string) (queryExchanger, error) {
 	switch c.activeTransport() {
-	case transportDoH:
-		return c.newDoHQueryTransport(resolverLabel)
+	case transportDoH, transportDoH3, transportDoQ:
+		return c.newEncryptedQueryTransport(resolverLabel)
 	case transportDoT:
 		conn, err := c.dialDoTResolver(resolverLabel, tcpQueryDialTimeout)
 		if err != nil {
 			return nil, err
 		}
 		// DoT is the TCP/53 wire format inside TLS, so the framing exchanger is
-		// reused verbatim — only the dial differs.
+		// reused verbatim â€” only the dial differs.
 		return &tcpQueryTransport{conn: conn}, nil
 	case transportTCP:
 		return newTCPQueryTransport(resolverLabel, tcpQueryDialTimeout)
@@ -150,7 +160,7 @@ func resolverHostWithPort(resolverLabel string, port int) string {
 }
 
 // tcpQueryTransport wraps a single persistent TCP connection to a resolver and
-// exchanges RFC 1035 §4.2.2 length-prefixed DNS messages. The connection is
+// exchanges RFC 1035 Â§4.2.2 length-prefixed DNS messages. The connection is
 // reused across the many queries a probe sends, so there is no per-query
 // handshake cost.
 type tcpQueryTransport struct {

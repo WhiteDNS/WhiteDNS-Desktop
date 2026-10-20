@@ -113,11 +113,16 @@ func (c *Client) nextQueryTypeForPacketPath(path string, packetType uint8) uint1
 // queryShaping snapshots the client's per-query DNS-shaping settings for the
 // wire builder. All fields are client-only and server-transparent.
 func (c *Client) queryShaping() DnsParser.QueryShaping {
+	padding := 0
+	if t := c.activeTransport(); t == transportDoT || t == transportDoH || t == transportDoH3 || t == transportDoQ {
+		padding = c.cfg.DNSPaddingBlockSize
+	}
 	return DnsParser.QueryShaping{
-		EDNSUDPSize:   c.ednsUDPSize,
-		RandomizeID:   c.dnsRandomizeID,
-		EDNSCookie:    c.dnsEDNSCookie,
-		CaseRandomize: c.dnsCaseRandomize,
+		EncryptedPaddingBlockSize: padding,
+		EDNSUDPSize:               c.ednsUDPSize,
+		RandomizeID:               c.dnsRandomizeID,
+		EDNSCookie:                c.dnsEDNSCookie,
+		CaseRandomize:             c.dnsCaseRandomize,
 	}
 }
 

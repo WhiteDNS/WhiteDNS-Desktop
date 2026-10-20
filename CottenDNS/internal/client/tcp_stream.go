@@ -19,7 +19,11 @@ import (
 
 var errLateStreamResult = errors.New("late stream result for closed or terminal local stream")
 
-func (c *Client) HandleTCPConnect(_ context.Context, conn net.Conn) {
+func (c *Client) HandleTCPConnect(ctx context.Context, conn net.Conn) {
+	if c.cottenMax.Load() != nil {
+		c.serveCottenMaxStream(ctx, conn, "forward:0", 0, conn)
+		return
+	}
 	if ok, reason := c.shouldAdmitNewLocalStream(c.now()); !ok {
 		c.logNewStreamRejected(reason)
 		if conn != nil {

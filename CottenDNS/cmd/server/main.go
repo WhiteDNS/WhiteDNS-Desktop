@@ -22,6 +22,7 @@ import (
 	"cottendns-go/internal/logger"
 	"cottendns-go/internal/runtimepath"
 	"cottendns-go/internal/security"
+	"cottendns-go/internal/tunnelinfo"
 	UDPServer "cottendns-go/internal/udpserver"
 	"cottendns-go/internal/version"
 )
@@ -88,6 +89,7 @@ func main() {
 	}
 
 	srv := UDPServer.New(cfg, log, codec)
+	srv.SetCottenMaxSecret(keyInfo.Key)
 
 	// Encryption-method auto-detection: build a codec per method from the shared
 	// key so the server adapts to whatever method the client uses, with the
@@ -133,6 +135,9 @@ func main() {
 	}
 
 	log.Infof("\U0001F680 <green>Server Configuration Loaded</green>")
+	for _, line := range tunnelinfo.Server(cfg) {
+		log.Infof("%s", line)
+	}
 	if len(cfg.Domain) > 0 {
 		log.Infof(
 			"\U0001F310 <green>Allowed Domains: <cyan>%s</cyan>, Min Label:<cyan>%d</cyan></green>",

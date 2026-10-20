@@ -399,7 +399,7 @@ func loadSchema() {
 				Key:          option.key,
 				Label:        optionLabel(option.key),
 				Group:        optionGroup(option.key),
-				Description:  option.description,
+				Description:  optionDescription(option.key, option.description),
 				Kind:         optionKind(option.key, option.value),
 				DefaultValue: option.value,
 				Choices:      optionChoices(option.key),
@@ -713,9 +713,45 @@ func validChoice(value any, choices []OptionChoice) bool {
 
 func validOptionRange(key string, value any) bool {
 	switch key {
-	case "LISTEN_PORT", "LOCAL_DNS_PORT":
+	case "LISTEN_PORT", "LOCAL_DNS_PORT", "RESOLVER_DOT_PORT", "RESOLVER_DOH_PORT", "RESOLVER_DOQ_PORT":
 		port, ok := value.(int)
 		return ok && port >= 1 && port <= 65535
+	case "RESOLVER_DISCOVERY_WANT", "RESOLVER_DISCOVERY_CONCURRENCY":
+		n, ok := value.(int)
+		return ok && n >= 1 && n <= 64
+	case "RESOLVER_DISCOVERY_PACE_MILLISECONDS":
+		n, ok := value.(int)
+		return ok && n >= 1 && n <= 60000
+	case "RESOLVER_DISCOVERY_SAMPLE_RANGES":
+		n, ok := value.(int)
+		return ok && n >= 0 && n <= 4096
+	case "RESOLVER_DISCOVERY_CANDIDATES":
+		candidates, ok := value.([]string)
+		return ok && len(candidates) <= 256
+	case "RESOLVER_DISCOVERY_NETWORK_ID":
+		label, ok := value.(string)
+		return ok && len(label) <= 256
+	case "DNS_PADDING_BLOCK_SIZE":
+		n, ok := value.(int)
+		return ok && (n == 0 || (n >= 16 && n <= 4096))
+	case "COTTENMAX_HOLD_MILLISECONDS":
+		n, ok := value.(int)
+		return ok && n >= 0 && n <= 1500 && n%100 == 0
+	case "COTTENMAX_FAILOVER_AFTER_MILLISECONDS":
+		n, ok := value.(int)
+		return ok && n >= 100 && n <= 60000
+	case "COTTENMAX_SAFE_QNAME", "COTTENMAX_MAX_QNAME":
+		n, ok := value.(int)
+		return ok && n >= 64 && n <= 253
+	case "COTTENMAX_MAX_ANSWER":
+		n, ok := value.(int)
+		return ok && n >= 512 && n <= 1232
+	case "COTTENMAX_MAX_PATH_WINDOW", "COTTENMAX_MAX_INFLIGHT":
+		n, ok := value.(int)
+		return ok && n >= 1 && n <= 1024
+	case "COTTENMAX_SESSION_IDLE_MILLISECONDS":
+		n, ok := value.(int)
+		return ok && n >= 1000 && n <= 90000
 	default:
 		return true
 	}
@@ -754,12 +790,27 @@ func baseOptionKind(value any) string {
 	}
 }
 
+// A few user-facing choices need context beyond the adjacent TOML comment.
+// Keep these explanations beside the schema so every UI sees the same guidance.
+func optionDescription(key, fallback string) string {
+	switch key {
+	case "TUNNEL_MODE":
+		return "Normal is the compatible default. CottenMax (beta) uses the same domain, key and resolver profile, and requires an updated CottenDNS server. Save and reconnect after switching; select Normal manually if Max cannot connect."
+	case "RESOLVER_TRANSPORT":
+		return "Transport to your DNS resolver. HTTP/3 uses UDP/443 and DoQ uses UDP/853 by default; the chosen resolver must support it. Max never falls back to plaintext from an encrypted resolver transport."
+	default:
+		return fallback
+	}
+}
+
 func optionChoices(key string) []OptionChoice {
 	switch key {
+	case "TUNNEL_MODE":
+		return []OptionChoice{{Value: "legacy", Label: "Normal CottenDNS"}, {Value: "cottenmax", Label: "CottenMax (beta)"}}
 	case "PROTOCOL_TYPE":
 		return []OptionChoice{{Value: "SOCKS5", Label: "SOCKS5"}, {Value: "SOCKS4", Label: "SOCKS4"}}
 	case "RESOLVER_TRANSPORT":
-		return []OptionChoice{{Value: "auto", Label: "Automatic"}, {Value: "udp", Label: "UDP/53"}, {Value: "tcp", Label: "TCP/53"}, {Value: "dot", Label: "DNS over TLS"}, {Value: "doh", Label: "DNS over HTTPS"}}
+		return []OptionChoice{{Value: "auto", Label: "Automatic"}, {Value: "udp", Label: "UDP/53"}, {Value: "tcp", Label: "TCP/53"}, {Value: "dot", Label: "DNS over TLS"}, {Value: "doh", Label: "DNS over HTTPS"}, {Value: "doh3", Label: "DNS over HTTPS (HTTP/3)"}, {Value: "doq", Label: "DNS over QUIC"}}
 	case "RESOLVER_IP_MODE":
 		return []OptionChoice{{Value: "auto", Label: "IPv4 with IPv6 fallback"}, {Value: "dual", Label: "IPv4 and IPv6"}, {Value: "ipv4", Label: "IPv4 only"}, {Value: "ipv6", Label: "IPv6 only"}}
 	case "RESOLVER_BALANCING_STRATEGY":
@@ -783,7 +834,19 @@ func optionChoices(key string) []OptionChoice {
 
 func optionGroup(key string) string {
 	switch {
-	case key == "PROTOCOL_TYPE" || strings.HasPrefix(key, "LISTEN_") || strings.HasPrefix(key, "SOCKS5_"):
+	case key == "COTTENMAX_FAILOVER_AFTER_MILLISECONDS":
+		return "Delivery and failover"
+	case key == "COTTENMAX_QNAME_LOSS_GUARD" || key == "COTTENMAX_SAFE_QNAME" || key == "COTTENMAX_MAX_QNAME" || key == "COTTENMAX_MAX_ANSWER":
+		return "MTU discovery"
+	case key == "COTTENMAX_MAX_PATH_WINDOW" || key == "COTTENMAX_MAX_INFLIGHT":
+		return "Performance and limits"
+	case key == "COTTENMAX_SESSION_IDLE_MILLISECONDS":
+		return "ARQ and sessions"
+	case key == "COTTENMAX_HOLD_MILLISECONDS":
+		return "Ping policy"
+	case strings.HasPrefix(key, "COTTENMAX_"):
+		return "Encoding and compatibility"
+	case key == "TUNNEL_MODE" || key == "PROTOCOL_TYPE" || strings.HasPrefix(key, "LISTEN_") || strings.HasPrefix(key, "SOCKS5_"):
 		return "Local proxy"
 	case strings.HasPrefix(key, "LOCAL_DNS_") || strings.HasPrefix(key, "DNS_RESPONSE_"):
 		return "Local DNS"
@@ -814,6 +877,54 @@ func optionGroup(key string) string {
 
 func optionLabel(key string) string {
 	switch key {
+	case "TUNNEL_MODE":
+		return "CottenDNS mode"
+	case "RESOLVER_TRANSPORT":
+		return "DNS resolver transport"
+	case "RESOLVER_DOQ_PORT":
+		return "DoQ resolver port"
+	case "RESOLVER_HTTP3_FALLBACK":
+		return "Allow HTTP/2 fallback for HTTP/3 DNS"
+	case "RESOLVER_DISCOVERY_ENABLED":
+		return "Discover working resolvers for CottenMax"
+	case "RESOLVER_DISCOVERY_COUNTRY":
+		return "Resolver discovery country code"
+	case "RESOLVER_DISCOVERY_CANDIDATES":
+		return "Additional discovery resolver endpoints"
+	case "RESOLVER_DISCOVERY_SAMPLE_RANGES":
+		return "Optional address samples for resolver discovery"
+	case "RESOLVER_DISCOVERY_WANT":
+		return "Target healthy discovery paths"
+	case "RESOLVER_DISCOVERY_CONCURRENCY":
+		return "Maximum concurrent discovery candidates"
+	case "RESOLVER_DISCOVERY_PACE_MILLISECONDS":
+		return "Discovery candidate interval (ms)"
+	case "RESOLVER_DISCOVERY_CACHE_FILE":
+		return "Optional discovery cache base path"
+	case "RESOLVER_DISCOVERY_NETWORK_ID":
+		return "Optional network label for discovery cache"
+	case "DNS_PADDING_BLOCK_SIZE":
+		return "Encrypted DNS padding block (bytes; 0 disables)"
+	case "QNAME_LABEL_COUNT_JITTER":
+		return "Vary CottenMax QNAME label count"
+	case "COTTENMAX_FAILOVER_AFTER_MILLISECONDS":
+		return "CottenMax domain failover delay (ms)"
+	case "COTTENMAX_QNAME_LOSS_GUARD":
+		return "Experimental CottenMax QNAME loss guard"
+	case "COTTENMAX_SAFE_QNAME":
+		return "CottenMax initial QNAME length"
+	case "COTTENMAX_MAX_QNAME":
+		return "CottenMax maximum QNAME length"
+	case "COTTENMAX_MAX_ANSWER":
+		return "CottenMax maximum DNS answer (bytes)"
+	case "COTTENMAX_MAX_PATH_WINDOW":
+		return "CottenMax maximum queries per path"
+	case "COTTENMAX_MAX_INFLIGHT":
+		return "CottenMax maximum total pending queries"
+	case "COTTENMAX_SESSION_IDLE_MILLISECONDS":
+		return "CottenMax idle session retirement (ms)"
+	case "COTTENMAX_HOLD_MILLISECONDS":
+		return "CottenMax idle poll hold (ms)"
 	case "PROTOCOL_TYPE":
 		return "CottenDNS proxy protocol"
 	case "LISTEN_IP":
@@ -824,7 +935,7 @@ func optionLabel(key string) string {
 	replacements := map[string]string{
 		"DNS": "DNS", "EDNS": "EDNS", "MTU": "MTU", "ARQ": "ARQ", "RTO": "RTO",
 		"SOCKS5": "SOCKS5", "UDP": "UDP", "TCP": "TCP", "TLS": "TLS", "DOH": "DoH",
-		"DOT": "DoT", "QNAME": "QNAME", "NXDOMAIN": "NXDOMAIN", "RX": "RX", "TX": "TX",
+		"DOT": "DoT", "DOQ": "DoQ", "HTTP3": "HTTP/3", "COTTENMAX": "CottenMax", "QNAME": "QNAME", "NXDOMAIN": "NXDOMAIN", "RX": "RX", "TX": "TX",
 		"IP": "IP", "ID": "ID", "TTL": "TTL",
 	}
 	parts := strings.Split(strings.ToUpper(key), "_")

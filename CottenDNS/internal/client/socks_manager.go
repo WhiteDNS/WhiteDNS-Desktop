@@ -13,6 +13,7 @@ import (
 	"io"
 	"net"
 	"slices"
+	"strconv"
 	"sync"
 	"time"
 
@@ -250,6 +251,11 @@ func (c *Client) handleSOCKS5Request(ctx context.Context, conn net.Conn) {
 	}
 
 	if cmd == SOCKS5_CMD_UDP_ASSOCIATE {
+		if c.cottenMax.Load() != nil {
+			_ = c.sendSocksReply(conn, SOCKS5_REPLY_CMD_NOT_SUPPORTED, SOCKS5_ATYP_IPV4, net.IPv4zero, 0)
+			_ = conn.Close()
+			return
+		}
 		c.handleSocksUDPAssociate(ctx, conn, addr, port, atyp)
 		return
 	}
@@ -332,6 +338,10 @@ func readNullTerminatedSocksField(conn net.Conn) ([]byte, error) {
 
 func (c *Client) handleSOCKSConnect(ctx context.Context, conn net.Conn, addr string, port uint16, atyp byte, socksVersion byte) {
 	_ = conn.SetReadDeadline(time.Time{})
+	if c.cottenMax.Load() != nil {
+		c.serveCottenMaxStream(ctx, conn, net.JoinHostPort(addr, strconv.Itoa(int(port))), socksVersion, conn)
+		return
+	}
 	if ok, reason := c.shouldAdmitNewLocalStream(c.now()); !ok {
 		c.logNewStreamRejected(reason)
 		if socksVersion == SOCKS4_VERSION {

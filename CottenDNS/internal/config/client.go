@@ -25,18 +25,42 @@ import (
 )
 
 type ClientConfig struct {
-	ConfigDir                 string   `toml:"-"`
-	ConfigPath                string   `toml:"-"`
-	ResolversFilePath         string   `toml:"-"`
-	explicitRX_TX_Workers     bool     `toml:"-"`
-	ConfigPreset              string   `toml:"CONFIG_PRESET"`
-	ProtocolType              string   `toml:"PROTOCOL_TYPE"`
-	Domains                   []string `toml:"DOMAINS"`
+	TunnelMode                         string   `toml:"TUNNEL_MODE"`
+	ResolverDiscoveryCacheFile         string   `toml:"RESOLVER_DISCOVERY_CACHE_FILE"`
+	ResolverDiscoveryNetworkID         string   `toml:"RESOLVER_DISCOVERY_NETWORK_ID"`
+	ResolverDiscoveryCandidates        []string `toml:"RESOLVER_DISCOVERY_CANDIDATES"`
+	ResolverDiscoveryWant              int      `toml:"RESOLVER_DISCOVERY_WANT"`
+	ResolverDiscoveryConcurrency       int      `toml:"RESOLVER_DISCOVERY_CONCURRENCY"`
+	ResolverDiscoveryPaceMilliseconds  int      `toml:"RESOLVER_DISCOVERY_PACE_MILLISECONDS"`
+	CottenMaxFailoverAfterMilliseconds int      `toml:"COTTENMAX_FAILOVER_AFTER_MILLISECONDS"`
+	CottenMaxSafeQName                 int      `toml:"COTTENMAX_SAFE_QNAME"`
+	CottenMaxMaxQName                  int      `toml:"COTTENMAX_MAX_QNAME"`
+	CottenMaxMaxAnswer                 int      `toml:"COTTENMAX_MAX_ANSWER"`
+	CottenMaxMaxPathWindow             int      `toml:"COTTENMAX_MAX_PATH_WINDOW"`
+	CottenMaxMaxInflight               int      `toml:"COTTENMAX_MAX_INFLIGHT"`
+	CottenMaxSessionIdleMilliseconds   int      `toml:"COTTENMAX_SESSION_IDLE_MILLISECONDS"`
+	CottenMaxQNameLossGuard            bool     `toml:"COTTENMAX_QNAME_LOSS_GUARD"`
+	QNameLabelJitter                   bool     `toml:"QNAME_LABEL_COUNT_JITTER"`
+	DNSPaddingBlockSize                int      `toml:"DNS_PADDING_BLOCK_SIZE"`
+	ResolverDoQPort                    int      `toml:"RESOLVER_DOQ_PORT"`
+	ResolverHTTP3Fallback              bool     `toml:"RESOLVER_HTTP3_FALLBACK"`
+	ResolverDiscoveryEnabled           bool     `toml:"RESOLVER_DISCOVERY_ENABLED"`
+	ResolverDiscoveryCountry           string   `toml:"RESOLVER_DISCOVERY_COUNTRY"`
+	ResolverDiscoverySampleRanges      int      `toml:"RESOLVER_DISCOVERY_SAMPLE_RANGES"`
+	CottenMaxServerPublicKey           string   `toml:"COTTENMAX_SERVER_PUBLIC_KEY"`
+	CottenMaxHoldMilliseconds          int      `toml:"COTTENMAX_HOLD_MILLISECONDS"`
+	ConfigDir                          string   `toml:"-"`
+	ConfigPath                         string   `toml:"-"`
+	ResolversFilePath                  string   `toml:"-"`
+	explicitRX_TX_Workers              bool     `toml:"-"`
+	ConfigPreset                       string   `toml:"CONFIG_PRESET"`
+	ProtocolType                       string   `toml:"PROTOCOL_TYPE"`
+	Domains                            []string `toml:"DOMAINS"`
 	// StandbyDomains (domain rotation) are tunnel domains on the same server
 	// that are never queried until the active ones stop working, so a firewall
 	// watching traffic cannot block them in advance. Tried in order, one at a
 	// time, after a full scan finds no working path.
-	StandbyDomains []string `toml:"STANDBY_DOMAINS"`
+	StandbyDomains            []string `toml:"STANDBY_DOMAINS"`
 	ListenIP                  string   `toml:"LISTEN_IP"`
 	ListenPort                int      `toml:"LISTEN_PORT"`
 	SOCKS5Auth                bool     `toml:"SOCKS5_AUTH"`
@@ -75,6 +99,8 @@ type ClientConfig struct {
 	// Query rate limits (see internal/client/query_rate_limit.go): hard caps
 	// on outgoing DNS queries for networks that drop DNS above a fixed rate.
 	// Each scope is independent and they stack; 0 = scope off (default).
+	// Positive rates are user-defined (including fractions, 500, or higher),
+	// with no fixed upper cap.
 	// Any non-zero scope also forces duplication to 1, disables session-init
 	// racing and adaptive duplication, and shrinks health-recheck batches,
 	// because under a cap every extra query costs real throughput.
@@ -99,10 +125,12 @@ type ClientConfig struct {
 	// DoT/DoH are opt-in disguise transports, never something "auto" escalates
 	// into: they exist to make the resolver hop look like ordinary encrypted DNS
 	// where plain 53 is fingerprinted. Selecting one and having it fail is not
-	// fatal — the client falls back to UDP and then TCP/53 on its own, so a
+	// fatal in legacy mode — that client falls back to UDP and then TCP/53 on its own, so a
 	// blocked TLS port degrades to the survival path instead of no tunnel.
+	// CottenMax supports dot/doh/doh3/doq with verified TLS and no plaintext fallback.
+	// New QUIC modes remain explicit in both clients and never downgrade to plaintext.
 	ResolverTransport string `toml:"RESOLVER_TRANSPORT"`
-	// Encrypted-resolver settings, used only by the dot/doh transports.
+	// Encrypted-resolver settings, used by dot/doh/doh3/doq transports.
 	// ResolverTLSServerName is the SNI + certificate name presented to the
 	// resolver (leave empty to use the resolver IP itself). ResolverTLSPin is an
 	// optional base64 SHA-256 of the server certificate's SubjectPublicKeyInfo:
@@ -318,6 +346,13 @@ type ClientConfig struct {
 	// punishing resolvers the censor is forging failures for. Set false to
 	// restore the legacy behavior of counting every NXDOMAIN as a failure.
 	ResolverIgnoreInjectedNXDOMAIN bool `toml:"RESOLVER_IGNORE_INJECTED_NXDOMAIN"`
+	// ResolverIgnoreInjectedNXDOMAINInProbes extends that to MTU probes,
+	// session init and health rechecks: an NXDOMAIN there is skipped and the
+	// client waits for the real answer until the probe timeout. Default false:
+	// on networks where the censor forges NXDOMAIN and drops the real answer,
+	// every such resolver then costs MTU_TEST_RETRIES x MTU_TEST_TIMEOUT instead
+	// of failing at once, which stalls scans over large resolver lists.
+	ResolverIgnoreInjectedNXDOMAINInProbes bool `toml:"RESOLVER_IGNORE_INJECTED_NXDOMAIN_IN_PROBES"`
 }
 
 type ClientConfigOverrides struct {
@@ -336,6 +371,7 @@ type ClientConfigFlagBinder struct {
 func defaultClientConfig() ClientConfig {
 	return ClientConfig{
 		ConfigPreset:                          "default",
+		TunnelMode:                            TunnelLegacy,
 		ProtocolType:                          "SOCKS5",
 		Domains:                               nil,
 		ListenIP:                              "127.0.0.1",
@@ -376,35 +412,41 @@ func defaultClientConfig() ClientConfig {
 		// bring them back, ratcheting the pool down to the floor and collapsing
 		// throughput. 90s keeps genuinely-dead resolvers out while tolerating
 		// transient loss.
-		AutoDisableTimeoutWindowSeconds:      90.0,
-		AutoDisableMinObservations:           3,
-		AutoDisableCheckIntervalSeconds:      1.0,
-		BaseEncodeData:                       false,
-		LegacySessionID:                      false,
-		MaxActiveStreams:                     2048,
-		LocalHandshakeTimeoutSeconds:         5.0,
-		UploadCompressionType:                2,
-		DownloadCompressionType:              2,
-		CompressionMinSize:                   compression.DefaultMinSize,
-		DataEncryptionMethod:                 1,
-		EncryptionKey:                        "",
-		MinUploadMTU:                         100,
-		MinDownloadMTU:                       1000,
-		MaxUploadMTU:                         200,
-		MaxDownloadMTU:                       4000,
-		MTUTestRetriesResolvers:              3,
-		MTUTestRetriesLogs:                   5,
-		MTUTestTimeoutResolvers:              2.0,
-		MTUTestTimeoutLogs:                   2.0,
-		MTUTestParallelismResolvers:          100,
-		MTUTestParallelismLogs:               32,
-		MTUBackgroundParallelism:             1,
-		MTUProbeSamples:                      1,
-		MTUMaxLoss:                           0.0,
-		MTUGroupGapRatio:                     0.25,
-		MTUAdaptiveGrouping:                  true,
-		MTUWeightedMinPool:                   2,
-		FastConnect:                          false,
+		AutoDisableTimeoutWindowSeconds:    90.0,
+		AutoDisableMinObservations:         3,
+		AutoDisableCheckIntervalSeconds:    1.0,
+		BaseEncodeData:                     false,
+		LegacySessionID:                    false,
+		MaxActiveStreams:                   2048,
+		LocalHandshakeTimeoutSeconds:       5.0,
+		UploadCompressionType:              2,
+		DownloadCompressionType:            2,
+		CompressionMinSize:                 compression.DefaultMinSize,
+		DataEncryptionMethod:               1,
+		EncryptionKey:                      "",
+		MinUploadMTU:                       100,
+		MinDownloadMTU:                     1000,
+		MaxUploadMTU:                       200,
+		MaxDownloadMTU:                     4000,
+		MTUTestRetriesResolvers:            3,
+		MTUTestRetriesLogs:                 5,
+		MTUTestTimeoutResolvers:            2.0,
+		MTUTestTimeoutLogs:                 2.0,
+		MTUTestParallelismResolvers:        100,
+		MTUTestParallelismLogs:             32,
+		MTUBackgroundParallelism:           1,
+		MTUProbeSamples:                    1,
+		MTUMaxLoss:                         0.0,
+		MTUGroupGapRatio:                   0.25,
+		MTUAdaptiveGrouping:                true,
+		MTUWeightedMinPool:                 2,
+		FastConnect:                        false,
+		CottenMaxHoldMilliseconds:          500,
+		CottenMaxFailoverAfterMilliseconds: 3000,
+		CottenMaxSafeQName:                 101, CottenMaxMaxQName: 253, CottenMaxMaxAnswer: 1232,
+		CottenMaxMaxPathWindow: 256, CottenMaxMaxInflight: 256, CottenMaxSessionIdleMilliseconds: 90000,
+		ResolverDoQPort: 853, ResolverDiscoveryWant: 16, ResolverDiscoveryConcurrency: 16,
+		ResolverDiscoveryPaceMilliseconds:    20,
 		DNSRandomizeQueryID:                  true,
 		DNSEDNSCookie:                        true,
 		DNSQNameCaseRandomization:            false,
@@ -572,6 +614,11 @@ func LoadClientConfigWithOverrides(filename string, overrides ClientConfigOverri
 }
 
 func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
+	mode, err := normalizeTunnelMode(cfg.TunnelMode)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.TunnelMode = mode
 	cfg.ConfigPreset = normalizeConfigPresetName(cfg.ConfigPreset)
 	if !isKnownConfigPreset(cfg.ConfigPreset) {
 		return cfg, fmt.Errorf("invalid CONFIG_PRESET: %q (valid: default, speed, survival, tcp-survival)", cfg.ConfigPreset)
@@ -711,10 +758,15 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 		cfg.ResolverTransport = "dot"
 	case "doh":
 		cfg.ResolverTransport = "doh"
+	case "doh3", "h3":
+		cfg.ResolverTransport = "doh3"
+	case "doq":
+		cfg.ResolverTransport = "doq"
 	default:
-		return cfg, fmt.Errorf("invalid RESOLVER_TRANSPORT: %q (want auto|udp|tcp|dot|doh)", cfg.ResolverTransport)
+		return cfg, fmt.Errorf("invalid RESOLVER_TRANSPORT: %q (want auto|udp|tcp|dot|doh|doh3|doq)", cfg.ResolverTransport)
 	}
 	cfg.ResolverDoTPort = clampInt(defaultIntBelow(cfg.ResolverDoTPort, 1, 853), 1, 65535)
+	cfg.ResolverDoQPort = clampInt(defaultIntBelow(cfg.ResolverDoQPort, 1, 853), 1, 65535)
 	cfg.ResolverDoHPort = clampInt(defaultIntBelow(cfg.ResolverDoHPort, 1, 443), 1, 65535)
 	if cfg.ResolverDoHPath == "" || cfg.ResolverDoHPath[0] != '/' {
 		cfg.ResolverDoHPath = "/dns-query"
@@ -877,7 +929,11 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 		return cfg, fmt.Errorf("ENCRYPTION_KEY is required in client config")
 	}
 
-	cfg.Domains = normalizeClientDomains(cfg.Domains)
+	if cfg.TunnelMode == TunnelCottenMax {
+		cfg.Domains = AppendNewDomains(nil, cfg.Domains, nil)
+	} else {
+		cfg.Domains = normalizeClientDomains(cfg.Domains)
+	}
 	if len(cfg.Domains) == 0 {
 		return cfg, fmt.Errorf("DOMAINS must contain at least one domain")
 	}
@@ -886,11 +942,19 @@ func finalizeClientConfig(cfg ClientConfig) (ClientConfig, error) {
 	cfg.ResolversFilePath = strings.TrimSpace(cfg.ResolversFilePath)
 
 	resolvers, resolverMap, err := LoadClientResolvers(cfg.ResolversPath())
-	if err != nil {
+	if err != nil && !(cfg.TunnelMode == TunnelCottenMax && cfg.ResolverDiscoveryEnabled) {
 		return cfg, err
 	}
+	// Opt-in Max discovery may bootstrap from cached/system/bundled candidates.
+	// Candidates still have to authenticate before carrying traffic.
 	cfg.Resolvers = resolvers
 	cfg.ResolverMap = resolverMap
+	if err := validateResolverOptions(cfg); err != nil {
+		return cfg, err
+	}
+	if err := validateCottenMaxClient(cfg); err != nil {
+		return cfg, err
+	}
 	return cfg, nil
 }
 
@@ -1300,6 +1364,9 @@ func NewClientConfigFlagBinder(fs *flag.FlagSet) (*ClientConfigFlagBinder, error
 		binder.flagToField[flagName] = field.Name
 		target := valueElem.Field(i)
 		usage := fmt.Sprintf("Override %s from config file", tomlTag)
+		if detail := optionHelp(tomlTag, false); detail != "" {
+			usage += ": " + detail
+		}
 
 		switch target.Kind() {
 		case reflect.String:

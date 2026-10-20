@@ -254,62 +254,62 @@ func (c *Client) HandleDNSQueryRes(packet VpnProto.Packet) error {
 		return nil
 	}
 
-	if c.localDNSCache != nil {
-		lite, err := dnsParser.ParsePacketLite(assembled)
-		if err == nil && lite.HasQuestion {
-			cacheKey := dnsCache.BuildKey(lite.FirstQuestion.Name, lite.FirstQuestion.Type, lite.FirstQuestion.Class)
-			c.localDNSCache.SetReady(cacheKey, lite.FirstQuestion.Name, lite.FirstQuestion.Type, lite.FirstQuestion.Class, assembled, time.Now())
-		}
+	lite, err := dnsParser.ParsePacketLite(assembled)
+	if err == nil && lite.Header.QR == 1 && lite.HasQuestion {
+		c.completePendingDNS(assembled, lite.FirstQuestion)
 	}
 
 	return nil
 }
 
-// ProcessDNSQuery handles a DNS query by checking the local cache or dispatching to the tunnel.
-// It only responds on cache hits and uses "fire-and-forget" for misses.
+// ProcessDNSQuery replies immediately on a cache hit. On a miss it retains the
+// callback and delivers the tunnel response without requiring a second query.
+// The return value still reports only an immediate cache hit.
 func (c *Client) ProcessDNSQuery(query []byte, addr net.Addr, respond func([]byte)) bool {
 	if c == nil || !c.SessionReady() {
 		return false
 	}
-
-	// 1. Lite Parse DNS Query
 	lite, err := dnsParser.ParseDNSRequestLite(query)
 	if err != nil || !lite.HasQuestion {
 		return false
 	}
-
 	question := lite.FirstQuestion
-	now := time.Now()
-
-	// 2. Check Local Cache
+	key := dnsCache.BuildKey(question.Name, question.Type, question.Class)
+	p := &c.pendingDNS
+	p.mu.Lock()
+	dispatch := c.localDNSCache == nil
 	if c.localDNSCache != nil {
-		key := dnsCache.BuildKey(question.Name, question.Type, question.Class)
-		res := c.localDNSCache.LookupOrCreatePending(key, question.Name, question.Type, question.Class, now)
-
+		res := c.localDNSCache.LookupOrCreatePending(key, question.Name, question.Type, question.Class, time.Now())
 		if res.Status == dnsCache.StatusReady && len(res.Response) > 0 {
-			// Cache Hit - Rewrite Transaction ID and send back
+			p.mu.Unlock()
 			if respond != nil {
-				resp := dnsCache.PatchResponseForQuery(res.Response, query)
-				respond(resp)
+				respond(dnsCache.PatchResponseForQuery(res.Response, query))
 			}
 			if c.log != nil {
-				c.log.Infof("🔍 <green>DNS Cache Hit: %s (%d)</green>", question.Name, question.Type)
+				c.log.Infof("DNS Cache Hit: %s (%d)", question.Name, question.Type)
 			}
 			return true
 		}
-
-		if res.Status == dnsCache.StatusPending && !res.DispatchNeeded {
-			// Already pending in tunnel, don't re-dispatch
-			if c.log != nil {
-				c.log.Debugf("🔍 <yellow>DNS Query Pending: %s (%d)</yellow>", question.Name, question.Type)
-			}
+		dispatch = res.DispatchNeeded
+	}
+	if respond != nil {
+		first, accepted := c.addPendingDNSLocked(key, query, respond)
+		if !accepted {
+			p.mu.Unlock()
+			failPendingDNS(dnsPendingWaiter{query: query, respond: respond})
 			return false
 		}
+		// A prior waiter group may have timed out or been reset while the
+		// cache still marks the question pending. Allow a fresh attempt.
+		dispatch = dispatch || first
 	}
-
-	// 3. Dispatch to Tunnel
-	c.log.Infof("🔍 <yellow>DNS Query Request: %s (%d)</yellow>", question.Name, question.Type)
-	c.dispatchDNSQueryToTunnel(query)
+	p.mu.Unlock()
+	if dispatch {
+		if c.log != nil {
+			c.log.Infof("DNS Query Request: %s (%d)", question.Name, question.Type)
+		}
+		c.dispatchDNSQueryToTunnel(query)
+	}
 	return false
 }
 

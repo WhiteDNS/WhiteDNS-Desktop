@@ -162,6 +162,10 @@ func resolverTransportChain(name string) []resolverTransport {
 		return []resolverTransport{transportDoT, transportUDP, transportTCP}
 	case "doh":
 		return []resolverTransport{transportDoH, transportUDP, transportTCP}
+	case "doh3":
+		return []resolverTransport{transportDoH3}
+	case "doq":
+		return []resolverTransport{transportDoQ}
 	default: // "auto"
 		return []resolverTransport{transportUDP, transportTCP}
 	}

@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"cottendns-go/internal/config"
+	"cottendns-go/internal/cottenmax"
 	dnsCache "cottendns-go/internal/dnscache"
 	domainMatcher "cottendns-go/internal/domainmatcher"
 	fragmentStore "cottendns-go/internal/fragmentstore"
@@ -43,6 +44,8 @@ const (
 var preSessionPacketTypes = buildPreSessionPacketTypes()
 
 type Server struct {
+	cottenMax                *cottenmax.Server
+	cottenMaxSecret          string
 	cfg                      config.ServerConfig
 	log                      *logger.Logger
 	codec                    *security.Codec
@@ -574,6 +577,21 @@ func splitDeferredSessionPools(totalWorkers int, totalQueue int) (dnsWorkers int
 func (s *Server) Run(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	if s.cfg.TunnelMode == config.TunnelCottenMax || s.cottenMaxSecret != "" {
+		if err := s.startCottenMax(runCtx); err != nil {
+			return err
+		}
+		if s.cottenMax != nil {
+			defer s.cottenMax.Close()
+			go func() {
+				select {
+				case <-s.cottenMax.Done():
+					cancel()
+				case <-runCtx.Done():
+				}
+			}()
+		}
+	}
 
 	listenAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(s.cfg.UDPHost, strconv.Itoa(s.cfg.UDPPort)))
 	if err != nil {
@@ -712,6 +730,11 @@ func (s *Server) Run(ctx context.Context) error {
 	cancel()
 	tcpWG.Wait()
 	<-cleanupDone
+	if s.cottenMax != nil {
+		if err := s.cottenMax.Err(); err != nil {
+			return fmt.Errorf("cottenmax stopped: %w", err)
+		}
+	}
 
 	if ctx.Err() != nil {
 		return ctx.Err()

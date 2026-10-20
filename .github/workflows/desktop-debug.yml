@@ -1,16 +1,32 @@
-name: WhiteDns Debug Build
+name: CottenMax Beta Debug Build
 
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: "Debug package version"
+        required: false
+        default: "1.2.4-cottenmax-beta.20261021"
+        type: string
+      build_linux:
+        description: "Also build Linux preview packages"
+        required: false
+        default: false
+        type: boolean
   push:
     branches:
       - WhiteDns
+
+defaults:
+  run:
+    shell: bash
 
 permissions:
   contents: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+  DEBUG_VERSION: ${{ inputs.version || '1.2.4-cottenmax-beta.20261021' }}
 
 concurrency:
   group: whitedns-debug-${{ github.ref }}
@@ -19,22 +35,57 @@ concurrency:
 jobs:
   windows-debug:
     name: Windows x64 debug app
-    runs-on: macos-latest
+    runs-on: windows-latest
     timeout-minutes: 45
 
     steps:
       - name: Checkout
         uses: actions/checkout@v6
 
+
+      - name: Setup Python for source receipt verification
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Verify published CottenDNS source receipt
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, re
+          pin = json.loads(Path("vendor/cottendns.json").read_text())
+          if not re.fullmatch(r"[0-9a-f]{40}", pin["commit"]):
+              raise SystemExit("CottenDNS must reference a published full commit, not a local snapshot")
+          receipt = json.loads(Path(pin["source_snapshot"]).read_text())
+          source = Path(pin["directory"])
+          tree = hashlib.sha256()
+          for item in receipt["files"]:
+              relative = item["path"]
+              path = source / relative
+              if not path.resolve().is_relative_to(source.resolve()):
+                  raise SystemExit(f"Invalid source receipt path: {relative}")
+              digest = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+              if digest != item["sha256_lf"]:
+                  raise SystemExit(f"Stale CottenDNS source input: {relative}")
+              tree.update(f"{relative} {digest}\n".encode())
+          if tree.hexdigest() != receipt["source_tree_sha256_lf"]:
+              raise SystemExit("CottenDNS source receipt tree hash does not match")
+          print(f"Verified {len(receipt['files'])} production inputs for {pin['commit']}")
+          PY
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.x"
+          go-version: "1.26.5"
           cache: true
           cache-dependency-path: |
             desktop/go.sum
             MasterDnsVPN/go.sum
             CottenDNS/go.sum
+
+      - name: Install GNU Make
+        shell: powershell
+        run: choco install make --no-progress --yes
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -65,13 +116,15 @@ jobs:
 
       - name: Prepare embedded DNS engines and Xray
         run: |
-          make -C desktop prepare-package
-          make -C desktop prepare-embedded-client TARGET_GOOS=windows TARGET_GOARCH=amd64
-          make -C desktop prepare-embedded-core TARGET_GOOS=windows TARGET_GOARCH=amd64
+          make -C desktop SHELL=bash prepare-package
+          make -C desktop SHELL=bash prepare-embedded-client TARGET_GOOS=windows TARGET_GOARCH=amd64
+          make -C desktop SHELL=bash prepare-embedded-core TARGET_GOOS=windows TARGET_GOARCH=amd64
 
       - name: Build Windows debug app
         working-directory: desktop
-        run: wails build -clean -debug -platform windows/amd64
+        run: |
+          wails build -clean -debug -platform windows/amd64
+          make SHELL=bash package-assets
 
       - name: Verify runnable app
         run: |
@@ -80,12 +133,13 @@ jobs:
       - name: Upload runnable app
         uses: actions/upload-artifact@v6
         with:
-          name: WhiteDNS-Desktop-WhiteDns-debug-windows-x64
+          name: WhiteDNS-Desktop-CottenMax-beta-debug-windows-x64
           path: desktop/build/bin/*
           if-no-files-found: error
           retention-days: 14
 
   linux-preview:
+    if: github.event_name == 'push' || inputs.build_linux
     name: Linux ${{ matrix.label }} packages
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
@@ -106,10 +160,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+
+      - name: Setup Python for source receipt verification
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Verify published CottenDNS source receipt
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import hashlib, json, re
+          pin = json.loads(Path("vendor/cottendns.json").read_text())
+          if not re.fullmatch(r"[0-9a-f]{40}", pin["commit"]):
+              raise SystemExit("CottenDNS must reference a published full commit, not a local snapshot")
+          receipt = json.loads(Path(pin["source_snapshot"]).read_text())
+          source = Path(pin["directory"])
+          tree = hashlib.sha256()
+          for item in receipt["files"]:
+              relative = item["path"]
+              path = source / relative
+              if not path.resolve().is_relative_to(source.resolve()):
+                  raise SystemExit(f"Invalid source receipt path: {relative}")
+              digest = hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
+              if digest != item["sha256_lf"]:
+                  raise SystemExit(f"Stale CottenDNS source input: {relative}")
+              tree.update(f"{relative} {digest}\n".encode())
+          if tree.hexdigest() != receipt["source_tree_sha256_lf"]:
+              raise SystemExit("CottenDNS source receipt tree hash does not match")
+          print(f"Verified {len(receipt['files'])} production inputs for {pin['commit']}")
+          PY
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.x"
+          go-version: "1.26.5"
           cache: true
           cache-dependency-path: |
             desktop/go.sum
@@ -141,7 +226,7 @@ jobs:
       - name: Build Linux packages
         run: |
           make -C desktop package-linux-distros \
-            VERSION="1.1.4-WhiteDns-debug" \
+            VERSION="$DEBUG_VERSION" \
             LINUX_PLATFORMS="linux/${{ matrix.arch }}" \
             LINUX_CLIENT_ARCH="${{ matrix.arch }}" \
             LINUX_GO_TAGS="webkit2_41" \
@@ -174,7 +259,7 @@ jobs:
         if: matrix.arch == 'amd64'
         uses: actions/upload-artifact@v6
         with:
-          name: WhiteDNS-Desktop-WhiteDns-debug-archlinux-x64
+          name: WhiteDNS-Desktop-CottenMax-beta-debug-archlinux-x64
           path: desktop/build/releases/debug/whitedns-desktop-*.pkg.tar.zst
           if-no-files-found: error
           retention-days: 14
@@ -182,7 +267,7 @@ jobs:
       - name: Upload runnable Linux app
         uses: actions/upload-artifact@v6
         with:
-          name: WhiteDNS-Desktop-WhiteDns-debug-linux-${{ matrix.label }}
+          name: WhiteDNS-Desktop-CottenMax-beta-debug-linux-${{ matrix.label }}
           path: desktop/build/bin/*
           if-no-files-found: error
           retention-days: 14
@@ -190,7 +275,7 @@ jobs:
       - name: Upload Linux installers
         uses: actions/upload-artifact@v6
         with:
-          name: WhiteDNS-Desktop-WhiteDns-debug-linux-${{ matrix.label }}-installers
+          name: WhiteDNS-Desktop-CottenMax-beta-debug-linux-${{ matrix.label }}-installers
           path: |
             desktop/build/releases/debug/WhiteDNS-Desktop-*
           if-no-files-found: error

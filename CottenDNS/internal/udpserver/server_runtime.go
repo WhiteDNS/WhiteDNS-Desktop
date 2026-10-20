@@ -251,6 +251,11 @@ func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, queues ingress
 			return err
 		}
 
+		if s.cottenMax != nil && s.cottenMax.DispatchUDP(buffer[:n], conn, addr) {
+			s.packetPool.Put(buffer)
+			continue
+		}
+
 		// Reject ordinary DNS noise, malformed datagrams and frames that cannot
 		// be decoded with the configured shared key before they can occupy the
 		// worker queue. This ordering is essential on public UDP/53: queueing a

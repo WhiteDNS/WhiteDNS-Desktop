@@ -1,6 +1,7 @@
 package client
 
 import (
+	"cottendns-go/internal/config"
 	"net"
 	"strconv"
 )
@@ -17,6 +18,7 @@ const (
 // StatusSnapshot is a race-safe, presentation-neutral view of the live client.
 // It lets terminal and desktop frontends render status without scraping logs.
 type StatusSnapshot struct {
+	TunnelMode          string
 	Phase               string
 	Transport           string
 	FamilyMode          string
@@ -57,6 +59,7 @@ func (c *Client) StatusSnapshot() StatusSnapshot {
 		return StatusSnapshot{Phase: "stopped"}
 	}
 	s := StatusSnapshot{
+		TunnelMode:          c.cfg.TunnelMode,
 		Phase:               clientPhaseName(c.runtimePhase.Load()),
 		Transport:           c.activeTransport().String(),
 		FamilyMode:          c.cfg.ResolverIPMode,
@@ -109,6 +112,33 @@ func (c *Client) StatusSnapshot() StatusSnapshot {
 	}
 	if c.rxChannel != nil {
 		s.RXQueue = len(c.rxChannel)
+	}
+	if c.cfg.TunnelMode == config.TunnelCottenMax {
+		s.Transport = "cottenmax/" + c.cfg.ResolverTransport
+		s.ActiveStreams = int(c.cottenMaxStreams.Load())
+		s.ActiveResolvers, s.ActiveIPv4, s.ActiveIPv6 = 0, 0, 0
+		if engine := c.cottenMax.Load(); engine != nil {
+			if s.Phase != "stopped" && !engine.Established() {
+				s.Phase = "connecting"
+			}
+			var loss float64
+			for _, p := range engine.PathStats() {
+				if !p.Verified || p.Suspended {
+					continue
+				}
+				s.ActiveResolvers++
+				loss += p.Loss
+				host, _, _ := net.SplitHostPort(p.Resolver)
+				if resolverAddressIsIPv6(host) {
+					s.ActiveIPv6++
+				} else {
+					s.ActiveIPv4++
+				}
+			}
+			if s.ActiveResolvers > 0 {
+				s.LossPerMille = uint64(1000 * loss / float64(s.ActiveResolvers))
+			}
+		}
 	}
 	return s
 }

@@ -19,6 +19,11 @@ import (
 )
 
 func (s *Server) handlePacket(packet []byte) []byte {
+	if s.cottenMax != nil {
+		if response, matched := s.cottenMax.Exchange(packet); matched {
+			return response
+		}
+	}
 	parsed, err := DnsParser.ParseDNSRequestLite(packet)
 	if err != nil {
 		if errors.Is(err, DnsParser.ErrNotDNSRequest) || errors.Is(err, DnsParser.ErrPacketTooShort) {

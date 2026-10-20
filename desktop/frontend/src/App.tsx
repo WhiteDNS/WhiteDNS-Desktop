@@ -288,6 +288,14 @@ function importTypeLabel(value?: string): string {
   return normalized === "stormdns" ? "StormDNS" : normalized === "cottendns" ? "CottenDNS" : "MasterDNS";
 }
 
+function settingsEngineLabel(profile?: SettingsProfile, engine?: string): string {
+  const importType = normalizeImportType(engine || profile?.importType);
+  if (importType !== "cottendns") {
+    return importTypeLabel(importType);
+  }
+  return profile?.cottenDnsOptions?.TUNNEL_MODE === "cottenmax" ? "CottenDNS / Max beta" : "CottenDNS / Normal";
+}
+
 function normalizeConnectionProfile(profile: ConnectionProfile): ConnectionProfile {
   const domains = normalizeConnectionDomains(profile.domains?.length ? profile.domains : [profile.domain]);
   return {
@@ -1748,7 +1756,7 @@ function DashboardPage({
   const runtimeEndpoint = proxyEndpoint(runtime.listenIp, runtime.listenPort);
   const selectedSettingsEndpoint = selectedSettings ? proxyEndpoint(selectedSettings.listenIp, selectedSettings.listenPort) : "";
   const selectedEngineEndpoint = dnsEngineProxyEndpoint(selectedSettings, selectedConnection?.importType);
-  const selectedEngineName = importTypeLabel(selectedConnection?.importType || selectedSettings?.importType);
+  const selectedEngineName = settingsEngineLabel(selectedSettings, selectedConnection?.importType);
   const endpoint = runtimeEndpoint || selectedSettingsEndpoint || "-";
   const localProxyEndpoint = proxyEndpoint(runtime.localProxyIp, runtime.listenPort);
   const publicProxyEndpoint = localProxyEndpoint
@@ -2170,7 +2178,7 @@ function DashboardPage({
           <AlertTitle>Setup required</AlertTitle>
           <AlertDescription>
             {missingConnection
-              ? "Connection profile needs a MasterDNS/StormDNS domain and encryption key."
+              ? "Connection profile needs a tunnel domain and encryption key."
               : "Resolver profile needs at least one valid resolver."}
           </AlertDescription>
           <AlertAction>
@@ -3608,7 +3616,10 @@ function ConnectionsPage({
                 revealable
               />
               <SelectField
-                label="Encryption"
+                label={normalizeImportType(draft.importType) === "cottendns" ? "Normal-mode encryption" : "Encryption"}
+                description={normalizeImportType(draft.importType) === "cottendns"
+                  ? "CottenMax uses its own authenticated ChaCha20-Poly1305 transport. Both modes use the same encryption key above."
+                  : undefined}
                 value={draft.encryptionMethod}
                 onChange={(encryptionMethod) => setDraft({ ...draft, encryptionMethod: Number(encryptionMethod) })}
                 options={[
@@ -4392,7 +4403,7 @@ function SettingsPage({
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <Badge variant="secondary">{importTypeLabel(profile.importType)}</Badge>
+                        <Badge variant="secondary">{settingsEngineLabel(profile)}</Badge>
                       </td>
                       <td className="min-w-0 px-3 py-3">
                         <span className="block truncate font-mono text-xs">{proxyEndpoint(profile.listenIp, profile.listenPort)}</span>
@@ -4980,7 +4991,9 @@ function CottenDNSSettingsFields({
     schema.find((option) => option.key === "CONFIG_PRESET")?.defaultValue ?? "default",
   );
   const presetName = String(overrides.CONFIG_PRESET || defaultPresetName);
+  const modeOption = schema.find((option) => option.key === "TUNNEL_MODE");
   const groups = schema
+    .filter((option) => option.key !== "TUNNEL_MODE")
     .reduce<Array<{ name: string; options: CottenDNSOptionDefinition[] }>>((result, option) => {
       const existing = result.find((group) => group.name === option.group);
       if (existing) {
@@ -5074,6 +5087,39 @@ function CottenDNSSettingsFields({
           Clear overrides
         </Button>
       </div>
+
+      {modeOption && (
+        <section className="rounded-lg border bg-card p-4 sm:p-5" aria-labelledby="cottendns-mode-title">
+          <div className="grid gap-4 md:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <h3 id="cottendns-mode-title" className="text-sm font-semibold">Choose your CottenDNS mode</h3>
+                {effectiveValue(modeOption) === "cottenmax" && <Badge variant="secondary">Beta</Badge>}
+              </div>
+              <SelectField
+                label={modeOption.label}
+                value={String(effectiveValue(modeOption))}
+                options={(modeOption.choices || []).map((choice) => [String(choice.value), choice.label])}
+                onChange={(next) => updateOption(modeOption.key, next)}
+                description="Uses this settings profile and your existing connection profile."
+              />
+              {Object.prototype.hasOwnProperty.call(overrides, modeOption.key) && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => clearOption(modeOption.key)}>
+                  <RotateCcw />
+                  Use default mode
+                </Button>
+              )}
+            </div>
+            <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
+              <p className="font-medium text-foreground">One domain and key for Normal and Max</p>
+              <p>CottenMax is a beta transport inside CottenDNS. Your domain, encryption key and resolver profile stay the same.</p>
+              <p>Max requires the updated CottenDNS server. That server accepts both modes on the same listener; an older server supports Normal only.</p>
+              <p>Save settings, then reconnect to apply a mode change. If Max cannot connect, select Normal CottenDNS, save and reconnect. Switching is manual.</p>
+              <p>Start with the default Max options. HTTP/3, DoQ, discovery and query shaping are optional in the categories below.</p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="grid min-h-[31rem] overflow-hidden rounded-lg border bg-card lg:grid-cols-[16rem_minmax(0,1fr)]">
         <aside className="border-b bg-muted/20 p-3 lg:border-b-0 lg:border-r">

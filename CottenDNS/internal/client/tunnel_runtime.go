@@ -131,8 +131,9 @@ func (c *Client) exchangeUDPQueryWithConn(conn *net.UDPConn, packet []byte, time
 			// exchange (MTU probe, session init, recheck) before the real answer
 			// lands and drop a working resolver. Skip it as the live tunnel does
 			// (RESOLVER_IGNORE_INJECTED_NXDOMAIN); the deadline still catches a
-			// path that is really dead.
-			if n >= 4 && c.rcodeIsInjectedNoise(buffer[3]&0x0F) {
+			// path that is really dead. Opt-in (..._IN_PROBES): when the real
+			// answer never comes, each skip costs a full probe timeout.
+			if n >= 4 && c.cfg.ResolverIgnoreInjectedNXDOMAINInProbes && c.rcodeIsInjectedNoise(buffer[3]&0x0F) {
 				addr, _ := conn.RemoteAddr().(*net.UDPAddr)
 				c.noteInjectedResolverNoise(addr)
 				continue
@@ -160,8 +161,8 @@ func (c *Client) sendOneWayDNSQuery(resolver Connection, packet []byte, deadline
 		// Best-effort one-shot over the active stream transport (e.g. the
 		// session-close burst). DoH has no one-way form, so it reuses the normal
 		// request/response exchanger and discards the answer.
-		if c.activeTransport() == transportDoH {
-			transport, err := c.newDoHQueryTransport(resolver.ResolverLabel)
+		if c.activeTransport() == transportDoH || c.activeTransport() == transportDoH3 || c.activeTransport() == transportDoQ {
+			transport, err := c.newEncryptedQueryTransport(resolver.ResolverLabel)
 			if err != nil {
 				return err
 			}

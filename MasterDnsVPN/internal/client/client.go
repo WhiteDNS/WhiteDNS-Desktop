@@ -146,6 +146,7 @@ type Client struct {
 	pingManager *PingManager
 
 	// DNS Management
+	pendingDNS             dnsPendingQueries
 	localDNSCache          *dnsCache.Store
 	dnsResponses           *fragmentStore.Store[dnsFragmentKey]
 	localDNSCachePersist   bool

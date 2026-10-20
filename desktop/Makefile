@@ -10,6 +10,8 @@ RELEASE_ASSET_PREFIX ?= WhiteDNS-Desktop
 ROOT_DIR := ..
 MASTERDNS_DIR := $(ROOT_DIR)/MasterDnsVPN
 COTTENDNS_DIR := $(ROOT_DIR)/CottenDNS
+COTTENDNS_ATTRIBUTION_FILES := SOAR_LICENSE.txt QUIC_GO_LICENSE.txt QPACK_LICENSE.txt THIRD_PARTY_NOTICES.md
+PACKAGE_LICENSE_DIR ?=
 COTTENDNS_VERSION := $(shell sed -n 's/.*"commit": "\([^"]*\)".*/\1/p' "$(ROOT_DIR)/vendor/cottendns.json")
 WAILS ?= wails
 GO_BUILD_CACHE ?= $(CURDIR)/.cache/go-build
@@ -415,7 +417,8 @@ package-linux-fedora-rpm-docker: validate-version
 package-all: all
 
 stage-artifacts:
-	@if [ -z "$(PLATFORM)" ]; then \
+	@set -e; \
+	if [ -z "$(PLATFORM)" ]; then \
 		printf 'PLATFORM is required\n' >&2; \
 		exit 1; \
 	fi; \
@@ -423,6 +426,7 @@ stage-artifacts:
 		printf 'build/bin does not exist; run a package target first\n' >&2; \
 		exit 1; \
 	fi; \
+	$(MAKE) package-assets; \
 	rm -rf "build/releases/$(PLATFORM)"; \
 	mkdir -p "build/releases/$(PLATFORM)"; \
 	cp -R build/bin/. "build/releases/$(PLATFORM)/"; \
@@ -491,7 +495,24 @@ archive-artifacts: validate-version
 package-helper: dns-clients xray-core package-assets
 
 package-assets:
-	@printf 'Runtime helpers and proxy cores are packaged with the app\n'
+	@set -e; \
+	license_dir="$(PACKAGE_LICENSE_DIR)"; \
+	if [ -z "$$license_dir" ]; then \
+		license_dir="build/bin/licenses"; \
+		if [ -d "$(MACOS_APP_RESOURCES_DIR)" ]; then license_dir="$(MACOS_APP_RESOURCES_DIR)/licenses"; fi; \
+	fi; \
+	mkdir -p "$$license_dir"; \
+	cp "$(ROOT_DIR)/LICENSE.MD" "$$license_dir/WhiteDNS-LICENSE.MD"; \
+	for component in CottenDNS MasterDnsVPN StormDNS; do \
+		mkdir -p "$$license_dir/$$component"; \
+		cp "$(ROOT_DIR)/$$component/LICENSE" "$$license_dir/$$component/LICENSE"; \
+	done; \
+	for attribution in $(COTTENDNS_ATTRIBUTION_FILES); do \
+		cp "$(COTTENDNS_DIR)/$$attribution" "$$license_dir/CottenDNS/$$attribution"; \
+	done; \
+	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/NOTICE.cottendns.txt" "$$license_dir/CottenDNS/NOTICE.cottendns.txt"; \
+	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/data/THIRD_PARTY.md" "$$license_dir/CottenDNS/DISCOVERY_DATA_NOTICES.md"; \
+	printf 'Packaged component licenses in %s\n' "$$license_dir"
 
 test: test-backend test-frontend
 
@@ -559,6 +580,12 @@ cottendns-client-target:
 	test -n "$(COTTENDNS_VERSION)" || { echo "Missing CottenDNS source pin" >&2; exit 1; }; \
 	(cd "$(COTTENDNS_DIR)" && GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -buildvcs=false -trimpath -ldflags "$(HELPER_GO_LDFLAGS) -X cottendns-go/internal/version.BuildVersion=$(COTTENDNS_VERSION)" -o "../desktop/clients/$$helper" ./cmd/client); \
 	chmod 755 "clients/$$helper"; \
+	cp "$(COTTENDNS_DIR)/LICENSE" "clients/COTTENDNS_LICENSE.txt"; \
+	for attribution in $(COTTENDNS_ATTRIBUTION_FILES); do \
+		cp "$(COTTENDNS_DIR)/$$attribution" "clients/$$attribution"; \
+	done; \
+	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/NOTICE.cottendns.txt" "clients/NOTICE.cottendns.txt"; \
+	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/data/THIRD_PARTY.md" "clients/DISCOVERY_DATA_NOTICES.md"; \
 	printf 'Built %s\n' "clients/$$helper"
 
 xray-core:

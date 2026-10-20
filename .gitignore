@@ -95,3 +95,25 @@ desktop/cores/*
 **/*.tgz
 **/*.7z
 **/*.sha256
+
+# Local beta verification, README additions and scratch output
+# Existing tracked tests/READMEs stay in Git; local edits are excluded from the beta commit.
+**/*_test.go
+**/test/
+**/tests/
+**/testdata/
+**/src/androidTest/
+**/[Rr][Ee][Aa][Dd][Mm][Ee]*
+**/.cache/
+**/.bench/
+**/__pycache__/
+**/*.test
+**/*.test.exe
+**/*.prof
+**/*.trace
+**/coverage/
+**/*-sources.jar
+/CottenDNS/docs/COTTENMAX_EXPERIMENT.md
+/CottenDNS/docs/IRAN_DNS_RESILIENCE.md
+/desktop/COTTENMAX_BETA.md
+/desktop/COTTENMAX_INTEGRATION.md

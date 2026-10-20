@@ -166,6 +166,9 @@ func (c *Client) SessionReady() bool {
 	if c == nil {
 		return false
 	}
+	if engine := c.cottenMax.Load(); engine != nil {
+		return engine.Established()
+	}
 	return c.sessionReady
 }
 
@@ -537,7 +540,11 @@ func (c *Client) PrintBanner() {
 	c.ShortPrintBanner()
 	c.log.Infof("🚀 <green>Client Configuration Loaded</green>")
 
-	c.log.Infof("🚀 <cyan>Client Mode, Protocol:</cyan> <yellow>%s</yellow> <cyan>Encryption:</cyan> <yellow>%d</yellow>", c.cfg.ProtocolType, c.cfg.DataEncryptionMethod)
+	if c.cfg.TunnelMode == config.TunnelCottenMax {
+		c.log.Infof("Experimental CottenMax | Proxy: %s | Encryption: ephemeral X25519 / ChaCha20-Poly1305", c.cfg.ProtocolType)
+	} else {
+		c.log.Infof("🚀 <cyan>Client Mode, Protocol:</cyan> <yellow>%s</yellow> <cyan>Encryption:</cyan> <yellow>%d</yellow>", c.cfg.ProtocolType, c.cfg.DataEncryptionMethod)
+	}
 
 	strategyName := "Round-Robin"
 	switch c.cfg.ResolverBalancingStrategy {
@@ -588,6 +595,9 @@ func (c *Client) BuildConnectionMap() error {
 	if total <= 0 {
 		if len(domains) == 0 {
 			return fmt.Errorf("domains are missing in config")
+		}
+		if c.cfg.TunnelMode == config.TunnelCottenMax && c.cfg.ResolverDiscoveryEnabled {
+			return nil
 		}
 		return fmt.Errorf("no %s resolvers are available for RESOLVER_IP_MODE=%q", strings.ToUpper(c.cfg.ResolverIPMode), c.cfg.ResolverIPMode)
 	}

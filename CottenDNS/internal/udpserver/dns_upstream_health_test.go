@@ -31,16 +31,27 @@ func TestOrderedDNSUpstreamsDeprioritizesRepeatedFailures(t *testing.T) {
 }
 
 func TestQueryOneUpstreamRetriesTruncatedUDPOverTCP(t *testing.T) {
-	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	// TCP and UDP can have different reserved port ranges on Windows.
+	// Keep both listeners only after reserving the same available port.
+	var tcpListener net.Listener
+	var udpConn *net.UDPConn
+	var err error
+	for attempt := 0; attempt < 64; attempt++ {
+		tcpListener, err = net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := tcpListener.Addr().(*net.TCPAddr).Port
+		udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
+		if err == nil {
+			break
+		}
+		_ = tcpListener.Close()
+	}
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("reserve shared TCP/UDP test port: %v", err)
 	}
 	defer tcpListener.Close()
-	port := tcpListener.Addr().(*net.TCPAddr).Port
-	udpConn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
-	if err != nil {
-		t.Fatal(err)
-	}
 	defer udpConn.Close()
 
 	query := []byte{0x12, 0x34, 0x01, 0x00, 0, 1, 0, 0, 0, 0, 0, 0}

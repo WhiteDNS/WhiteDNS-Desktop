@@ -1284,6 +1284,7 @@ func main() {
 	defer listener.Close()
 	fmt.Println("WD_PROGRESS phase=starting percent=5")
 	fmt.Println("WD_RESOLVERS active=1.1.1.1 standby=- valid=1.1.1.1")
+	fmt.Println("WD_PROGRESS phase=connected percent=100")
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop

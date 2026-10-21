@@ -15,13 +15,14 @@ import (
 // (RFC 7766). Some networks intercept or block UDP/53 but leave TCP/53 alone (Russia since
 // 2026-08). The link redials with backoff for as long as the client runs.
 type tcpLink struct {
-	addr     string
-	out      chan []byte
-	up       atomic.Bool
-	done     chan struct{}
-	stopOnce sync.Once
-	connMu   sync.Mutex
-	conn     net.Conn // guarded by connMu; Close runs outside the client scheduler
+	addr          string
+	out           chan []byte
+	up            atomic.Bool
+	done          chan struct{}
+	stopOnce      sync.Once
+	connMu        sync.Mutex
+	conn          net.Conn // guarded by connMu; Close runs outside the client scheduler
+	authenticated atomic.Uint64
 }
 
 func (c *Client) startTCP(addr string) *tcpLink {
@@ -103,7 +104,7 @@ func (l *tcpLink) run(c *Client) {
 			backoff = min(2*backoff, 30*time.Second)
 			continue
 		}
-		backoff = time.Second
+		proof := l.authenticated.Load()
 		l.connMu.Lock()
 		l.conn = conn
 		l.up.Store(true)
@@ -118,6 +119,20 @@ func (l *tcpLink) run(c *Client) {
 		// Answers to anything still in flight on that connection are gone: fail those queries
 		// now so their data goes out on other paths, rather than waiting out their timeouts.
 		c.linkDown(l)
+		if l.authenticated.Load() != proof {
+			backoff = time.Second
+			continue // a proven path can recover immediately
+		}
+		// Accept-then-close and unauthenticated DNS replies must not create a
+		// tight reconnect loop that consumes client/server conntrack entries.
+		select {
+		case <-c.done:
+			return
+		case <-l.done:
+			return
+		case <-time.After(backoff):
+		}
+		backoff = min(2*backoff, 30*time.Second)
 	}
 }
 

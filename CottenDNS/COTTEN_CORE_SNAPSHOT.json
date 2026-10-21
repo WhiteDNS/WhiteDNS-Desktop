@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "4de16d2b2d4283f7b3320236f352e5c1cbf64674",
-  "base_commit": "4de16d2b2d4283f7b3320236f352e5c1cbf64674",
+  "commit": "0f1d6f0eb34eb4490520ea448bb1397df38b775a",
+  "base_commit": "0f1d6f0eb34eb4490520ea448bb1397df38b775a",
   "source": "Pinned production inputs; local tests, README additions and caches excluded.",
-  "source_tree_sha256_lf": "63eb25438c8116bca46d6ebc47a07ae36b5c7d578e7295d0e263b11ea21540b5",
+  "source_tree_sha256_lf": "cfbb4a195990fb4fa9264fe0664f08d2db59cd9c4ef52aacd3062a9ab7b8e707",
   "soar_base": "v0.2.3",
   "files": [
     {
@@ -40,7 +40,7 @@
     },
     {
       "path": "cmd/server/main.go",
-      "sha256_lf": "2da7902e00935f9f782bd0512ef53adaa9db1dba32194532a67e484ded46d177"
+      "sha256_lf": "df1298fcd278e540d66b2a3edf99b9c3bc6aa4b6661be921731b7607ffd0b1bb"
     },
     {
       "path": "cmd/server/versioninfo.json",
@@ -88,7 +88,7 @@
     },
     {
       "path": "internal/client/client.go",
-      "sha256_lf": "e8213f768b8381a2b53cf8a2a5423ece34650d6a2b99f2a5872cfdff0cae394d"
+      "sha256_lf": "46a354227ae2489617125599fa31a7595c5f76e27f4dbe6e4c23dbf46c3229ee"
     },
     {
       "path": "internal/client/client_utils.go",
@@ -108,7 +108,7 @@
     },
     {
       "path": "internal/client/cottenmax.go",
-      "sha256_lf": "396431784d4c06dbc0a0ab27901fdb1732cd82ecebf55040b76b69db6dd34148"
+      "sha256_lf": "4903ec4a8a6320e92f5bd63b0ff11cd29810b4d66ed55f0940ca893c8c745de8"
     },
     {
       "path": "internal/client/cottenmax_discovery.go",
@@ -124,7 +124,7 @@
     },
     {
       "path": "internal/client/cottenmax_scan.go",
-      "sha256_lf": "fb3481bf203003669b6057f2ce55c15b45336cd95b92910b1636549f48e63014"
+      "sha256_lf": "668dee78cd4e3f297d40b16bd68dba114ddc746e91020da7912cc5fba188abb8"
     },
     {
       "path": "internal/client/dispatcher.go",
@@ -188,7 +188,7 @@
     },
     {
       "path": "internal/client/mtu.go",
-      "sha256_lf": "47ea1d5a3e8d2dcc4f55bd210f8dc9e4fb93bbbb97ca2be3b48d2ee0c0572b83"
+      "sha256_lf": "55921b21f3cea980f9a69637a5debc3d7738e94605ec9f7505e9516813008d51"
     },
     {
       "path": "internal/client/mtu_cluster.go",
@@ -244,7 +244,7 @@
     },
     {
       "path": "internal/client/scan.go",
-      "sha256_lf": "62833310ce7991fbdf34fa9b6bd08bd5583423b8c0d2fa8ae3c39f56982ea5a0"
+      "sha256_lf": "b5bcc6fd9201af71be678f28d77d7dd6ee4a6d9fcf7775dc691b554d4b5960f1"
     },
     {
       "path": "internal/client/server_policy.go",
@@ -364,7 +364,7 @@
     },
     {
       "path": "internal/cottenmax/engine/client.go",
-      "sha256_lf": "5c7cd8bae804cc216e560e1696e96e74fab7bf96793aae0a0534a6d6b73c1b70"
+      "sha256_lf": "0510ca4df7e43bdfa50bbe8e046eab603d81510a64be84e42a788eaffe6a4455"
     },
     {
       "path": "internal/cottenmax/engine/cottenmax_qname_guard.go",
@@ -424,7 +424,7 @@
     },
     {
       "path": "internal/cottenmax/engine/NOTICE.cottendns.txt",
-      "sha256_lf": "0eafc8d5e64805248d36a0b3867475de83d39d3776dbf210f189199edbe9a688"
+      "sha256_lf": "2a66eba2ef36da2dc8c1e370611ac4ccc555472ef60905ca1ad936aa2903b939"
     },
     {
       "path": "internal/cottenmax/engine/ranges.go",
@@ -456,7 +456,7 @@
     },
     {
       "path": "internal/cottenmax/engine/tcp.go",
-      "sha256_lf": "3c7345b31f9b46f3fe9dd29f9298ff4b242f37544d654929b01438e22f6339af"
+      "sha256_lf": "11c584c39dc1ebd46506aa40504dcfc27fdcdace592003477ba6937452125cf0"
     },
     {
       "path": "internal/cottenmax/engine/varint.go",
@@ -656,7 +656,7 @@
     },
     {
       "path": "internal/udpserver/embedded.go",
-      "sha256_lf": "e8276a329cd4dfe4ff2a4a555c737c020fb3cedb7eabfc013c2066cb9d41eb86"
+      "sha256_lf": "3ec52ebeb217aac60582b0402a7d898b7ae516a4ce1a15b750f27292c525c91c"
     },
     {
       "path": "internal/udpserver/invalid_cookie_tracker.go",
@@ -756,7 +756,7 @@
     },
     {
       "path": "internal/udpserver/socks5_upstream.go",
-      "sha256_lf": "fe9e1ce0cdafe8a87914d9b042dbe92c2af432606734ea218cb4956cf6f2aa3b"
+      "sha256_lf": "513357d092522f441ff7cb64a60aa02542165a11fe8c634b01f1d6cda0417ce6"
     },
     {
       "path": "internal/udpserver/stream_server.go",

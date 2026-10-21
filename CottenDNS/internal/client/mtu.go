@@ -655,6 +655,7 @@ func (c *Client) runConnectionMTUTest(ctx context.Context, conn *Connection, ser
 	if conn == nil {
 		return
 	}
+	c.emitScanTesting(conn.ResolverLabel, c.cfg.ResolverTransport)
 	// Registered before the recover below so it runs after it: every exit path,
 	// panic included, has updated the counters by the time progress is reported.
 	defer c.logMTUProgress(counters, total)

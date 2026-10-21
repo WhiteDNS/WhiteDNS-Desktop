@@ -489,6 +489,8 @@ export interface ScannerState {
   invalid: number;
   duplicates: number;
   validResolvers: string[];
+  testingPaths?: string[];
+  workingPaths?: string[];
   error: string;
   startedAt: number;
   finishedAt: number;

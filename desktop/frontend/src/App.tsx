@@ -5508,6 +5508,7 @@ function ScannerPage({
                   { label: "Completed", value: scanner.completed },
                   { label: "Total", value: scanner.total },
                   { label: "Valid", value: scanner.valid },
+                  { label: "Testing paths", value: scanner.testingPaths?.length ?? 0 },
                   { label: "Rejected", value: scanner.rejected },
                   { label: "Parallel", value: scanner.scanParallel || scanParallel },
                 ]}
@@ -5519,6 +5520,8 @@ function ScannerPage({
                   <AlertDescription>{scanner.error}</AlertDescription>
                 </Alert>
               )}
+              {!!scanner.testingPaths?.length && <div className="rounded-lg border p-3 text-xs"><p className="mb-2 font-medium">Testing DNS paths</p><p className="break-words font-mono">{scanner.testingPaths.slice(0, 12).join(" · ")}{scanner.testingPaths.length > 12 ? ` · +${scanner.testingPaths.length - 12} more` : ""}</p></div>}
+              {!!scanner.workingPaths?.length && <div className="rounded-lg border p-3 text-xs"><p className="mb-2 font-medium">Working DNS paths ({scanner.workingPaths.length})</p><p className="break-words font-mono">{scanner.workingPaths.slice(0, 12).join(" · ")}{scanner.workingPaths.length > 12 ? ` · +${scanner.workingPaths.length - 12} more` : ""}</p></div>}
               {scanner.mode === "connection-upgrade" && scanner.restartAvailable && !scanner.autoRestart && (
                 <div className="flex flex-wrap gap-2 rounded-lg border bg-background/70 p-3">
                   <Button type="button" size="sm" onClick={() => applyUpgrade("save")}>

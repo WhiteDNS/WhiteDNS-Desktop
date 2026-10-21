@@ -37,6 +37,8 @@ func main() {
 	configPath := flag.String("config", "server_config.toml", "Path to server configuration file")
 	logPath := flag.String("log", "", "Path to log file (optional)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
+	capabilitiesFlag := flag.Bool("capabilities", false, "Print supported tunnel modes and DNS transports, then exit")
+	checkConfigFlag := flag.Bool("check-config", false, "Validate configuration without opening listeners or generating keys")
 	metricsAddress := flag.String("metrics-address", "", "Optional HTTP health/Prometheus listen address (for example 127.0.0.1:9090)")
 	configFlags, err := config.NewServerConfigFlagBinder(flag.CommandLine)
 	if err != nil {
@@ -49,14 +51,28 @@ func main() {
 		fmt.Printf("CottenDns Server Version: %s\n", version.GetVersion())
 		return
 	}
+	if *capabilitiesFlag {
+		fmt.Println("cottendns-normal cottenmax dns-udp dns-tcp shared-key")
+		return
+	}
 
 	resolvedConfigPath := runtimepath.Resolve(*configPath)
 
 	cfg, err := config.LoadServerConfigWithOverrides(resolvedConfigPath, configFlags.Overrides())
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Server startup failed: %v\n", err)
-		waitForExitInput()
+		if !*checkConfigFlag {
+			waitForExitInput()
+		}
 		os.Exit(1)
+	}
+	if *checkConfigFlag {
+		if len(cfg.Domain) == 0 {
+			fmt.Fprintln(os.Stderr, "Server configuration has no allowed domains")
+			os.Exit(1)
+		}
+		fmt.Println("Server configuration is valid")
+		return
 	}
 
 	var log *logger.Logger

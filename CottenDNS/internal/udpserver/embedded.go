@@ -22,6 +22,9 @@ type EmbeddedConfig struct {
 	DialContext func(context.Context, string, string) (net.Conn, error)
 	ExchangeDNS func(context.Context, []byte) ([]byte, error)
 	Allowed     func() bool
+	// Zero preserves the existing per-account defaults. The embedding panel
+	// must select explicit limits for shared profiles; these are not user counts.
+	MaxActiveSessions, MaxStreamsPerSession int
 }
 
 type Embedded struct {
@@ -42,6 +45,9 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 	if err != nil {
 		return nil, err
 	}
+	if in.MaxActiveSessions < 0 || in.MaxActiveSessions > 4096 || in.MaxStreamsPerSession < 0 || in.MaxStreamsPerSession > 4096 {
+		return nil, errors.New("embedded session and stream limits must be 0 (existing default) or 1..4096")
+	}
 	cfg := config.DefaultServerConfig()
 	cfg.Domain = []string{in.Domain}
 	if len(in.Domains) > 0 {
@@ -60,6 +66,12 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 	cfg.TCPListenerEnabled, cfg.UDPIPv6Enabled, cfg.TCPIPv6Enabled = false, false, false
 	cfg.MinVPNLabelLength = 1
 	cfg.MaxActiveSessions, cfg.MaxStreamsPerSession = 8, 128
+	if in.MaxActiveSessions > 0 {
+		cfg.MaxActiveSessions = in.MaxActiveSessions
+	}
+	if in.MaxStreamsPerSession > 0 {
+		cfg.MaxStreamsPerSession = in.MaxStreamsPerSession
+	}
 	cfg.DeferredSessionWorkers, cfg.DeferredSessionQueueLimit = 2, 64
 	cfg.SessionOrphanQueueInitialCap, cfg.StreamQueueInitialCapacity = 8, 16
 	cfg.DNSFragmentStoreCapacity, cfg.SOCKS5FragmentStoreCapacity = 32, 32
@@ -71,16 +83,28 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 	cfg.SessionCleanupIntervalSecs = 5
 	ctx, cancel := context.WithCancel(parent)
 	s := New(cfg, logger.New("Cotten account", "ERROR"), codec)
-	s.embeddedDialContext = func(_ context.Context, network, address string) (net.Conn, error) {
+	s.embeddedDialContext = func(caller context.Context, network, address string) (net.Conn, error) {
 		if ctx.Err() != nil || !in.Allowed() {
 			return nil, net.ErrClosed
 		}
-		dialCtx, stop := context.WithTimeout(ctx, 15*time.Second)
+		if caller == nil {
+			caller = ctx
+		}
+		dialCtx, stop := context.WithTimeout(caller, 15*time.Second)
 		defer stop()
-		return in.DialContext(dialCtx, network, address)
-	}
-	s.dialStreamUpstreamFn = func(network, address string, _ time.Duration) (net.Conn, error) {
-		return s.embeddedDialContext(ctx, network, address)
+		stopAccount := context.AfterFunc(ctx, stop)
+		defer stopAccount()
+		if err := dialCtx.Err(); err != nil {
+			return nil, err
+		}
+		conn, err := in.DialContext(dialCtx, network, address)
+		if cancelled := dialCtx.Err(); cancelled != nil {
+			if conn != nil {
+				_ = conn.Close()
+			}
+			return nil, cancelled
+		}
+		return conn, err
 	}
 	s.embeddedDNSExchange = func(raw []byte) ([]byte, error) {
 		if ctx.Err() != nil || !in.Allowed() {

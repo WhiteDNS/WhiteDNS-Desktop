@@ -54,6 +54,7 @@ func (c *Client) runCottenMaxResolverScan(ctx context.Context) (ResolverScanSumm
 		go func() {
 			defer wg.Done()
 			for job := range jobs {
+				c.emitScanTesting(job.resolver, job.transport)
 				result := c.probeCottenMaxScanPath(ctx, job)
 				select {
 				case results <- result:

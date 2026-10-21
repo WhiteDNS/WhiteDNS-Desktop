@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -127,6 +127,12 @@ func (s *Server) dialTCPTarget(address string) (net.Conn, error) {
 }
 
 func (s *Server) dialTCPTargetContext(ctx context.Context, address string) (net.Conn, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if s.embeddedDialContext != nil {
+		return s.embeddedDialContext(ctx, "tcp", address)
+	}
 	dialFn := s.dialStreamUpstreamFn
 	timeout := s.socksConnectTimeout
 	if timeout <= 0 {

@@ -17,7 +17,7 @@ CottenDNS modifications (updated 2026-10-21):
   both paths carry live streams with independent authentication, sizing,
   congestion and recovery state. Short startup authentication probes do not
   become idle beacons. Statistics distinguish observed wire sizes from limits.
-  Failed QNAME-size discovery is retried with exponential backoff (10s to 30m)
+  Failed QNAME-size discovery is retried with exponential backoff (10s to 1m)
   on existing traffic so a replacement forwarder can regain capacity; short
   queries remain the fallback and only an authenticated padded probe promotes it.
   Authenticated late answers/hellos refresh the path RTT after latency changes
@@ -42,6 +42,8 @@ CottenDNS modifications (updated 2026-10-21):
 - `roundtripper.go`: `DialConfirmed` exposes the existing OPENED wait directly
   for local SOCKS/HTTP proxies.
 - `tcp.go`: cancel an in-progress TCP/TLS resolver dial when its client/path closes.
+  Back off accept-then-close loops until the connection proves authenticated
+  tunnel progress; a previously proven connection can reconnect immediately.
   Bound concurrent resolver TCP/TLS handshakes independently of UDP startup.
   Replace half-open sockets after repeated actual query timeouts and sustained
   lack of authenticated progress. Close the captured socket outside the client

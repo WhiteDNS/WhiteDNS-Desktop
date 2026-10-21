@@ -855,7 +855,29 @@ func (a *App) applyDNSScannerEvent(runID int64, event storm.ScannerEvent) {
 		a.scannerState.Valid = 0
 		a.scannerState.Rejected = 0
 		a.scannerState.ValidResolvers = []string{}
+		a.scannerState.TestingPaths = []string{}
+		a.scannerState.WorkingPaths = []string{}
 		a.scannerState.Error = ""
+	case "testing", "path":
+		if event.Resolver != "" {
+			label := event.Resolver
+			if event.Transport != "" {
+				label += " (" + strings.ToUpper(event.Transport) + ")"
+			}
+			if event.Event == "testing" {
+				a.scannerState.TestingPaths = append(a.scannerState.TestingPaths, label)
+			} else {
+				for i, item := range a.scannerState.TestingPaths {
+					if item == label {
+						a.scannerState.TestingPaths = append(a.scannerState.TestingPaths[:i], a.scannerState.TestingPaths[i+1:]...)
+						break
+					}
+				}
+				if event.Usable && !containsString(a.scannerState.WorkingPaths, label) {
+					a.scannerState.WorkingPaths = append(a.scannerState.WorkingPaths, label)
+				}
+			}
+		}
 	case "valid":
 		if event.Resolver != "" && !containsString(a.scannerState.ValidResolvers, event.Resolver) {
 			if err := a.appendScannerValidResolverLocked(event.Resolver); err != nil {
@@ -882,6 +904,7 @@ func (a *App) applyDNSScannerEvent(runID int64, event storm.ScannerEvent) {
 	case "rejected":
 		a.scannerState.Message = "DNS resolver rejected"
 	case "complete":
+		a.scannerState.TestingPaths = []string{}
 		if event.Total > 0 {
 			a.scannerState.Total = event.Total
 			a.scannerState.Completed = event.Total
@@ -916,6 +939,7 @@ func (a *App) finishDNSScannerRun(runID int64, status string, message string) {
 	}
 	_ = a.refreshScannerValidResolversLocked()
 	a.scannerState.Status = status
+	a.scannerState.TestingPaths = []string{}
 	if status == model.ScannerFailed {
 		a.scannerState.Status = status
 		a.scannerState.Error = message
@@ -1719,5 +1743,10 @@ func newDNSScannerRuntimeDir() (string, error) {
 
 func cloneScannerState(state model.ScannerState) model.ScannerState {
 	state.ValidResolvers = append([]string(nil), state.ValidResolvers...)
+	state.TestingPaths = append([]string(nil), state.TestingPaths...)
+	state.WorkingPaths = append([]string(nil), state.WorkingPaths...)
+	if state.Status != model.ScannerRunning {
+		state.TestingPaths = nil
+	}
 	return state
 }

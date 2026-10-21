@@ -55,6 +55,12 @@ func (c *Client) runCottenMax(ctx context.Context) error {
 			}
 			return
 		}
+		if err := engine.Probe(warmCtx, 32); err != nil {
+			if ctx.Err() == nil {
+				c.log.Warnf("CottenMax authenticated, but tunnel transfer verification failed; check the matching server build and resolver path (%v)", err)
+			}
+			return
+		}
 		if ctx.Err() == nil {
 			c.runtimePhase.Store(clientPhaseConnected)
 			c.logConnectionProgress("connected", 100, "mode", "cottenmax")
@@ -122,7 +128,9 @@ func (c *Client) serveCottenMaxStream(ctx context.Context, local net.Conn, targe
 		return
 	}
 	defer remote.Close()
-	c.runtimePhase.Store(clientPhaseConnected)
+	if c.runtimePhase.Swap(clientPhaseConnected) != clientPhaseConnected {
+		c.logConnectionProgress("connected", 100, "mode", "cottenmax")
+	}
 	if !c.cottenMaxReply(replyConn, version, true) {
 		return
 	}

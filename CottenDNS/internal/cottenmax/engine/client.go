@@ -991,7 +991,10 @@ func (c *Client) failLocked(q *pendingQuery, now time.Time, refused bool) {
 }
 
 func (p *path) backoffNameProbe(now time.Time) {
-	delay := min(10*time.Second*time.Duration(1<<(2*min(p.nameBackoffs, 4))), 30*time.Minute)
+	// Keep recovery probes sparse, but do not strand a working path at the
+	// minimum size for minutes after transient loss. Probes still require
+	// authenticated successes and only run when the session has work.
+	delay := min(10*time.Second*time.Duration(1<<min(p.nameBackoffs, 3)), time.Minute)
 	p.nameRetryAt = now.Add(delay)
 	p.nameBackoffs = min(p.nameBackoffs+1, 4)
 	p.probeFails = 2
@@ -1392,6 +1395,9 @@ func (c *Client) onHelloLocked(q *pendingQuery, reply []byte, now time.Time) {
 }
 
 func (c *Client) observeWireSizeLocked(p *path, q *pendingQuery, answerBytes int) {
+	if p.tcp != nil {
+		p.tcp.authenticated.Add(1)
+	}
 	// question contains the wire name and four QTYPE/QCLASS bytes. A wire
 	// name is two bytes longer than its presentation form without trailing dot.
 	p.observedNameLen = max(p.observedNameLen, len(q.question)-6)

@@ -712,6 +712,7 @@ func (c *Client) Run(ctx context.Context) error {
 					return err
 				}
 				c.runtimePhase.Store(clientPhaseConnected)
+				c.logConnectionProgress("connected", 100, "mode", "normal")
 
 				c.InitVirtualStream0()
 

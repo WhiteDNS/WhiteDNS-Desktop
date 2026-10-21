@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "f5ba185ec140eb35fc134836c0cce383c0b28a50",
-  "base_commit": "f5ba185ec140eb35fc134836c0cce383c0b28a50",
+  "commit": "4de16d2b2d4283f7b3320236f352e5c1cbf64674",
+  "base_commit": "4de16d2b2d4283f7b3320236f352e5c1cbf64674",
   "source": "Pinned production inputs; local tests, README additions and caches excluded.",
-  "source_tree_sha256_lf": "cd1c7b8b9317a4e2ea8ee9a28e0a2631bbc5d902db9f67bbbcc3b752430a8ebb",
+  "source_tree_sha256_lf": "63eb25438c8116bca46d6ebc47a07ae36b5c7d578e7295d0e263b11ea21540b5",
   "soar_base": "v0.2.3",
   "files": [
     {
@@ -108,7 +108,7 @@
     },
     {
       "path": "internal/client/cottenmax.go",
-      "sha256_lf": "8fedfbb4d2a54f02e1610c669cfc93b8f24eae3b884473de9d14fe8a4125bcf6"
+      "sha256_lf": "396431784d4c06dbc0a0ab27901fdb1732cd82ecebf55040b76b69db6dd34148"
     },
     {
       "path": "internal/client/cottenmax_discovery.go",
@@ -344,7 +344,7 @@
     },
     {
       "path": "internal/config/server.go",
-      "sha256_lf": "942ffd87b09c537a4f935bc838eabb98ad08b82591a745a005785ed6307b6b91"
+      "sha256_lf": "948b663acd0f88be2f2ccadce74078331550197b9428fda80f2640045b3adb88"
     },
     {
       "path": "internal/config/tunnel_mode.go",
@@ -352,7 +352,7 @@
     },
     {
       "path": "internal/cottenmax/client.go",
-      "sha256_lf": "e94a8c3cf3dfc40a4237ab60f75653d2d3aad74671712f628605e46eb55f3d91"
+      "sha256_lf": "612bf9b5536208cbc47c93f012dfcba8c966526caaf94117e6b6773bbe315173"
     },
     {
       "path": "internal/cottenmax/dns.go",
@@ -364,7 +364,7 @@
     },
     {
       "path": "internal/cottenmax/engine/client.go",
-      "sha256_lf": "1404e75509de8754cff930df4e8c66e29a9f22271713cb3b228603d34661ced6"
+      "sha256_lf": "5c7cd8bae804cc216e560e1696e96e74fab7bf96793aae0a0534a6d6b73c1b70"
     },
     {
       "path": "internal/cottenmax/engine/cottenmax_qname_guard.go",
@@ -424,7 +424,7 @@
     },
     {
       "path": "internal/cottenmax/engine/NOTICE.cottendns.txt",
-      "sha256_lf": "84e6c77e3592d0843081bf5b076537a9d64096960afe76fe7705bd6dbbcbcd58"
+      "sha256_lf": "0eafc8d5e64805248d36a0b3867475de83d39d3776dbf210f189199edbe9a688"
     },
     {
       "path": "internal/cottenmax/engine/ranges.go",
@@ -436,11 +436,11 @@
     },
     {
       "path": "internal/cottenmax/engine/server.go",
-      "sha256_lf": "1eae091406601a2fe504de0d779237da51b0f21fe6425bc603d8f3e99d72067d"
+      "sha256_lf": "6e30bf950803706be63289130756cf7c8480ae481871c098a6e14e01b39b5e3a"
     },
     {
       "path": "internal/cottenmax/engine/session.go",
-      "sha256_lf": "cdd0be582aacb3b7f42735a9cc467878e9a6f55b52ada8b902ba19afba76520b"
+      "sha256_lf": "9b642961d80898b750bf5fa8bf3ba746e360604c01d2ed675eb9dcc3ba1f66dc"
     },
     {
       "path": "internal/cottenmax/engine/SPEC.md",
@@ -624,7 +624,7 @@
     },
     {
       "path": "internal/tunnelinfo/info.go",
-      "sha256_lf": "8bf848e735899037f8d20eadd468e76fcfc794e11fee33f8be3c4375fc7ab084"
+      "sha256_lf": "1c8ed54bbfce2a4d2da3f6904edcae62c7f79297a858e4c3be74072478a7e775"
     },
     {
       "path": "internal/udpframe/frame.go",
@@ -632,7 +632,7 @@
     },
     {
       "path": "internal/udpserver/cottenmax.go",
-      "sha256_lf": "9490cecc8c9a17afff3bdf95f5672f945ddb1eb2dfdaa6e52cabdcd8edac4f0b"
+      "sha256_lf": "829b0ba2732e658d8f8ef7fd804cca039c1a3a45ed969f9f4fad32708793ddd9"
     },
     {
       "path": "internal/udpserver/cottenmax_dns.go",

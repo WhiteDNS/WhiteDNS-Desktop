@@ -44,7 +44,7 @@ type ServerConfig struct {
 	MaxBytesPerPrefix int
 	StreamWindow      uint64
 	SendBuffer        int
-	// MaxStreams caps streams per session. Default 128; at most 256, so stream control frames
+	// MaxStreams caps streams per session. Default 128; at most MaxStreamsLimit, so control frames
 	// fit the session's queue.
 	MaxStreams int
 	Logger     *slog.Logger
@@ -92,7 +92,7 @@ func (c *ServerConfig) setDefaults() {
 	if c.MaxStreams <= 0 {
 		c.MaxStreams = 128
 	}
-	c.MaxStreams = min(c.MaxStreams, maxStreamsCap)
+	c.MaxStreams = min(c.MaxStreams, MaxStreamsLimit)
 	if c.Logger == nil {
 		c.Logger = slog.New(slog.DiscardHandler)
 	}

@@ -65,6 +65,13 @@ have their own connection setup. The adapter's multi-domain failover uses
 independent authenticated sessions and does not migrate existing streams. See
 docs/COTTENMAX_OPTIONS.md in the source checkout.
 
+Capacity extension, 2026-10-21: client/server stream ceilings can reach 512
+when explicitly enabled by the CottenDNS server. The bounded control queue is
+2048 entries, retaining at least one quarter of its capacity as headroom for
+the three control frames per admitted stream. Existing server admission
+defaults remain 256 and all flow-control, aggregate stream and byte limits
+remain in force. The wire encoding and cryptography are unchanged.
+
 Production code imports this copy. The upstream module in go.mod is retained
 only for independent interoperability tests and the tagged performance
 comparison. Do not replace that comparator with this package.

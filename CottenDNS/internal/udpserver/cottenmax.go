@@ -57,13 +57,14 @@ func (s *Server) startCottenMax(ctx context.Context) error {
 	}
 	s.cottenMax, err = cottenmax.NewServer(ctx, cottenmax.ServerConfig{
 		Domains: domains, Key: key, Secret: s.cottenMaxSecret,
-		MaxSessions: s.cfg.MaxActiveSessions, MaxStreams: min(s.cfg.MaxStreamsPerSession, 256),
+		MaxSessions: s.cfg.MaxActiveSessions, MaxStreams: min(s.cfg.MaxStreamsPerSession, s.cfg.CottenMaxMaxStreams, cottenmax.MaxStreamsLimit),
 		Dial: s.dialCottenMaxTarget,
 	})
 	if err != nil {
 		return err
 	}
 	if s.log != nil {
+		s.log.Infof("CottenMax capacity: sessions=%d across %d domains, streams/session=%d", s.cfg.MaxActiveSessions, len(domains), min(s.cfg.MaxStreamsPerSession, s.cfg.CottenMaxMaxStreams, cottenmax.MaxStreamsLimit))
 		if strings.TrimSpace(s.cfg.CottenMaxKeyFile) != "" {
 			s.log.Warnf("CottenMax compatibility identity; optional server public key = %q", pub)
 		} else {

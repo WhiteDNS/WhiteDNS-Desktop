@@ -105,7 +105,7 @@ func (c *Client) serveCottenMaxStream(ctx context.Context, local net.Conn, targe
 	}
 	var remote net.Conn
 	var err error
-	if active > int64(min(limit, 256)) {
+	if active > int64(min(limit, cottenmax.MaxStreamsLimit)) {
 		err = fmt.Errorf("cottenmax: stream limit reached")
 	} else {
 		dialCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -256,7 +256,7 @@ func (c *Client) newCottenMaxEngine() (*cottenmax.Client, error) {
 		ListenPacket:                 listenPacket,
 		DiscoveryForDomain:           func(domain string) cottenmax.Discovery { return c.cottenMaxDiscoveryForDomain(domain, resolvers) },
 		Hold:                         time.Duration(c.cfg.CottenMaxHoldMilliseconds) * time.Millisecond,
-		MaxStreams:                   min(c.cfg.MaxActiveStreams, 256),
+		MaxStreams:                   min(c.cfg.MaxActiveStreams, cottenmax.MaxStreamsLimit),
 		DialTCP:                      dialTCP,
 		Discovery:                    c.cottenMaxDiscovery(resolvers),
 	})

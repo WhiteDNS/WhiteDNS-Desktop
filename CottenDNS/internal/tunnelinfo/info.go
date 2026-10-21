@@ -54,6 +54,7 @@ func Server(cfg config.ServerConfig) []string {
 		"Modes: Normal CottenDNS + CottenMax beta; requests select the mode automatically on the same DNS listener.",
 		"Clients choose TUNNEL_MODE=legacy or cottenmax. The server TUNNEL_MODE setting does not disable normal clients.",
 		"Beta setup: update server and clients; keep the existing delegated DOMAIN and encrypt_key.txt credential. No additional Max service or delegation is required.",
+		fmt.Sprintf("Capacity ceilings: %d sessions; normal %d streams/session; Max %d streams/session. Session counts are not guaranteed user capacity.", cfg.MaxActiveSessions, cfg.MaxStreamsPerSession, min(cfg.MaxStreamsPerSession, cfg.CottenMaxMaxStreams, 512)),
 	}
 	if strings.TrimSpace(cfg.CottenMaxKeyFile) != "" {
 		lines = append(lines, "Compatibility Max identity override is configured. Keep matching client public-key pins until a coordinated migration to the existing shared credential.")

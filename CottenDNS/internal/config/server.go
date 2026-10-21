@@ -26,15 +26,16 @@ import (
 )
 
 type ServerConfig struct {
-	TunnelMode       string `toml:"TUNNEL_MODE"`
-	CottenMaxKeyFile string `toml:"COTTENMAX_KEY_FILE"`
-	ConfigDir        string `toml:"-"`
-	ConfigPath       string `toml:"-"`
-	ConfigPreset     string `toml:"CONFIG_PRESET"`
-	ProtocolType     string `toml:"PROTOCOL_TYPE"`
-	UDPHost          string `toml:"UDP_HOST"`
-	UDPPort          int    `toml:"UDP_PORT"`
-	UDPReaders       int    `toml:"UDP_READERS"`
+	TunnelMode          string `toml:"TUNNEL_MODE"`
+	CottenMaxKeyFile    string `toml:"COTTENMAX_KEY_FILE"`
+	CottenMaxMaxStreams int    `toml:"COTTENMAX_MAX_STREAMS"`
+	ConfigDir           string `toml:"-"`
+	ConfigPath          string `toml:"-"`
+	ConfigPreset        string `toml:"CONFIG_PRESET"`
+	ProtocolType        string `toml:"PROTOCOL_TYPE"`
+	UDPHost             string `toml:"UDP_HOST"`
+	UDPPort             int    `toml:"UDP_PORT"`
+	UDPReaders          int    `toml:"UDP_READERS"`
 	// UDPIPv6Enabled adds a dedicated udp6 tunnel listener on UDPIPv6Host at the
 	// same UDP port, alongside the IPv4 listener, so IPv4 and IPv6 clients are
 	// served together. Like the TCP side it never relies on platform dual-stack
@@ -287,6 +288,7 @@ func defaultServerConfig() ServerConfig {
 	return ServerConfig{
 		ConfigPreset:                      "default",
 		TunnelMode:                        TunnelLegacy,
+		CottenMaxMaxStreams:               256,
 		ProtocolType:                      "SOCKS5",
 		UDPHost:                           "0.0.0.0",
 		UDPPort:                           53,
@@ -541,6 +543,9 @@ func finalizeServerConfig(cfg ServerConfig) (ServerConfig, error) {
 	// TCP/53 uses its own length-framed buffer and is unaffected by this limit.
 	cfg.MaxPacketSize = clampInt(defaultIntBelow(cfg.MaxPacketSize, 1, 4096), 512, 4096)
 	cfg.MaxStreamsPerSession = clampInt(defaultIntBelow(cfg.MaxStreamsPerSession, 1, 4096), 16, 65535)
+	if cfg.CottenMaxMaxStreams < 1 || cfg.CottenMaxMaxStreams > 512 {
+		return cfg, fmt.Errorf("COTTENMAX_MAX_STREAMS must be 1..512")
+	}
 	cfg.MaxActiveSessions = clampInt(defaultIntBelow(cfg.MaxActiveSessions, 1, 2048), 1, 65535)
 	cfg.MaxAllowedClientPacketDuplication = clampOptionalServerInt(cfg.MaxAllowedClientPacketDuplication, 1, 15)
 	cfg.MaxAllowedClientSetupPacketDuplication = clampOptionalServerInt(cfg.MaxAllowedClientSetupPacketDuplication, 1, 15)

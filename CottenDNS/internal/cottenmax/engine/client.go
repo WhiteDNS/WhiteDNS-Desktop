@@ -52,7 +52,7 @@ type Config struct {
 	MaxAnswer    int
 	StreamWindow uint64 // per-stream receive window. Default 256 KiB.
 	SendBuffer   int    // per-stream send buffer. Default 64 KiB.
-	MaxStreams   int    // Default 64; at most 256, so stream control frames fit the session's queue.
+	MaxStreams   int    // Default 64; at most MaxStreamsLimit, with control queue headroom.
 	// SessionIdle retires a session with no streams and no authenticated answer for this long:
 	// the next Dial handshakes again rather than reuse a session the server may have ended
 	// (an idle client sends nothing, and the reference server forgets a session after 2
@@ -117,7 +117,7 @@ func (c *Config) setDefaults() {
 	if c.SessionIdle <= 0 {
 		c.SessionIdle = 90 * time.Second
 	}
-	c.MaxStreams = min(c.MaxStreams, maxStreamsCap)
+	c.MaxStreams = min(c.MaxStreams, MaxStreamsLimit)
 	if c.Logger == nil {
 		c.Logger = slog.New(slog.DiscardHandler)
 	}

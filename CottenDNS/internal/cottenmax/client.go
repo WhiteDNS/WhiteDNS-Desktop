@@ -15,6 +15,9 @@ import (
 // Discovery retains the authenticated resolver-discovery behavior of Soar.
 type Discovery = soar.Discovery
 
+// MaxStreamsLimit bounds stream admission with space reserved for control frames.
+const MaxStreamsLimit = soar.MaxStreamsLimit
+
 type ClientConfig struct {
 	Discovery Discovery
 	// DiscoveryForDomain optionally isolates persisted discovery hints per zone.

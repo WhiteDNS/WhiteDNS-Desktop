@@ -67,6 +67,15 @@ func (l *tcpLink) run(c *Client) {
 			return
 		default:
 		}
+		// Do not let a large resolver list open an unbounded number of sockets
+		// or TLS handshakes at once. UDP startup never waits for these slots.
+		select {
+		case c.tcpDialSlots <- struct{}{}:
+		case <-c.done:
+			return
+		case <-l.done:
+			return
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		// A blocked TCP/TLS handshake must release its socket when the app
 		// closes or discovery removes this path, rather than wait ten seconds.
@@ -81,6 +90,7 @@ func (l *tcpLink) run(c *Client) {
 		}()
 		conn, err := c.cfg.DialTCP(ctx, "tcp", l.addr)
 		cancel()
+		<-c.tcpDialSlots
 		dbg("tcp link %s dial err=%v", l.addr, err)
 		if err != nil {
 			select {

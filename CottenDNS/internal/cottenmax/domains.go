@@ -240,3 +240,38 @@ func (f *domainFailover) close() error {
 	}
 	return nil
 }
+
+func (f *domainFailover) authenticate(ctx context.Context) error {
+	f.mu.Lock()
+	first, count, closed := f.preferred, len(f.domains), f.closed
+	f.mu.Unlock()
+	if closed {
+		return net.ErrClosed
+	}
+	var failures []error
+	for step := range count {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		index := (first + step) % count
+		attempt, cancel := context.WithTimeout(ctx, f.after)
+		stop := context.AfterFunc(f.ctx, cancel)
+		engine, err := f.engineFor(attempt, index)
+		if err == nil {
+			err = engine.Authenticate(attempt)
+		}
+		stop()
+		cancel()
+		if f.ctx.Err() != nil {
+			return net.ErrClosed
+		}
+		if err == nil {
+			f.mu.Lock()
+			f.preferred = index
+			f.mu.Unlock()
+			return nil
+		}
+		failures = append(failures, err)
+	}
+	return fmt.Errorf("cottenmax: no authenticated tunnel domain: %w", errors.Join(failures...))
+}

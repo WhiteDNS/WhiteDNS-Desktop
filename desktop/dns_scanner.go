@@ -174,6 +174,9 @@ func (a *App) StartScannerScan(request model.ScannerStartRequest) (model.Scanner
 	if err != nil {
 		return a.GetScannerState(), err
 	}
+	if model.NormalizeImportType(connection.ImportType) == model.ImportTypeCottenDNS {
+		return a.startCottenDNSScanner(connection, inputPath, inputFileName, inputTotal, inputInvalid, inputDuplicates, scanParallel)
+	}
 	listenPort, apiPort, err := scannerRandomPorts()
 	if err != nil {
 		return a.GetScannerState(), err
@@ -1429,13 +1432,14 @@ func (a *App) scannerConnection(id string) (model.ConnectionProfile, error) {
 			continue
 		}
 		if len(model.ConnectionDomains(profile)) == 0 {
-			return model.ConnectionProfile{}, fmt.Errorf("connection profile needs at least one MasterDNS domain")
+			return model.ConnectionProfile{}, fmt.Errorf("connection profile needs at least one tunnel domain")
 		}
 		if strings.TrimSpace(profile.EncryptionKey) == "" {
 			return model.ConnectionProfile{}, fmt.Errorf("connection profile needs an encryption key")
 		}
-		if model.NormalizeImportType(profile.ImportType) != model.ImportTypeMasterDNS {
-			return model.ConnectionProfile{}, fmt.Errorf("DNS scanner requires a MasterDNS connection profile")
+		engine := model.NormalizeImportType(profile.ImportType)
+		if engine != model.ImportTypeMasterDNS && engine != model.ImportTypeCottenDNS {
+			return model.ConnectionProfile{}, fmt.Errorf("DNS scanner requires a MasterDNS or CottenDNS connection profile")
 		}
 		return profile, nil
 	}

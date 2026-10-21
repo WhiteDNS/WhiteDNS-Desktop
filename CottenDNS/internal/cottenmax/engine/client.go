@@ -58,8 +58,8 @@ type Config struct {
 	// (an idle client sends nothing, and the reference server forgets a session after 2
 	// minutes of silence). Keep it below the server's idle timeout. Default 90s.
 	SessionIdle time.Duration
-	// TCP controls TCP/53 paths: "auto" (default) adds one for a resolver whose UDP path never
-	// answers, "on" adds one for every resolver up front, "only" uses TCP alone, "off" never
+	// TCP controls DNS stream paths: "auto" (default) and "on" independently probe UDP
+	// and TCP for every resolver, "only" uses TCP alone, "off" never uses TCP
 	// (except for resolvers StreamOnly reports).
 	TCP string
 	// StreamOnly reports resolvers that only speak a stream transport (DNS over
@@ -170,8 +170,10 @@ type Client struct {
 	cachedVerified int
 	cacheQ         chan []string // the latest verified set, for storeCache
 	cacheDone      chan struct{} // closed once storeCache has flushed and exited
+	tcpDialSlots   chan struct{} // bound simultaneous DNS TCP/TLS handshakes
 
-	lastDump time.Time
+	lastDump   time.Time
+	probeUntil time.Time // short authenticated startup probe, never an idle beacon
 }
 
 type path struct {
@@ -195,7 +197,9 @@ type path struct {
 	suspended time.Time
 	dead      bool
 
-	nameLen           int       // current QNAME cap
+	nameLen           int // current QNAME cap
+	observedNameLen   int
+	observedAnswer    int
 	lastLargeNameAuth time.Time // authenticated near-cap upload name, optional guard
 	lastLargeNameLen  int
 	probeFails        int
@@ -343,7 +347,7 @@ func NewClient(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	c := &Client{cfg: cfg, z: z, pc: pc, pending: make(map[uint16]*pendingQuery),
+	c := &Client{cfg: cfg, z: z, pc: pc, pending: make(map[uint16]*pendingQuery), tcpDialSlots: make(chan struct{}, 16),
 		wakeCh: make(chan struct{}, 1), done: make(chan struct{})}
 	for _, r := range cfg.Resolvers {
 		if err := c.addPathLocked(r); err != nil {
@@ -385,7 +389,7 @@ func (c *Client) addPathLocked(r string) error {
 		return nil
 	}
 	c.paths = append(c.paths, c.newPath(ua, false))
-	if c.cfg.TCP == "on" {
+	if c.cfg.TCP == "on" || c.cfg.TCP == "auto" {
 		c.paths[len(c.paths)-1].sibling = true
 		c.paths = append(c.paths, c.newPath(ua, true))
 	}
@@ -443,6 +447,19 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) wake() { signal(c.wakeCh) }
+
+// Authenticate starts the same handshake used by live streams, without opening
+// an application connection. A short probe window also vets alternate paths.
+func (c *Client) Authenticate(ctx context.Context) error {
+	if _, err := c.session(ctx); err != nil {
+		return err
+	}
+	c.mu.Lock()
+	c.probeUntil = time.Now().Add(2 * time.Second)
+	c.mu.Unlock()
+	c.wake()
+	return nil
+}
 
 // DialContext opens a stream to addr (host:port) through the tunnel.
 func (c *Client) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -1021,7 +1038,7 @@ func (c *Client) fillLocked(now time.Time) {
 	// Keep one probe on each unverified path, so new and recovering resolvers get vetted, but
 	// only while there's real traffic: a lost probe's ack and LOST bookkeeping mustn't count, or
 	// it would beget another probe and an idle session would never go quiet.
-	busy := cs.busy()
+	busy := cs.busy() || now.Before(c.probeUntil)
 	for _, p := range c.paths {
 		if !busy {
 			break
@@ -1290,6 +1307,7 @@ func (c *Client) onAnswer(msg []byte) {
 		return
 	}
 	if q.hello {
+		// A signed HELLO is authenticated in onHelloLocked; record sizing there.
 		c.onHelloLocked(q, a.txt, now)
 		return
 	}
@@ -1306,6 +1324,7 @@ func (c *Client) onAnswer(msg []byte) {
 		dbg("cli auth fail pn=%d err=%v", pn, err)
 		return // forged or corrupt: keep waiting for the real answer
 	}
+	c.observeWireSizeLocked(p, q, len(msg))
 	delete(c.pending, a.txn)
 	cs.lastAuth, cs.unanswered = now, time.Time{}
 	// The liveness clock runs from the first query since the last authenticated answer. With
@@ -1352,6 +1371,7 @@ func (c *Client) onHelloLocked(q *pendingQuery, reply []byte, now time.Time) {
 	if err != nil {
 		return // forged
 	}
+	c.observeWireSizeLocked(p, q, 0)
 	delete(c.pending, q.txn)
 	if !q.expired {
 		p.inflight--
@@ -1369,4 +1389,11 @@ func (c *Client) onHelloLocked(q *pendingQuery, reply []byte, now time.Time) {
 	cs.established = true
 	cs.lastAuth = now
 	close(cs.ready)
+}
+
+func (c *Client) observeWireSizeLocked(p *path, q *pendingQuery, answerBytes int) {
+	// question contains the wire name and four QTYPE/QCLASS bytes. A wire
+	// name is two bytes longer than its presentation form without trailing dot.
+	p.observedNameLen = max(p.observedNameLen, len(q.question)-6)
+	p.observedAnswer = max(p.observedAnswer, answerBytes)
 }

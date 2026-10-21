@@ -276,6 +276,9 @@ type ServerConfigFlagBinder struct {
 	flagToField map[string]string
 }
 
+// DefaultServerConfig returns independent defaults for managed embeddings.
+func DefaultServerConfig() ServerConfig { return defaultServerConfig() }
+
 func defaultServerConfig() ServerConfig {
 	workers := min(max(runtime.NumCPU(), 1), 16)
 

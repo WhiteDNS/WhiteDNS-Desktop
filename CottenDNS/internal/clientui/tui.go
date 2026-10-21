@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"cottendns-go/internal/client"
+	"cottendns-go/internal/config"
 	"cottendns-go/internal/tunnelinfo"
 	"cottendns-go/internal/version"
 )
@@ -222,7 +223,7 @@ func (m model) compactView() string {
 		familyPolicyLabel(m.status.FamilyMode),
 		sectionTitle("TUNNEL") + "  " + tunnelinfo.ModeLabel(m.status.TunnelMode),
 		"Resolver hop " + m.status.Transport,
-		fmt.Sprintf("MTU up %d / down %d | streams %d", m.status.UploadMTU, m.status.DownloadMTU, m.status.ActiveStreams),
+		fmt.Sprintf("%s | streams %d", tunnelSizeText(m.status), m.status.ActiveStreams),
 		"Proxy " + m.status.ProxyAddress,
 		sectionTitle("TRAFFIC"),
 		"Up " + formatSpeed(m.upSpeed) + " | down " + formatSpeed(m.downSpeed),
@@ -231,6 +232,9 @@ func (m model) compactView() string {
 	}
 	if m.status.LocalDNSEnabled {
 		lines = append(lines, "DNS "+m.status.LocalDNSAddress)
+	}
+	if m.status.TunnelMode == config.TunnelCottenMax {
+		lines = append(lines, fmt.Sprintf("DNS paths: UDP %d / TCP %d", m.status.ActiveUDPPaths, m.status.ActiveTCPPaths))
 	}
 	lines = append(lines, sectionTitle("ACTIVITY"))
 	lines = append(lines, renderActivity(m.logs, max(0, min(12, m.height-len(lines)-1)), m.width)...)
@@ -273,7 +277,7 @@ func (m model) dashboardView() string {
 		sectionTitle("TUNNEL"),
 		row("Mode", tunnelinfo.ModeLabel(m.status.TunnelMode)),
 		row("Transport", m.status.Transport),
-		row("MTU", fmt.Sprintf("upload %d / download %d", m.status.UploadMTU, m.status.DownloadMTU)),
+		row("Sizes", tunnelSizeText(m.status)),
 		row("Streams", fmt.Sprintf("%d active", m.status.ActiveStreams)),
 		row("Proxy", m.status.ProxyAddress),
 	}, "\n")
@@ -305,6 +309,13 @@ func (m model) dashboardView() string {
 	rightPanel := panel.Width(columnWidth).Render(right)
 	columns := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, " ", rightPanel)
 	return m.finishView(header, statusLine, columns, inner)
+}
+
+func tunnelSizeText(s client.StatusSnapshot) string {
+	if s.TunnelMode == config.TunnelCottenMax {
+		return fmt.Sprintf("QNAME %d / reply %d DNS bytes", s.CottenMaxQNameBytes, s.CottenMaxAnswerBytes)
+	}
+	return fmt.Sprintf("MTU upload %d / download %d", s.UploadMTU, s.DownloadMTU)
 }
 
 func (m model) finishView(header, statusLine, columns string, inner int) string {

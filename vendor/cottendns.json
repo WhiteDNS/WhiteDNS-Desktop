@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "409aafde08e115aa396690559152bcc7c0785567",
+  "commit": "f5ba185ec140eb35fc134836c0cce383c0b28a50",
   "directory": "CottenDNS",
-  "update": "CottenMax beta pinned to the organization source commit; production inputs recorded in the source snapshot.",
-  "base_commit": "48d6c81d45edd85aaf3b4a88f8ebc06c22b88574",
+  "update": "Pinned CottenMax independent UDP/TCP transport and authenticated scan core.",
+  "base_commit": "f5ba185ec140eb35fc134836c0cce383c0b28a50",
   "source_snapshot": "CottenDNS/COTTEN_CORE_SNAPSHOT.json"
 }

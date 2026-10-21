@@ -306,6 +306,21 @@ func RenderClientTOML(connection model.ConnectionProfile, overrides map[string]a
 	return renderTOML(connection, overrides, true)
 }
 
+// RenderScannerClientTOML retains the selected tunnel mode and resolver transport
+// while preventing a scan-only helper from opening local proxy/DNS listeners.
+func RenderScannerClientTOML(connection model.ConnectionProfile, overrides map[string]any, parallel int) string {
+	values := make(map[string]any, len(overrides)+6)
+	for key, value := range overrides {
+		values[key] = value
+	}
+	values["TERMINAL_UI"] = "plain"
+	values["LOG_LEVEL"] = "INFO"
+	values["LOCAL_DNS_ENABLED"] = false
+	values["FAST_CONNECT"] = false
+	values["MTU_TEST_PARALLELISM_RESOLVERS"] = parallel
+	return renderTOML(connection, values, true)
+}
+
 func RenderSettingsTOML(overrides map[string]any) string {
 	return renderTOML(model.ConnectionProfile{}, overrides, false)
 }

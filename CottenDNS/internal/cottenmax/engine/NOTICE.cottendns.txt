@@ -8,12 +8,15 @@ the beta source publication. The upstream command, benchmark, and data generator
 are excluded.
 The package name remains `soar` to keep the changes easy to compare upstream.
 
-CottenDNS modifications (updated 2026-10-19):
+CottenDNS modifications (updated 2026-10-21):
 
 - `client.go`: held polls retain their hold-aware deadlines even when later
   polls arrive first; immediate data queries retain fast loss recovery with
   the RTO's variance margin and a minimum 50ms allowance for reordering.
-  TCP auto-fallback also handles a previously verified UDP path stalling.
+  Automatic transport selection probes UDP and TCP independently from startup;
+  both paths carry live streams with independent authentication, sizing,
+  congestion and recovery state. Short startup authentication probes do not
+  become idle beacons. Statistics distinguish observed wire sizes from limits.
   Failed QNAME-size discovery is retried with exponential backoff (10s to 30m)
   on existing traffic so a replacement forwarder can regain capacity; short
   queries remain the fallback and only an authenticated padded probe promotes it.
@@ -31,12 +34,15 @@ CottenDNS modifications (updated 2026-10-19):
 - `discover.go`: an optional address-family predicate applies to every candidate
   source, including cached/system/bundled/sampled endpoints. The adapter adds
   bounded, expiring per-domain/profile cache hints; paths reauthenticate.
+  Discovery budgets count distinct resolvers, allowing both UDP/TCP paths per
+  candidate without double-counting the requested resolver diversity.
 - `session.go`: an in-flight packet owns its ACK ranges. They are removed from
   the pending ACK queue on send and requeued on loss, avoiding redundant ACK
   frames in every query and upload starvation with short names.
 - `roundtripper.go`: `DialConfirmed` exposes the existing OPENED wait directly
   for local SOCKS/HTTP proxies.
 - `tcp.go`: cancel an in-progress TCP/TLS resolver dial when its client/path closes.
+  Bound concurrent resolver TCP/TLS handshakes independently of UDP startup.
   Replace half-open sockets after repeated actual query timeouts and sustained
   lack of authenticated progress. Close the captured socket outside the client
   lock; account old-query losses and discard stale queued messages before redial

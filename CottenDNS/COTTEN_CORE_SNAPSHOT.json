@@ -1,8 +1,9 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "base_commit": "48d6c81d45edd85aaf3b4a88f8ebc06c22b88574",
-  "source": "Pinned CottenMax beta production inputs; tests, README additions and caches excluded",
-  "source_tree_sha256_lf": "ad9ca601d4a204eaf4328e339c9c5c1d99828e933d9b6dfaaa55964ef6ef6024",
+  "commit": "f5ba185ec140eb35fc134836c0cce383c0b28a50",
+  "base_commit": "f5ba185ec140eb35fc134836c0cce383c0b28a50",
+  "source": "Pinned production inputs; local tests, README additions and caches excluded.",
+  "source_tree_sha256_lf": "cd1c7b8b9317a4e2ea8ee9a28e0a2631bbc5d902db9f67bbbcc3b752430a8ebb",
   "soar_base": "v0.2.3",
   "files": [
     {
@@ -107,7 +108,7 @@
     },
     {
       "path": "internal/client/cottenmax.go",
-      "sha256_lf": "c9b23f7b724d8d500aab5b25f082cebed2e218db1d3a26a2075e02c6e852d3bd"
+      "sha256_lf": "8fedfbb4d2a54f02e1610c669cfc93b8f24eae3b884473de9d14fe8a4125bcf6"
     },
     {
       "path": "internal/client/cottenmax_discovery.go",
@@ -120,6 +121,10 @@
     {
       "path": "internal/client/cottenmax_resolver_transport.go",
       "sha256_lf": "2d15d5b5a65fd5e2351dbd7fe3ae32d4f1bdebe338edd6a9297e7956c2e0d77d"
+    },
+    {
+      "path": "internal/client/cottenmax_scan.go",
+      "sha256_lf": "fb3481bf203003669b6057f2ce55c15b45336cd95b92910b1636549f48e63014"
     },
     {
       "path": "internal/client/dispatcher.go",
@@ -219,7 +224,7 @@
     },
     {
       "path": "internal/client/resolver_runtime_state.go",
-      "sha256_lf": "72589a958110371a626fd1c92c835bc25e8e10c443e58bfcb9e2016892b38419"
+      "sha256_lf": "b32baa800d5a37e2a349c2bbf77caa955870094197cbdbad1ea5ed0a2502a9cb"
     },
     {
       "path": "internal/client/resolver_stats.go",
@@ -239,7 +244,7 @@
     },
     {
       "path": "internal/client/scan.go",
-      "sha256_lf": "855e4016e156428d8bc8460df4423691abca8a65601316a2efae4a9d09ff202c"
+      "sha256_lf": "62833310ce7991fbdf34fa9b6bd08bd5583423b8c0d2fa8ae3c39f56982ea5a0"
     },
     {
       "path": "internal/client/server_policy.go",
@@ -251,7 +256,7 @@
     },
     {
       "path": "internal/client/socks_manager.go",
-      "sha256_lf": "b1804d9917fd3e8d999a402b62760644f91c04d65effbe7c2cf6998f08475937"
+      "sha256_lf": "e3f9fe302e79fe16baf7484bee12755413d9538de7010389712afcc86acb9188"
     },
     {
       "path": "internal/client/socks_ratelimit.go",
@@ -259,7 +264,7 @@
     },
     {
       "path": "internal/client/status.go",
-      "sha256_lf": "3313fbd156ee548d172e67d141296c5ba6bfda380e173db227b5ae525e459ea6"
+      "sha256_lf": "5fb3f467b64463f3451b75364b1f363875d5c6b57b11b421fe5ff7f7666d43c1"
     },
     {
       "path": "internal/client/stream_admission.go",
@@ -291,7 +296,7 @@
     },
     {
       "path": "internal/client/traffic_stats.go",
-      "sha256_lf": "323e7a68c254a21477cbcf8ec4dc133af1775c2c109c6d6c2c6176a9746df947"
+      "sha256_lf": "882960c2e79515b5ddd05a0139721d8c7d389abfb85ac465785182c206a1f57c"
     },
     {
       "path": "internal/client/transport.go",
@@ -315,7 +320,7 @@
     },
     {
       "path": "internal/clientui/tui.go",
-      "sha256_lf": "c47eaf2cddb9fe57d777b0418821d68bdf04ae7786a52cafd3335cdb667996e6"
+      "sha256_lf": "62aa0d2b1e5218ce62648556f68b2e2dceafbf069e1ec9c95619abefc1587c6a"
     },
     {
       "path": "internal/compression/types.go",
@@ -339,7 +344,7 @@
     },
     {
       "path": "internal/config/server.go",
-      "sha256_lf": "da4d5dd6555f61572ec2b4a27ae02c6ef557719f787d60f1d327aed644b293dd"
+      "sha256_lf": "942ffd87b09c537a4f935bc838eabb98ad08b82591a745a005785ed6307b6b91"
     },
     {
       "path": "internal/config/tunnel_mode.go",
@@ -355,11 +360,11 @@
     },
     {
       "path": "internal/cottenmax/domains.go",
-      "sha256_lf": "5c9d8ec31bfdc65675e857ca17bd0bca2a090a14b666c7b328f3bbf26c436a8d"
+      "sha256_lf": "52e03c88aeb695127d50421732bb313a7e6f263eea4e23a963d78e12317b7ca8"
     },
     {
       "path": "internal/cottenmax/engine/client.go",
-      "sha256_lf": "412de6a974165c599d683ecdf531c7815fc11f166543c70cdae3ab26ac20c323"
+      "sha256_lf": "1404e75509de8754cff930df4e8c66e29a9f22271713cb3b228603d34661ced6"
     },
     {
       "path": "internal/cottenmax/engine/cottenmax_qname_guard.go",
@@ -403,7 +408,7 @@
     },
     {
       "path": "internal/cottenmax/engine/discover.go",
-      "sha256_lf": "1afe9481265619983f3e770d5af8883fb783363029f692c9c75477a36c1bc491"
+      "sha256_lf": "c7c97e1d0e4099e49a92aaaecb2aab49b93659b290ab431cc08bf00a602c5bde"
     },
     {
       "path": "internal/cottenmax/engine/dnswire.go",
@@ -419,7 +424,7 @@
     },
     {
       "path": "internal/cottenmax/engine/NOTICE.cottendns.txt",
-      "sha256_lf": "22ba5ea2e7000315d57c26f850f2e71687ac6567067bb96003ebf56cdc73305d"
+      "sha256_lf": "84e6c77e3592d0843081bf5b076537a9d64096960afe76fe7705bd6dbbcbcd58"
     },
     {
       "path": "internal/cottenmax/engine/ranges.go",
@@ -443,7 +448,7 @@
     },
     {
       "path": "internal/cottenmax/engine/stats.go",
-      "sha256_lf": "cc66e32602c034051532850435d6eac3dcf1fa54353d80117abec7f8068bb93d"
+      "sha256_lf": "31108dacc843c369153c47fcaac17d7b1acfd864499d152d538dc4074c8e78a1"
     },
     {
       "path": "internal/cottenmax/engine/stream.go",
@@ -451,7 +456,7 @@
     },
     {
       "path": "internal/cottenmax/engine/tcp.go",
-      "sha256_lf": "aa470e7738137716ca891f3b07019f09ef010afccf05cf12e7bd25f5fe616f5a"
+      "sha256_lf": "3c7345b31f9b46f3fe9dd29f9298ff4b242f37544d654929b01438e22f6339af"
     },
     {
       "path": "internal/cottenmax/engine/varint.go",
@@ -462,8 +467,12 @@
       "sha256_lf": "7db228c949bb256f961375563ed617f302390fc774b6435375acff605f07e66f"
     },
     {
+      "path": "internal/cottenmax/probe.go",
+      "sha256_lf": "59e6b384c12addca6a26947225fa6af581719aee2de0ff88584c5533a64bf7cf"
+    },
+    {
       "path": "internal/cottenmax/server.go",
-      "sha256_lf": "bddbc07f8bd88b8936adb50e788bf2a9d34adc49e10e1bc19f68b42d2fae1ce6"
+      "sha256_lf": "bd1458ee75c6c9a8568f5ec89a50a59170e26256052f9f28fe36c10bc54017df"
     },
     {
       "path": "internal/dnscache/store.go",
@@ -615,7 +624,7 @@
     },
     {
       "path": "internal/tunnelinfo/info.go",
-      "sha256_lf": "a5586f782324ff533b167aef5fb1c0d00653f884d3511b4084c40c7c2ef03ebb"
+      "sha256_lf": "8bf848e735899037f8d20eadd468e76fcfc794e11fee33f8be3c4375fc7ab084"
     },
     {
       "path": "internal/udpframe/frame.go",
@@ -631,11 +640,11 @@
     },
     {
       "path": "internal/udpserver/deferred_session.go",
-      "sha256_lf": "169d36f2fe87685dd69ebb3d466f9d936b78c47b9e155a378dcb2765eb4d0c4f"
+      "sha256_lf": "084e85cc3273fe07c4e1e5f471566b8569926f86b085f991306d0f730319ab49"
     },
     {
       "path": "internal/udpserver/dns_tunnel.go",
-      "sha256_lf": "193c410ac6a91922d4626dbd4c5097dfae9f59bdb6245c10d7176da56a06c713"
+      "sha256_lf": "18938b43c8f91b6ca655bee4ef3b246bd8577e1aba93f413f13667341ed28d42"
     },
     {
       "path": "internal/udpserver/domain_rotation.go",
@@ -644,6 +653,10 @@
     {
       "path": "internal/udpserver/downstream_security.go",
       "sha256_lf": "b45c1ff32e7341f3b454b86027a8b3c6389a1c1b541e21fee35eb3e4eae8cdfa"
+    },
+    {
+      "path": "internal/udpserver/embedded.go",
+      "sha256_lf": "e8276a329cd4dfe4ff2a4a555c737c020fb3cedb7eabfc013c2066cb9d41eb86"
     },
     {
       "path": "internal/udpserver/invalid_cookie_tracker.go",
@@ -667,7 +680,7 @@
     },
     {
       "path": "internal/udpserver/server.go",
-      "sha256_lf": "88abed5d14fd1bb007d7d15618cfe270864e85d2a9e08819a92ba917646f0df7"
+      "sha256_lf": "db01c34bd31b037a9d7733a425674ebac02ae25323382f73ab0151a396d5e536"
     },
     {
       "path": "internal/udpserver/server_admission.go",
@@ -751,7 +764,7 @@
     },
     {
       "path": "internal/udpserver/udp_association.go",
-      "sha256_lf": "67a5d82bd2e9bde394641f27f84e72a6ef7f6bbfc7d1d33310932bc009a63a40"
+      "sha256_lf": "8b211a9243d5db2401b0ceea9954c12cea6bf865325c4036f0c7ec322281903d"
     },
     {
       "path": "internal/udpserver/udp_association_socks5.go",
@@ -798,6 +811,10 @@
       "sha256_lf": "1f5c55665e5c1a6c350ed66720891063bb1183ea930aeaa20e97d3c598a7dd1f"
     },
     {
+      "path": "LICENSE",
+      "sha256_lf": "373f6a0cd22c39e026be03c4eb64c33b25a6419344ea65e80b589b06a2a5a41f"
+    },
+    {
       "path": "QPACK_LICENSE.txt",
       "sha256_lf": "1b6a897efd39b20b3cdce8cd306160d115dbded39d855ceeffe21dc11e4d53df"
     },
@@ -813,6 +830,5 @@
       "path": "THIRD_PARTY_NOTICES.md",
       "sha256_lf": "5def2df657f38b2915ca43cf91b6e3a16b57fa453c2e4775bdd639d06fd1bfa7"
     }
-  ],
-  "commit": "409aafde08e115aa396690559152bcc7c0785567"
+  ]
 }

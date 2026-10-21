@@ -4,7 +4,6 @@ import (
 	"context"
 	"cottendns-go/internal/config"
 	"errors"
-	"fmt"
 )
 
 type ResolverScanSummary struct {
@@ -16,10 +15,10 @@ type ResolverScanSummary struct {
 // RunResolverScan classifies resolvers without starting listeners or a session.
 func (c *Client) RunResolverScan(ctx context.Context) (ResolverScanSummary, error) {
 	defer c.closeResolverCacheLog()
-	summary := ResolverScanSummary{Total: len(c.connections)}
 	if c.cfg.TunnelMode == config.TunnelCottenMax {
-		return summary, fmt.Errorf("cottenmax validates paths during its authenticated handshake; standalone --scan-only requires legacy mode")
+		return c.runCottenMaxResolverScan(ctx)
 	}
+	summary := ResolverScanSummary{Total: len(c.connections)}
 	if summary.Total == 0 {
 		c.logResolverScanComplete(summary)
 		return summary, nil

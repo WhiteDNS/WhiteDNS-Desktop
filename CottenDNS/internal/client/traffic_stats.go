@@ -13,6 +13,7 @@ package client
 
 import (
 	"context"
+	"cottendns-go/internal/config"
 	"fmt"
 	"time"
 )
@@ -82,6 +83,13 @@ func (c *Client) runTrafficStatsReporter(ctx context.Context) {
 			if c.log != nil {
 				lossPM := c.tunnelLossPerMille()
 				activeResolvers := c.balancer.ValidCount()
+				transport := c.activeTransport().String()
+				if c.cfg.TunnelMode == config.TunnelCottenMax {
+					status := c.StatusSnapshot()
+					lossPM = status.LossPerMille
+					activeResolvers = status.ActiveResolvers
+					transport = fmt.Sprintf("%s UDP=%d TCP=%d", status.Transport, status.ActiveUDPPaths, status.ActiveTCPPaths)
+				}
 				c.log.Infof(
 					"\U0001F4CA <cyan>↑</cyan> <yellow>%s</yellow> <gray>(Total: %s)</gray> <magenta>|</magenta> <cyan>↓</cyan> <yellow>%s</yellow> <gray>(Total: %s)</gray> <magenta>|</magenta> <cyan>loss</cyan> <yellow>%.1f%%</yellow> <magenta>|</magenta> <cyan>resolvers</cyan> <yellow>%d</yellow> <magenta>|</magenta> <cyan>transport</cyan> <yellow>%s</yellow> <magenta>|</magenta> <cyan>queues</cyan> <yellow>%d/%d/%d</yellow> <magenta>|</magenta> <cyan>drops</cyan> <yellow>rx=%d tx=%d</yellow> <magenta>|</magenta> <cyan>recoveries</cyan> <yellow>%d</yellow> <magenta>|</magenta> <cyan>stream-fail</cyan> <yellow>dial=%d write=%d</yellow>",
 					formatSpeed(upSpeed),
@@ -90,7 +98,7 @@ func (c *Client) runTrafficStatsReporter(ctx context.Context) {
 					formatBytes(currentRX),
 					float64(lossPM)/10.0,
 					activeResolvers,
-					c.activeTransport(),
+					transport,
 					len(c.txChannel), len(c.encodedTXChannel), len(c.rxChannel),
 					c.rxDroppedPackets.Load(), c.txAdmissionDrops.Load(),
 					c.transportRecoveryCount.Load(),

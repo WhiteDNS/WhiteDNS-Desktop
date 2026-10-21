@@ -14,6 +14,8 @@ import (
 )
 
 func (c *Client) runCottenMax(ctx context.Context) error {
+	ctx, cancelRuntime := context.WithCancel(ctx)
+	defer cancelRuntime()
 	defer c.closeSharedEncryptedDNSClient()
 	defer c.closeResolverCacheLog()
 	if len(c.cfg.Domains) == 0 {
@@ -21,67 +23,43 @@ func (c *Client) runCottenMax(ctx context.Context) error {
 	}
 	c.runtimePhase.Store(clientPhaseConnecting)
 	defer c.runtimePhase.Store(clientPhaseStopped)
-	resolvers := make([]string, 0, len(c.cfg.Resolvers))
-	for _, r := range c.cfg.Resolvers {
-		if c.cfg.ResolverIPMode == "ipv4" && resolverAddressIsIPv6(r.IP) {
-			continue
-		}
-		if c.cfg.ResolverIPMode == "ipv6" && !resolverAddressIsIPv6(r.IP) {
-			continue
-		}
-		resolvers = append(resolvers, formatResolverEndpoint(r.IP, r.Port))
-	}
-	tcp := "auto"
-	if c.cfg.ResolverTransport == "udp" {
-		tcp = "off"
-	}
-	if c.cfg.ResolverTransport == "tcp" || c.cfg.ResolverTransport == "dot" {
-		tcp = "only"
-	}
-	var dialTCP func(context.Context, string, string) (net.Conn, error)
-	var listenPacket func(context.Context, string, string) (net.PacketConn, error)
-	if c.cfg.ResolverTransport == "dot" {
-		if c.cfg.ResolverTLSInsecureSkipVerify && strings.TrimSpace(c.cfg.ResolverTLSPin) == "" {
-			return fmt.Errorf("cottenmax DoT requires certificate verification or RESOLVER_TLS_PIN")
-		}
-		dialTCP = c.dialCottenMaxDoT
-	}
-	if c.cfg.ResolverTransport == "doh" || c.cfg.ResolverTransport == "doh3" || c.cfg.ResolverTransport == "doq" {
-		listenPacket = c.newCottenMaxEncryptedPacketConn
-		tcp = "off"
-	}
-	if len(resolvers) == 0 && !c.cfg.ResolverDiscoveryEnabled {
-		return fmt.Errorf("cottenmax: no resolvers for configured address family")
-	}
-	// Hard query budgets cannot be applied by blocking Soar's send callback:
-	// it holds its session lock while sending. Reject until scheduled pacing
-	// can be integrated without stalling answer processing or loss detection.
-	if c.cfg.QueryRateLimited() {
-		return fmt.Errorf("experimental cottenmax does not yet support hard QUERY_RATE_LIMIT_* budgets; use legacy")
-	}
-	engine, err := cottenmax.NewClient(cottenmax.ClientConfig{
-		Domain: c.cfg.Domains[0], PublicKey: c.cfg.CottenMaxServerPublicKey,
-		Secret: c.cfg.EncryptionKey, Resolvers: resolvers, TCP: tcp,
-		Domains:          append(append([]string(nil), c.cfg.Domains[1:]...), c.cfg.StandbyDomains...),
-		FailoverAfter:    time.Duration(c.cfg.CottenMaxFailoverAfterMilliseconds) * time.Millisecond,
-		QNameLabelLength: c.cfg.QNameLabelLength, QNameLabelJitter: c.cfg.QNameLabelJitter, QNameLossGuard: c.cfg.CottenMaxQNameLossGuard,
-		SafeQName: c.cfg.CottenMaxSafeQName, MaxQName: c.cfg.CottenMaxMaxQName, MaxAnswer: c.cfg.CottenMaxMaxAnswer,
-		MaxPathWindow: c.cfg.CottenMaxMaxPathWindow, MaxInflight: c.cfg.CottenMaxMaxInflight,
-		SessionIdle:                  time.Duration(c.cfg.CottenMaxSessionIdleMilliseconds) * time.Millisecond,
-		EncryptedDNSPaddingBlockSize: cottenMaxEnginePadding(c.cfg.ResolverTransport, c.cfg.DNSPaddingBlockSize),
-		ListenPacket:                 listenPacket,
-		DiscoveryForDomain:           func(domain string) cottenmax.Discovery { return c.cottenMaxDiscoveryForDomain(domain, resolvers) },
-		Hold:                         time.Duration(c.cfg.CottenMaxHoldMilliseconds) * time.Millisecond,
-		MaxStreams:                   min(c.cfg.MaxActiveStreams, 256),
-		DialTCP:                      dialTCP,
-		Discovery:                    c.cottenMaxDiscovery(resolvers),
-	})
+	engine, err := c.newCottenMaxEngine()
 	if err != nil {
 		return err
 	}
 	c.cottenMax.Store(engine)
 	defer engine.Close()
 	c.log.Warnf("Experimental CottenMax: safe startup, held polls, ephemeral keys, byte-range retransmission and implicit upload ACKs; no automatic legacy downgrade")
+	go c.runTrafficStatsReporter(ctx)
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				c.logResolverRuntimeState()
+			}
+		}
+	}()
+	// Start authentication immediately so a client does not wait for a local
+	// proxy request before learning its usable DNS paths. The proxy listener
+	// still starts immediately; warmup never gates fast startup.
+	go func() {
+		warmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		defer cancel()
+		if err := engine.Authenticate(warmCtx); err != nil {
+			if ctx.Err() == nil {
+				c.log.Warnf("CottenMax authentication failed: no authenticated DNS path; check the Max server build, domain and shared key (%v)", err)
+			}
+			return
+		}
+		if ctx.Err() == nil {
+			c.runtimePhase.Store(clientPhaseConnected)
+			c.logConnectionProgress("connected", 100, "mode", "cottenmax")
+		}
+	}()
 	listener := NewTCPListener(c, c.cfg.ProtocolType)
 	if err := listener.Start(ctx, c.cfg.ListenIP, c.cfg.ListenPort); err != nil {
 		return err
@@ -219,4 +197,71 @@ func cottenMaxEnginePadding(transport string, block int) int {
 		return block
 	}
 	return 0 // HTTPS/QUIC adapters pad once, after the engine prepares its query.
+}
+
+// newCottenMaxEngine shares the exact runtime configuration with standalone
+// authenticated scans; callers may restrict cfg.Resolvers/ResolverTransport.
+func (c *Client) newCottenMaxEngine() (*cottenmax.Client, error) {
+	if len(c.cfg.Domains) == 0 {
+		return nil, fmt.Errorf("cottenmax requires a tunnel domain")
+	}
+	resolvers := make([]string, 0, len(c.cfg.Resolvers))
+	for _, r := range c.cfg.Resolvers {
+		if c.cfg.ResolverIPMode == "ipv4" && resolverAddressIsIPv6(r.IP) {
+			continue
+		}
+		if c.cfg.ResolverIPMode == "ipv6" && !resolverAddressIsIPv6(r.IP) {
+			continue
+		}
+		resolvers = append(resolvers, formatResolverEndpoint(r.IP, r.Port))
+	}
+	tcp := "auto"
+	if c.cfg.ResolverTransport == "udp" {
+		tcp = "off"
+	}
+	if c.cfg.ResolverTransport == "tcp" || c.cfg.ResolverTransport == "dot" {
+		tcp = "only"
+	}
+	var dialTCP func(context.Context, string, string) (net.Conn, error)
+	var listenPacket func(context.Context, string, string) (net.PacketConn, error)
+	if c.cfg.ResolverTransport == "dot" {
+		if c.cfg.ResolverTLSInsecureSkipVerify && strings.TrimSpace(c.cfg.ResolverTLSPin) == "" {
+			return nil, fmt.Errorf("cottenmax DoT requires certificate verification or RESOLVER_TLS_PIN")
+		}
+		dialTCP = c.dialCottenMaxDoT
+	}
+	if c.cfg.ResolverTransport == "doh" || c.cfg.ResolverTransport == "doh3" || c.cfg.ResolverTransport == "doq" {
+		listenPacket = c.newCottenMaxEncryptedPacketConn
+		tcp = "off"
+	}
+	if len(resolvers) == 0 && !c.cfg.ResolverDiscoveryEnabled {
+		return nil, fmt.Errorf("cottenmax: no resolvers for configured address family")
+	}
+	// Hard query budgets cannot be applied by blocking Soar's send callback:
+	// it holds its session lock while sending. Reject until scheduled pacing
+	// can be integrated without stalling answer processing or loss detection.
+	if c.cfg.QueryRateLimited() {
+		return nil, fmt.Errorf("experimental cottenmax does not yet support hard QUERY_RATE_LIMIT_* budgets; use legacy")
+	}
+	engine, err := cottenmax.NewClient(cottenmax.ClientConfig{
+		Domain: c.cfg.Domains[0], PublicKey: c.cfg.CottenMaxServerPublicKey,
+		Secret: c.cfg.EncryptionKey, Resolvers: resolvers, TCP: tcp,
+		Domains:          append(append([]string(nil), c.cfg.Domains[1:]...), c.cfg.StandbyDomains...),
+		FailoverAfter:    time.Duration(c.cfg.CottenMaxFailoverAfterMilliseconds) * time.Millisecond,
+		QNameLabelLength: c.cfg.QNameLabelLength, QNameLabelJitter: c.cfg.QNameLabelJitter, QNameLossGuard: c.cfg.CottenMaxQNameLossGuard,
+		SafeQName: c.cfg.CottenMaxSafeQName, MaxQName: c.cfg.CottenMaxMaxQName, MaxAnswer: c.cfg.CottenMaxMaxAnswer,
+		MaxPathWindow: c.cfg.CottenMaxMaxPathWindow, MaxInflight: c.cfg.CottenMaxMaxInflight,
+		SessionIdle:                  time.Duration(c.cfg.CottenMaxSessionIdleMilliseconds) * time.Millisecond,
+		EncryptedDNSPaddingBlockSize: cottenMaxEnginePadding(c.cfg.ResolverTransport, c.cfg.DNSPaddingBlockSize),
+		ListenPacket:                 listenPacket,
+		DiscoveryForDomain:           func(domain string) cottenmax.Discovery { return c.cottenMaxDiscoveryForDomain(domain, resolvers) },
+		Hold:                         time.Duration(c.cfg.CottenMaxHoldMilliseconds) * time.Millisecond,
+		MaxStreams:                   min(c.cfg.MaxActiveStreams, 256),
+		DialTCP:                      dialTCP,
+		Discovery:                    c.cottenMaxDiscovery(resolvers),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return engine, nil
 }

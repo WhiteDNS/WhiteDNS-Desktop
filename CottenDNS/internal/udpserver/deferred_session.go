@@ -33,6 +33,7 @@ type deferredSessionWorker struct {
 }
 
 type deferredSessionProcessor struct {
+	wg                 sync.WaitGroup
 	log                *logger.Logger
 	workers            []deferredSessionWorker
 	mu                 sync.Mutex
@@ -113,7 +114,14 @@ func (p *deferredSessionProcessor) Start(ctx context.Context) {
 	}
 
 	for idx := range p.workers {
-		go p.runDeferredWorker(ctx, idx)
+		p.wg.Add(1)
+		go func(idx int) { defer p.wg.Done(); p.runDeferredWorker(ctx, idx) }(idx)
+	}
+}
+
+func (p *deferredSessionProcessor) wait() {
+	if p != nil {
+		p.wg.Wait()
 	}
 }
 

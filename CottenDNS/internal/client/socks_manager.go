@@ -878,7 +878,7 @@ func (c *Client) handleSocksUDPAssociate(ctx context.Context, conn net.Conn, cli
 		})
 
 		if !isHit {
-			c.log.Debugf("🧳 <yellow>SOCKS5 DNS Miss or Pending - keeping association alive for retry.</yellow>")
+			c.log.Debugf("🧳 <yellow>SOCKS5 DNS pending - waiting for the tunnel response.</yellow>")
 		}
 	}
 }

@@ -37,11 +37,12 @@ type Discovery struct {
 	// lists are exhausted. Off by default: probing many in-country addresses from a user's device
 	// is a visible pattern, so enable it deliberately.
 	SampleRanges int
-	// Want stops adding candidates once this many paths are healthy: verified and working now.
+	// Want stops adding candidates once this many distinct resolvers are healthy.
 	// A verified path that's unusable or on a run of losses doesn't count, so discovery resumes
 	// when resolvers that worked get blocked. Default 16.
 	Want int
-	// Concurrency bounds unverified candidates being probed at once. Default 16.
+	// Concurrency bounds distinct candidate resolvers being probed at once. Both
+	// DNS transports share one candidate slot but keep separate path state. Default 16.
 	Concurrency int
 	// Pace is the minimum gap between adding candidates. Default 20ms.
 	Pace time.Duration
@@ -117,6 +118,14 @@ func (d *Discovery) candidates() []string {
 		add(sampleRanges(readList("data/ranges/"+d.Country+".txt"), d.SampleRanges))
 	}
 	return out
+}
+
+// CandidatesForScan returns the same filtered discovery inputs used by live
+// connections. It performs no network work; only an authenticated probe can
+// establish that an endpoint actually carries this tunnel.
+func (d Discovery) CandidatesForScan() []string {
+	d.setDefaults()
+	return d.candidates()
 }
 
 // parseResolver accepts "ip" or "ip:port".
@@ -218,15 +227,24 @@ func (c *Client) wantsCandidateLocked(now time.Time) bool {
 	if !d.Enabled || c.candIdx >= len(c.cands) {
 		return false
 	}
-	healthy, probing := 0, 0
+	healthy, probing := c.discoveryCountsLocked(now)
+	return healthy < d.Want && probing < d.Concurrency
+}
+
+func (c *Client) discoveryCountsLocked(now time.Time) (healthy, probing int) {
+	good, pending := make(map[string]bool), make(map[string]bool)
 	for _, p := range c.paths {
+		addr := p.addr.String()
 		if p.healthy(now) {
-			healthy++
+			good[addr] = true
 		} else if !p.verified && p.candidate {
-			probing++
+			pending[addr] = true
 		}
 	}
-	return healthy < d.Want && probing < d.Concurrency
+	for addr := range good {
+		delete(pending, addr)
+	}
+	return len(good), len(pending)
 }
 
 // discoverLocked adds candidate paths at the configured pace while too few paths are healthy,
@@ -236,26 +254,27 @@ func (c *Client) discoverLocked(now time.Time) {
 	if !d.Enabled {
 		return
 	}
-	verified, healthy, probing := 0, 0, 0
 	kept := c.paths[:0]
 	for _, p := range c.paths {
 		switch {
 		case p.verified:
-			verified++
-			if p.healthy(now) {
-				healthy++
-			}
 		case p.candidate && (p.outN >= 3 && p.inflight == 0 || p.tcp != nil && now.Sub(p.created) > 10*time.Second):
 			if p.tcp != nil {
 				p.tcp.stop()
 			}
 			continue // never answered: drop it
-		case p.candidate:
-			probing++
 		}
 		kept = append(kept, p)
 	}
 	c.paths = kept
+	verifiedAddresses := make(map[string]bool)
+	for _, p := range c.paths {
+		if p.verified {
+			verifiedAddresses[p.addr.String()] = true
+		}
+	}
+	verified := len(verifiedAddresses)
+	healthy, probing := c.discoveryCountsLocked(now)
 	if verified != c.cachedVerified && d.Cache != nil {
 		c.cachedVerified = verified
 		// Cache every verified resolver, whatever transport verified it: a TCP-only resolver is

@@ -5322,6 +5322,7 @@ function ScannerPage({
   }, [running]);
 
   const selectedConnection = state.connectionProfiles.find((profile) => profile.id === connectionProfileId) || state.connectionProfiles[0];
+  const cottenScan = normalizeImportType(selectedConnection?.importType) === "cottendns";
   const connectionReady = Boolean(connectionDomains(selectedConnection).length && selectedConnection?.encryptionKey.trim());
   const progress = scanner.total > 0 ? Math.round((scanner.completed / scanner.total) * 100) : 0;
   const elapsed = scanner.startedAt ? formatElapsed(scanner.startedAt, scanner.finishedAt || now) : "-";
@@ -5421,7 +5422,7 @@ function ScannerPage({
             <Download />
             File
           </Button>
-          <Button variant="outline" disabled={!running} onClick={pauseOrResume}>
+          <Button variant="outline" disabled={!running || cottenScan} onClick={pauseOrResume}>
             {scanner.paused ? <Play /> : <Pause />}
             {scanner.paused ? "Resume" : "Pause"}
           </Button>
@@ -5463,6 +5464,7 @@ function ScannerPage({
                   </SelectContent>
                 </Select>
                 <FieldDescription>{connectionDomainSummary(selectedConnection) || "Domain required"}</FieldDescription>
+                {cottenScan && <FieldDescription>Uses the selected CottenDNS settings, including Normal/Max and DNS transport. Max Auto tests UDP and TCP independently.</FieldDescription>}
               </Field>
               <NumberField
                 label="Scan parallel"

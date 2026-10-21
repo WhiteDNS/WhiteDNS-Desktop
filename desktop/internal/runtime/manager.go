@@ -433,6 +433,10 @@ func (m *Manager) ResolveClientBinary(ctx context.Context) (string, error) {
 	return m.resolveBinary(ctx)
 }
 
+func (m *Manager) ResolveClientBinaryForEngine(ctx context.Context, engine string) (string, error) {
+	return m.resolveBinaryForEngine(ctx, engine)
+}
+
 func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
 	return m.resolveBinaryForEngine(ctx, model.ImportTypeMasterDNS)
 }

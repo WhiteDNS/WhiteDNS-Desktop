@@ -128,6 +128,9 @@ func NewServer(ctx context.Context, cfg ServerConfig) (*Server, error) {
 					if err != nil {
 						return nil, err
 					}
+					if target == ProbeTarget {
+						return newProbeConn(s.ctx), nil
+					}
 					return cfg.Dial(ctx, target)
 				},
 			})

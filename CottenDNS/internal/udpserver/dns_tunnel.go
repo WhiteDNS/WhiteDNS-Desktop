@@ -76,6 +76,13 @@ func cloneInflightBytes(value []byte) []byte {
 }
 
 func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16, sequenceNum uint16) []byte {
+	if s.embeddedDNSExchange != nil {
+		response, err := s.embeddedDNSExchange(rawQuery)
+		if err != nil {
+			return nil
+		}
+		return response
+	}
 	parsed, err := DnsParser.ParseDNSRequestLite(rawQuery)
 	if err != nil {
 		if errors.Is(err, DnsParser.ErrNotDNSRequest) || errors.Is(err, DnsParser.ErrPacketTooShort) {

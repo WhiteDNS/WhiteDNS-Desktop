@@ -44,6 +44,8 @@ const (
 var preSessionPacketTypes = buildPreSessionPacketTypes()
 
 type Server struct {
+	embeddedDialContext      func(context.Context, string, string) (net.Conn, error)
+	embeddedDNSExchange      func([]byte) ([]byte, error)
 	cottenMax                *cottenmax.Server
 	cottenMaxSecret          string
 	cfg                      config.ServerConfig

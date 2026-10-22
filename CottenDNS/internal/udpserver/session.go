@@ -68,6 +68,8 @@ type sessionRecord struct {
 	reuseUntilUnixNano                  int64
 	lastActivityUnixNano                int64
 	lastDeferredCleanupActivityUnixNano int64
+	udpBudgetBlockedSince               time.Time // guarded by mu
+	udpBudgetBlockedCapacity            int       // guarded by mu
 
 	// New fields for ARQ refactor
 	Streams                         map[uint16]*Stream_server
@@ -297,6 +299,10 @@ func newSessionStore(orphanQueueCap int, streamQueueCap int, options ...any) *se
 }
 
 func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8, downloadCompressionType uint8, maxPacketsPerBatch int, legacy bool, codecs ...*security.Codec) (*sessionRecord, bool, error) {
+	return s.findOrCreateWithDownloadLimit(payload, uploadCompressionType, downloadCompressionType, maxPacketsPerBatch, legacy, 0, codecs...)
+}
+
+func (s *sessionStore) findOrCreateWithDownloadLimit(payload []byte, uploadCompressionType uint8, downloadCompressionType uint8, maxPacketsPerBatch int, legacy bool, downloadLimit int, codecs ...*security.Codec) (*sessionRecord, bool, error) {
 	if len(payload) != sessionInitDataSize || !isValidSessionResponseMode(payload[0]) {
 		return nil, false, nil
 	}
@@ -363,12 +369,16 @@ func (s *sessionStore) findOrCreate(payload []byte, uploadCompressionType uint8,
 	record.setLastActivityUnixNano(nowUnixNano)
 	record.UploadCompression = uploadCompressionType
 	record.DownloadCompression = downloadCompressionType
+	maxDownload := s.maxClientDownloadMTU
+	if downloadLimit > 0 && (maxDownload <= 0 || downloadLimit < maxDownload) {
+		maxDownload = downloadLimit
+	}
 	record.applyMTUFromSessionInit(
 		binary.BigEndian.Uint16(payload[2:4]),
 		binary.BigEndian.Uint16(payload[4:6]),
 		maxPacketsPerBatch,
 		s.maxClientUploadMTU,
-		s.maxClientDownloadMTU,
+		maxDownload,
 	)
 	copy(record.VerifyCode[:], payload[6:10])
 	record.Cookie = s.randomCookieLocked()

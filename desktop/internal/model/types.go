@@ -40,9 +40,11 @@ const (
 	DefaultV2RayProfileID      = "v2ray-default"
 	DefaultV2RaySettingsID     = "v2ray-settings-default"
 
-	ImportTypeMasterDNS = "masterdns"
-	ImportTypeStormDNS  = "stormdns"
-	ImportTypeCottenDNS = "cottendns"
+	ImportTypeMasterDNS   = "masterdns"
+	ImportTypeStormDNS    = "stormdns"
+	ImportTypeCottenDNS   = "cottendns"
+	ImportTypeSoar        = "soar"
+	DefaultSoarSettingsID = "settings-soar-preset"
 
 	V2RayProtocolVLESS       = "vless"
 	V2RayProtocolVMess       = "vmess"
@@ -64,6 +66,8 @@ type Choice[T comparable] struct {
 
 func NormalizeImportType(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
+	case ImportTypeSoar:
+		return ImportTypeSoar
 	case ImportTypeStormDNS:
 		return ImportTypeStormDNS
 	case ImportTypeCottenDNS:
@@ -74,14 +78,18 @@ func NormalizeImportType(value string) string {
 }
 
 type ConnectionProfile struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	ImportType        string   `json:"importType"`
-	Domain            string   `json:"domain"`
-	Domains           []string `json:"domains"`
-	EncryptionKey     string   `json:"encryptionKey"`
-	EncryptionMethod  int      `json:"encryptionMethod"`
-	ResolverProfileID string   `json:"resolverProfileId"`
+	SoarSettings       *SoarSettings       `json:"soarSettings,omitempty"`
+	BootstrapResolvers []string            `json:"bootstrapResolvers,omitempty"`
+	RemoteID           string              `json:"remoteId,omitempty"`
+	Subscription       *SubscriptionSource `json:"subscription,omitempty"`
+	ID                 string              `json:"id"`
+	Name               string              `json:"name"`
+	ImportType         string              `json:"importType"`
+	Domain             string              `json:"domain"`
+	Domains            []string            `json:"domains"`
+	EncryptionKey      string              `json:"encryptionKey"`
+	EncryptionMethod   int                 `json:"encryptionMethod"`
+	ResolverProfileID  string              `json:"resolverProfileId"`
 }
 
 // ConnectionDomains returns a normalized, de-duplicated domain list while

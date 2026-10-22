@@ -22,9 +22,13 @@ type EmbeddedConfig struct {
 	DialContext func(context.Context, string, string) (net.Conn, error)
 	ExchangeDNS func(context.Context, []byte) ([]byte, error)
 	Allowed     func() bool
-	// Zero preserves the existing per-account defaults. The embedding panel
-	// must select explicit limits for shared profiles; these are not user counts.
-	MaxActiveSessions, MaxStreamsPerSession int
+
+	// MaxActiveSessions bounds live sessions across native and legacy clients.
+	// Zero preserves the embedded default of 64; valid explicit values are 1–65535.
+	MaxActiveSessions int
+	// MaxStreamsPerSession bounds data streams within each tunnel session.
+	// Zero preserves the embedded default of 128; valid explicit values are 1–65535.
+	MaxStreamsPerSession int
 }
 
 type Embedded struct {
@@ -41,12 +45,15 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 	if parent == nil || in.Domain == "" || len(in.Domain) > 128 || strings.ContainsAny(in.Domain, " /\\\t\n") || len(in.Key) < 32 || in.DialContext == nil || in.ExchangeDNS == nil || in.Allowed == nil {
 		return nil, errors.New("embedded server requires a domain, key and all account-policy hooks")
 	}
+	if in.MaxActiveSessions < 0 || in.MaxActiveSessions > maxServerSessionSlots {
+		return nil, errors.New("embedded session limit must be between 1 and 65535, or zero for the default")
+	}
+	if in.MaxStreamsPerSession < 0 || in.MaxStreamsPerSession > 65535 {
+		return nil, errors.New("embedded stream limit must be between 1 and 65535, or zero for the default")
+	}
 	codec, err := security.NewCodec(5, in.Key)
 	if err != nil {
 		return nil, err
-	}
-	if in.MaxActiveSessions < 0 || in.MaxActiveSessions > 4096 || in.MaxStreamsPerSession < 0 || in.MaxStreamsPerSession > 4096 {
-		return nil, errors.New("embedded session and stream limits must be 0 (existing default) or 1..4096")
 	}
 	cfg := config.DefaultServerConfig()
 	cfg.Domain = []string{in.Domain}
@@ -65,7 +72,7 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 	cfg.DataEncryptionMethod, cfg.EncryptionAutoDetect = 5, false
 	cfg.TCPListenerEnabled, cfg.UDPIPv6Enabled, cfg.TCPIPv6Enabled = false, false, false
 	cfg.MinVPNLabelLength = 1
-	cfg.MaxActiveSessions, cfg.MaxStreamsPerSession = 8, 128
+	cfg.MaxActiveSessions, cfg.MaxStreamsPerSession = 64, 128
 	if in.MaxActiveSessions > 0 {
 		cfg.MaxActiveSessions = in.MaxActiveSessions
 	}
@@ -83,6 +90,12 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 	cfg.SessionCleanupIntervalSecs = 5
 	ctx, cancel := context.WithCancel(parent)
 	s := New(cfg, logger.New("Cotten account", "ERROR"), codec)
+	// A slow destination must not serialize all other connection attempts for
+	// a shared account. Keep the previous 128 queued slots and 32 per-session
+	// admissions, while allowing eight independent dials. DNS retains its
+	// separately sized pool above.
+	s.deferredConnectSession = newDeferredSessionProcessor(8, 16, s.log)
+	s.embeddedAllowed = func() bool { return ctx.Err() == nil && in.Allowed() }
 	s.embeddedDialContext = func(caller context.Context, network, address string) (net.Conn, error) {
 		if ctx.Err() != nil || !in.Allowed() {
 			return nil, net.ErrClosed
@@ -106,11 +119,31 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 		}
 		return conn, err
 	}
-	s.embeddedDNSExchange = func(raw []byte) ([]byte, error) {
+	s.dialStreamUpstreamFn = func(network, address string, timeout time.Duration) (net.Conn, error) {
+		caller := ctx
+		if timeout > 0 {
+			var cancelTimeout context.CancelFunc
+			caller, cancelTimeout = context.WithTimeout(caller, timeout)
+			defer cancelTimeout()
+		}
+		return s.embeddedDialContext(caller, network, address)
+	}
+	s.embeddedDNSExchange = func(caller context.Context, raw []byte) ([]byte, error) {
 		if ctx.Err() != nil || !in.Allowed() {
 			return nil, net.ErrClosed
 		}
-		return in.ExchangeDNS(ctx, raw)
+		if caller == nil {
+			caller = context.Background()
+		}
+		timeout := s.cfg.DNSUpstreamTimeout()
+		if timeout <= 0 {
+			timeout = 4 * time.Second
+		}
+		lookupCtx, cancelLookup := context.WithTimeout(caller, timeout)
+		defer cancelLookup()
+		stop := context.AfterFunc(ctx, cancelLookup)
+		defer stop()
+		return in.ExchangeDNS(lookupCtx, raw)
 	}
 	e := &Embedded{s: s, ctx: ctx, cancel: cancel, allowed: in.Allowed}
 	s.deferredDNSSession.Start(ctx)
@@ -120,15 +153,34 @@ func NewEmbedded(parent context.Context, in EmbeddedConfig) (*Embedded, error) {
 	return e, nil
 }
 
-// HandleDNS processes a complete wire-format DNS message over either transport.
+// HandleDNS processes a complete wire-format UDP DNS message.
 // The caller owns framing, socket limits, queuing and domain-based routing.
 func (e *Embedded) HandleDNS(query []byte) []byte {
+	return e.handleDNS(query, false)
+}
+
+// HandleDNSTCP preserves the larger response budget of a framed TCP transport.
+func (e *Embedded) HandleDNSTCP(query []byte) []byte {
+	return e.handleDNS(query, true)
+}
+
+func (e *Embedded) handleDNS(query []byte, tcp bool) []byte {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.ctx.Err() != nil || len(query) > 65535 || !e.allowed() {
 		return nil
 	}
+	if tcp {
+		return e.s.safeHandlePacketTCP(query)
+	}
 	return e.s.safeHandlePacket(query)
+}
+
+// SessionCount reports live native and legacy sessions for this account.
+func (e *Embedded) SessionCount() int {
+	e.s.sessions.mu.RLock()
+	defer e.s.sessions.mu.RUnlock()
+	return len(e.s.sessions.activeIDs)
 }
 
 func (e *Embedded) Close() error {

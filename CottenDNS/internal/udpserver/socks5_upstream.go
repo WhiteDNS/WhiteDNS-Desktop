@@ -130,9 +130,6 @@ func (s *Server) dialTCPTargetContext(ctx context.Context, address string) (net.
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	if s.embeddedDialContext != nil {
-		return s.embeddedDialContext(ctx, "tcp", address)
-	}
 	dialFn := s.dialStreamUpstreamFn
 	timeout := s.socksConnectTimeout
 	if timeout <= 0 {
@@ -145,6 +142,14 @@ func (s *Server) dialTCPTargetContext(ctx context.Context, address string) (net.
 		}
 	}
 	startedAt := logger.NowUnixNano()
+	if s.embeddedDialContext != nil {
+		if timeout > 0 {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, timeout)
+			defer cancel()
+		}
+		return s.embeddedDialContext(ctx, "tcp", address)
+	}
 
 	if dialFn == nil {
 		dialer := net.Dialer{Timeout: timeout}

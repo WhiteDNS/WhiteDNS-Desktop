@@ -8,21 +8,39 @@ WhiteDNS Desktop is a desktop application for running a local DNS tunneling clie
 
 Official channel: [https://t.me/whitedns](https://t.me/whitedns)
 
+## Download and subscriptions
+
+Download the official [latest desktop release](https://github.com/WhiteDNS/WhiteDNS-Desktop/releases/latest).
+Use the Windows x64 ZIP on ordinary Intel/AMD PCs; Windows ARM64 is for Windows on ARM.
+macOS and Linux packages are available for Intel/AMD and ARM64.
+
+To use a WhiteDNS Soar panel account:
+
+1. Copy its **subscription URL** from the panel.
+2. Open **Connections → Import**, paste the HTTPS URL, then choose **Import**.
+3. Select the imported connection and connect. The account's DNS resolvers and Soar settings are imported together.
+4. Use **Refresh subscriptions** while disconnected to receive account changes. Due subscriptions also refresh when the app opens while disconnected.
+
+A `soar://` profile link can also be imported, but does not receive subscription updates.
+HTTP subscriptions need explicit consent because they are unencrypted. Keep subscription URLs and full backups private.
+Saved profiles remain available when a subscription download fails; the server still enforces expiry and quotas.
+See [the Soar and subscription guide](docs/SOAR-SUBSCRIPTIONS.md).
+
 ## Credits
 
 WhiteDNS is backed by the [MasterDNS Client](https://github.com/masterking32/MasterDnsVPN)
-project and vendors the CottenDNS engine from
+project, integrates [Lantern Soar](https://github.com/getlantern/soar), and vendors the CottenDNS engine from
 [TaJirax/cottenDNS](https://github.com/TaJirax/cottenDNS) at the commit pinned
 in [`vendor/cottendns.json`](./vendor/cottendns.json).
 
 The desktop shell is built with [Wails](https://wails.io), and the proxy hop
 uses [Xray-core](https://github.com/XTLS/Xray-core). The MasterDNS and StormDNS
-engines are vendored in-tree under their own terms.
+engines are vendored in-tree under their own terms. Soar v0.2.3 is Apache-2.0 licensed, with the same WhiteDNS transport changes used in Android 1.6.8; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Features
 
 - DNS tunneling client for macOS, Windows, and Linux.
-- Selectable engine: CottenDNS, MasterDNS, or StormDNS.
+- Selectable engine: CottenDNS, MasterDNS, StormDNS, or Soar.
 - Local SOCKS5 and HTTP proxy, with an optional managed system proxy that is
   restored on disconnect and after an unclean exit.
 - Multi-domain connection profiles, with import, export, and bulk management.
@@ -33,11 +51,13 @@ engines are vendored in-tree under their own terms.
   category, showing the value each profile will actually run with.
 - Engine presets, including speed, survival, and TCP-survival.
 - Live connection progress, resolver state, traffic statistics, and logs.
+- HTTPS subscriptions with refresh, account traffic/quota/expiry metadata, and cached profiles.
+- Soar advanced transport, discovery, DNS packet and stream settings with help on each question mark.
 - Full backup and restore of every saved profile through native file dialogs.
 
 ## Building
 
-Requires Go 1.25+, Node 24+, and the Wails CLI.
+Requires Go 1.26.9+, Node 24+, and the Wails CLI.
 
 ```sh
 make -C desktop deps     # install frontend and Go dependencies
@@ -59,3 +79,14 @@ diagnostics; please check any log you attach before posting it.
 Report vulnerabilities privately to the official WhiteDNS team via the channel
 above rather than opening a public issue. Section 6 of the license covers
 security research and responsible disclosure.
+
+## CottenMax beta on the current Desktop client
+
+The `beta/cottenmax-20261021` branch combines the latest main interface with the reviewed CottenDNS core [`e50a43ef`](https://github.com/WhiteDNS/CottenDNS/commit/e50a43ef75ad10ae2ffbfa106d13c50de3e77624), including [PR #15](https://github.com/WhiteDNS/CottenDNS/pull/15). [Debug builds and test results](https://github.com/WhiteDNS/WhiteDNS-Desktop/actions?query=branch%3Abeta%2Fcottenmax-20261021) are available as workflow artifacts; these are beta builds, with no stable app release published by this update.
+
+Select a CottenDNS connection and a CottenDNS settings profile. Open **Settings → CottenDNS → CottenDNS mode**, select **CottenMax (beta)**, save and reconnect. The existing domain, key and resolver profile are reused.
+
+- Normal and Max coexist on an updated Max-enabled CottenDNS server. If Max cannot connect, switch back to Normal using the same profile.
+- UDP, TCP and automatic UDP/TCP selection apply to actual tunnel connections and Max resolver scanning. Encrypted DNS, padding, standby domains, discovery and query shaping remain optional.
+- Scans show testing and verified DNS paths. Max connection readiness waits for the core's authenticated tunnel-transfer marker.
+- Max options stay inside CottenDNS. The current main Soar engine, subscriptions and other engine controls remain available.

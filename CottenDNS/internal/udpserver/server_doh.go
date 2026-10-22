@@ -204,7 +204,7 @@ func (s *Server) handleDoHRequest(w http.ResponseWriter, r *http.Request, maxMes
 		return
 	}
 
-	response := s.safeHandlePacket(query)
+	response := s.safeHandlePacketTCP(query)
 	if len(response) == 0 {
 		// No tunnel answer (e.g. a keepalive or an unrecognized query). Signal a
 		// transient upstream failure so the client falls back rather than caching.

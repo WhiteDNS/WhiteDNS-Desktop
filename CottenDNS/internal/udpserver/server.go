@@ -45,7 +45,10 @@ var preSessionPacketTypes = buildPreSessionPacketTypes()
 
 type Server struct {
 	embeddedDialContext      func(context.Context, string, string) (net.Conn, error)
-	embeddedDNSExchange      func([]byte) ([]byte, error)
+	embeddedDNSExchange      func(context.Context, []byte) ([]byte, error)
+	embeddedAllowed          func() bool
+	embeddedDNSCacheMu       sync.Mutex
+	embeddedDNSCache         map[string]embeddedDNSCacheEntry
 	cottenMax                *cottenmax.Server
 	cottenMaxSecret          string
 	cfg                      config.ServerConfig
@@ -567,7 +570,7 @@ func splitDeferredSessionPools(totalWorkers int, totalQueue int) (dnsWorkers int
 
 	// DNS queries use a dedicated lightweight pool so connect-heavy work keeps
 	// the full user-configured deferred capacity.
-	dnsWorkers = 1
+	dnsWorkers = min(max(totalWorkers, 2), 8)
 	connectWorkers = totalWorkers
 
 	connectQueue = totalQueue

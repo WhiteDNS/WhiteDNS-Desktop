@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -464,6 +464,9 @@ func (s *Server) dispatchDeferredSessionPacketTracked(vpnPacket VpnProto.Packet,
 
 	if !s.tryBeginDeferredPacket(vpnPacket) {
 		return deferredDispatchAlreadyPending
+	}
+	if vpnPacket.PacketType == Enums.PACKET_STREAM_SYN || vpnPacket.PacketType == Enums.PACKET_SOCKS5_SYN {
+		run = s.deferredConnectRun(vpnPacket, run)
 	}
 
 	wrappedRun := func(ctx context.Context) {

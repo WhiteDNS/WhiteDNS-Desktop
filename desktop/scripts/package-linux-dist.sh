@@ -12,7 +12,7 @@ formats="${LINUX_PACKAGE_FORMATS-deb,rpm}"
 asset_suffix="${LINUX_ASSET_SUFFIX:-linux-$arch}"
 description="${LINUX_PACKAGE_DESCRIPTION:-WhiteDNS desktop client}"
 maintainer="${LINUX_PACKAGE_MAINTAINER:-WhiteDNS <noreply@whitedns.local>}"
-license="${LINUX_PACKAGE_LICENSE:-MIT}"
+license="${LINUX_PACKAGE_LICENSE:-LicenseRef-WhiteDNS}"
 linuxdeploy_url="${LINUXDEPLOY_URL:-https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage}"
 linuxdeploy_bin="${LINUXDEPLOY_BIN:-}"
 

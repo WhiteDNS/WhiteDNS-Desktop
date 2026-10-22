@@ -80,19 +80,20 @@ jobs:
             version="${GITHUB_REF_NAME#desktop-v}"
           fi
           if [ -z "$version" ]; then
-            version="1.2.4"
+            version="1.3.1"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25.x"
+          go-version: "1.26.9"
           cache: true
           cache-dependency-path: |
             desktop/go.sum
             MasterDnsVPN/go.sum
             CottenDNS/go.sum
+            Soar/go.sum
 
       - name: Setup Node
         uses: actions/setup-node@v6
@@ -117,6 +118,19 @@ jobs:
           WAILS_VERSION="$(go list -m -f '{{.Version}}' github.com/wailsapp/wails/v2)"
           go install "github.com/wailsapp/wails/v2/cmd/wails@${WAILS_VERSION}"
 
+      - name: Build frontend and test desktop integration
+        run: |
+          npm run build --prefix desktop/frontend
+          if [ "${{ matrix.kind }}" = "linux" ]; then
+            go -C desktop test -tags webkit2_41 ./... -count=1 -timeout=180s
+          else
+            go -C desktop test ./... -count=1 -timeout=180s
+          fi
+      - name: Test Soar wrapper and transport compatibility
+        if: matrix.artifact == 'whitedns-desktop-windows-x64'
+        run: |
+          go -C Soar test ./... -count=1 -timeout=120s
+          go -C Soar/third_party/soar test ./... -count=1 -timeout=180s
       - name: Build package
         shell: bash
         run: |
@@ -133,6 +147,9 @@ jobs:
               ;;
           esac
           make -C desktop VERSION="${{ steps.desktop-version.outputs.version }}" stage-artifacts PLATFORM="${{ matrix.artifact }}"
+
+      - name: Verify embedded Soar engine
+        run: python3 desktop/scripts/verify-soar-package.py "${{ matrix.kind == 'macos' && 'darwin' || matrix.kind }}" "${{ matrix.arch }}"
 
       - name: Archive package
         id: archive
@@ -268,6 +285,10 @@ jobs:
 
       - name: List release assets
         run: find release-assets -maxdepth 1 -type f -print | sort
+
+      - name: Generate package checksums
+        working-directory: release-assets
+        run: sha256sum * > SHA256SUMS.txt
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2

@@ -11,6 +11,7 @@ import (
 	goruntime "runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -27,6 +28,7 @@ func TestManagerStartsFakeStormDNSAndStopsCleanly(t *testing.T) {
 	stormPort := freePort(t)
 	publicPort := freePort(t)
 
+	var callbackMu sync.Mutex
 	var logs []string
 	var states []string
 	progressCh := make(chan model.ConnectionProgress, 4)
@@ -39,8 +41,12 @@ func TestManagerStartsFakeStormDNSAndStopsCleanly(t *testing.T) {
 			StopTimeout:    2 * time.Second,
 		},
 		Callbacks{
-			OnLog:      func(line string) { logs = append(logs, line) },
-			OnState:    func(status string, _ string) { states = append(states, status) },
+			OnLog: func(line string) { callbackMu.Lock(); defer callbackMu.Unlock(); logs = append(logs, line) },
+			OnState: func(status string, _ string) {
+				callbackMu.Lock()
+				defer callbackMu.Unlock()
+				states = append(states, status)
+			},
 			OnProgress: func(next model.ConnectionProgress) { progressCh <- next },
 		},
 	)
@@ -105,6 +111,8 @@ func TestManagerStartsFakeStormDNSAndStopsCleanly(t *testing.T) {
 	if manager.IsRunning() {
 		t.Fatal("expected manager to stop")
 	}
+	callbackMu.Lock()
+	defer callbackMu.Unlock()
 	if len(logs) == 0 {
 		t.Fatal("expected fake helper logs")
 	}
@@ -1406,5 +1414,27 @@ func TestEmbeddedCottenDNSReplacesPreviouslyExtractedCore(t *testing.T) {
 	}
 	if string(got) != string(raw) {
 		t.Fatal("old extracted core survived the app update")
+	}
+}
+
+func TestCottenReadinessRequiresTunnelProofAndHonorsCancellation(t *testing.T) {
+	m := NewManager(Options{StartTimeout: 20 * time.Millisecond}, Callbacks{})
+	active := &activeProcess{done: make(chan struct{}), tunnelReady: make(chan struct{})}
+	if err := m.waitForTunnelReady(context.Background(), active); err == nil {
+		t.Fatal("local listener alone reported ready")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := m.waitForTunnelReady(ctx, active); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
+	}
+	close(active.tunnelReady)
+	if err := m.waitForTunnelReady(context.Background(), active); err != nil {
+		t.Fatal(err)
+	}
+	exited := &activeProcess{done: make(chan struct{}), tunnelReady: make(chan struct{})}
+	close(exited.done)
+	if err := m.waitForTunnelReady(context.Background(), exited); err == nil {
+		t.Fatal("exited core reported ready")
 	}
 }

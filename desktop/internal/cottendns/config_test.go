@@ -235,3 +235,24 @@ func TestIPv6DesktopIntegrationContract(t *testing.T) {
 		}
 	}
 }
+
+func TestCottenMaxScanRetainsTransportAndOptionalFeatures(t *testing.T) {
+	options := map[string]any{"TUNNEL_MODE": "cottenmax", "RESOLVER_TRANSPORT": "auto",
+		"COTTENMAX_MAX_INFLIGHT": 128, "RESOLVER_DISCOVERY_ENABLED": true,
+		"RESOLVER_DISCOVERY_CANDIDATES": []string{"1.1.1.1:5353"}}
+	connection := model.ConnectionProfile{Domain: "a.example", EncryptionKey: "shared-test-key", EncryptionMethod: 5}
+	live := RenderClientTOML(connection, options)
+	scan := RenderScannerClientTOML(connection, options, 4)
+	for _, key := range []string{`TUNNEL_MODE = "cottenmax"`, `RESOLVER_TRANSPORT = "auto"`,
+		`COTTENMAX_MAX_INFLIGHT = 128`, `RESOLVER_DISCOVERY_ENABLED = true`, `ENCRYPTION_KEY = "shared-test-key"`} {
+		if !strings.Contains(live, key) || !strings.Contains(scan, key) {
+			t.Fatalf("live/scan lost %s", key)
+		}
+	}
+	if !strings.Contains(scan, "MTU_TEST_PARALLELISM_RESOLVERS = 4") || !strings.Contains(scan, "LOCAL_DNS_ENABLED = false") {
+		t.Fatal("scan-specific controls missing")
+	}
+	if options["LOCAL_DNS_ENABLED"] != nil {
+		t.Fatal("scan mutated the saved profile")
+	}
+}

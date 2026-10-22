@@ -8,6 +8,7 @@
 package udpserver
 
 import (
+	"context"
 	"encoding/binary"
 	"errors"
 	"io"
@@ -68,6 +69,13 @@ func (m *dnsResolveInflightManager) Wait(entry *dnsResolveInflightEntry, timeout
 	return m.inner.Wait(entry, timeout)
 }
 
+func (m *dnsResolveInflightManager) WaitContext(ctx context.Context, entry *dnsResolveInflightEntry, timeout time.Duration) ([]byte, bool) {
+	if m == nil {
+		return nil, false
+	}
+	return m.inner.WaitContext(ctx, entry, timeout)
+}
+
 func cloneInflightBytes(value []byte) []byte {
 	if len(value) == 0 {
 		return nil
@@ -75,13 +83,40 @@ func cloneInflightBytes(value []byte) []byte {
 	return append([]byte(nil), value...)
 }
 
-func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16, sequenceNum uint16) []byte {
-	if s.embeddedDNSExchange != nil {
-		response, err := s.embeddedDNSExchange(rawQuery)
-		if err != nil {
-			return nil
+// Queueing consumes the same DNS budget as the lookup itself. Otherwise a
+// resolver outage can leave minutes of stale work that each starts a fresh
+// timeout after the workers recover.
+func (s *Server) deferredDNSRun(run func(context.Context)) func(context.Context) {
+	if run == nil {
+		return nil
+	}
+	timeout := s.cfg.DNSUpstreamTimeout()
+	if timeout <= 0 {
+		timeout = 4 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	return func(parent context.Context) {
+		if !time.Now().Before(deadline) {
+			return
 		}
-		return response
+		ctx, cancel := context.WithDeadline(parent, deadline)
+		defer cancel()
+		if ctx.Err() == nil {
+			run(ctx)
+		}
+	}
+}
+
+func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16, sequenceNum uint16) []byte {
+	return s.buildDNSQueryResponsePayloadContext(context.Background(), rawQuery, sessionID, sequenceNum)
+}
+
+func (s *Server) buildDNSQueryResponsePayloadContext(ctx context.Context, rawQuery []byte, sessionID uint16, sequenceNum uint16) []byte {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil || !s.dnsAccountAllowed() {
+		return nil
 	}
 	parsed, err := DnsParser.ParseDNSRequestLite(rawQuery)
 	if err != nil {
@@ -103,7 +138,7 @@ func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16,
 		return response
 	}
 
-	if !DnsParser.IsSupportedTunnelDNSQuery(parsed.FirstQuestion.Type, parsed.FirstQuestion.Class) {
+	if s.embeddedDNSExchange == nil && !DnsParser.IsSupportedTunnelDNSQuery(parsed.FirstQuestion.Type, parsed.FirstQuestion.Class) {
 		response, responseErr := DnsParser.BuildNotImplementedResponseFromLite(rawQuery, parsed)
 		if responseErr != nil {
 			return nil
@@ -112,8 +147,11 @@ func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16,
 	}
 
 	cacheKey := dnscache.BuildKey(parsed.FirstQuestion.Name, parsed.FirstQuestion.Type, parsed.FirstQuestion.Class)
+	if s.embeddedDNSExchange != nil {
+		cacheKey = embeddedDNSQueryKey(rawQuery, cacheKey)
+	}
 	now := time.Now()
-	if cached, ok := s.dnsCache.GetReady(cacheKey, rawQuery, now); ok {
+	if cached, ok := s.cachedDNSResponse(cacheKey, rawQuery, now); ok {
 		if s.log != nil {
 			s.log.Debugf(
 				"🧠 <green>Tunnel DNS Cache Hit</green> <magenta>|</magenta> <blue>Domain</blue>: <cyan>%s</cyan> <magenta>|</magenta> <blue>Type</blue>: <yellow>%s</yellow> <magenta>|</magenta> <blue>Session</blue>: <cyan>%d</cyan> <magenta>|</magenta> <blue>Seq</blue>: <cyan>%d</cyan>",
@@ -141,10 +179,16 @@ func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16,
 		if waitTimeout <= 0 {
 			waitTimeout = 8 * time.Second
 		}
-		if resolved, ok := s.dnsResolveInflight.Wait(inflightEntry, waitTimeout); ok && len(resolved) != 0 {
-			return dnscache.PatchResponseForQuery(resolved, rawQuery)
+		if resolved, ok := s.dnsResolveInflight.WaitContext(ctx, inflightEntry, waitTimeout); ok && len(resolved) != 0 {
+			if !s.dnsAccountAllowed() || ctx.Err() != nil {
+				return nil
+			}
+			return patchEmbeddedDNSQuestion(dnscache.PatchResponseForQuery(resolved, rawQuery), rawQuery)
 		}
-		if cached, ok := s.dnsCache.GetReady(cacheKey, rawQuery, now); ok {
+		if !s.dnsAccountAllowed() || ctx.Err() != nil {
+			return nil
+		}
+		if cached, ok := s.cachedDNSResponse(cacheKey, rawQuery, time.Now()); ok {
 			return cached
 		}
 		response, responseErr := DnsParser.BuildServerFailureResponseFromLite(rawQuery, parsed)
@@ -154,7 +198,12 @@ func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16,
 		return response
 	}
 
-	resolved, err := s.resolveDNSUpstream(rawQuery)
+	var resolved []byte
+	if s.embeddedDNSExchange != nil {
+		resolved, err = s.embeddedDNSExchange(ctx, rawQuery)
+	} else {
+		resolved, err = s.resolveDNSUpstream(rawQuery)
+	}
 	if s.log != nil {
 		s.log.Debugf(
 			"🔎 <green>Tunnel DNS Upstream Lookup</green> <magenta>|</magenta> <blue>Domain</blue>: <cyan>%s</cyan> <magenta>|</magenta> <blue>Type</blue>: <yellow>%s</yellow> <magenta>|</magenta> <blue>Session</blue>: <cyan>%d</cyan> <magenta>|</magenta> <blue>Seq</blue>: <cyan>%d</cyan>",
@@ -164,8 +213,12 @@ func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16,
 			sequenceNum,
 		)
 	}
-	s.dnsResolveInflight.Resolve(cacheKey, resolved)
+	if !s.dnsAccountAllowed() || ctx.Err() != nil {
+		s.dnsResolveInflight.Resolve(cacheKey, nil)
+		return nil
+	}
 	if err != nil || len(resolved) == 0 {
+		s.dnsResolveInflight.Resolve(cacheKey, nil)
 		if s.log != nil {
 			s.log.Debugf(
 				"⚠️ <yellow>Tunnel DNS Upstream Failed</yellow> <magenta>|</magenta> <blue>Domain</blue>: <cyan>%s</cyan> <magenta>|</magenta> <blue>Type</blue>: <yellow>%s</yellow> <magenta>|</magenta> <blue>Session</blue>: <cyan>%d</cyan> <magenta>|</magenta> <blue>Seq</blue>: <cyan>%d</cyan>",
@@ -182,14 +235,19 @@ func (s *Server) buildDNSQueryResponsePayload(rawQuery []byte, sessionID uint16,
 		return response
 	}
 
-	s.dnsCache.SetReady(
-		cacheKey,
-		parsed.FirstQuestion.Name,
-		parsed.FirstQuestion.Type,
-		parsed.FirstQuestion.Class,
-		resolved,
-		now,
-	)
+	if s.embeddedDNSExchange != nil {
+		s.cacheEmbeddedDNSResponse(cacheKey, rawQuery, resolved, parsed.FirstQuestion, time.Now())
+	} else {
+		s.dnsCache.SetReady(
+			cacheKey,
+			parsed.FirstQuestion.Name,
+			parsed.FirstQuestion.Type,
+			parsed.FirstQuestion.Class,
+			resolved,
+			now,
+		)
+	}
+	s.dnsResolveInflight.Resolve(cacheKey, resolved)
 	if s.log != nil {
 		s.log.Debugf(
 			"🌍 <green>Tunnel DNS Resolved Upstream</green> <magenta>|</magenta> <blue>Domain</blue>: <cyan>%s</cyan> <magenta>|</magenta> <blue>Type</blue>: <yellow>%s</yellow> <magenta>|</magenta> <blue>Session</blue>: <cyan>%d</cyan> <magenta>|</magenta> <blue>Seq</blue>: <cyan>%d</cyan> <magenta>|</magenta> <blue>Bytes</blue>: <cyan>%d</cyan>",

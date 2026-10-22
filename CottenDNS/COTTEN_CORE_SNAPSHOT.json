@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "0f1d6f0eb34eb4490520ea448bb1397df38b775a",
-  "base_commit": "0f1d6f0eb34eb4490520ea448bb1397df38b775a",
+  "commit": "e50a43ef75ad10ae2ffbfa106d13c50de3e77624",
+  "base_commit": "e50a43ef75ad10ae2ffbfa106d13c50de3e77624",
   "source": "Pinned production inputs; local tests, README additions and caches excluded.",
-  "source_tree_sha256_lf": "cfbb4a195990fb4fa9264fe0664f08d2db59cd9c4ef52aacd3062a9ab7b8e707",
+  "source_tree_sha256_lf": "1fca1092f7ceed1143a0512f0cd122276a33028bc8c6c248528523ed7384745d",
   "soar_base": "v0.2.3",
   "files": [
     {
@@ -300,7 +300,7 @@
     },
     {
       "path": "internal/client/transport.go",
-      "sha256_lf": "21790cc1207d1e11d2950ce0bbe79a4e9168573b3ea0aa876c4fcd1fad44cb3d"
+      "sha256_lf": "6a36cd3c08f70a1f9d3f5d6949ab7ba1cca37fcd4f4e012120d4d86b7f181044"
     },
     {
       "path": "internal/client/tunnel_guidance.go",
@@ -499,6 +499,10 @@
       "sha256_lf": "a4340b343e1ff4303244dc784960fe82c80c74d0ba4c176c68f6eee5516bfbe7"
     },
     {
+      "path": "internal/dnsparser/response_budget.go",
+      "sha256_lf": "6c468bbe2f319468888655be8415c3c9441084fd53c35552662817c641db37ef"
+    },
+    {
       "path": "internal/dnsparser/transport.go",
       "sha256_lf": "7a6495cbc2cf7b1a18f07c75035af615cf0bbf9b6420f0a608a3aa388df70dd1"
     },
@@ -572,7 +576,7 @@
     },
     {
       "path": "internal/inflight/manager.go",
-      "sha256_lf": "5d4574a60ef8dff3c9d5e75ed6d7db0bd2a80aa373fc0719319e14a9630831f8"
+      "sha256_lf": "e4e399942587fdbe391ca111e479e412e811eeb7aca3dc2645877eac3a587921"
     },
     {
       "path": "internal/logger/color_support_unix.go",
@@ -640,11 +644,11 @@
     },
     {
       "path": "internal/udpserver/deferred_session.go",
-      "sha256_lf": "084e85cc3273fe07c4e1e5f471566b8569926f86b085f991306d0f730319ab49"
+      "sha256_lf": "aa30724edbabc14461596cb1c7bc8021fc2cec519c0ae3d18dca187159ab2ee2"
     },
     {
       "path": "internal/udpserver/dns_tunnel.go",
-      "sha256_lf": "18938b43c8f91b6ca655bee4ef3b246bd8577e1aba93f413f13667341ed28d42"
+      "sha256_lf": "296f2338d4f9fc6ce8cce51f3e495833e8e7a986f3c7022b219b3607b26f87cc"
     },
     {
       "path": "internal/udpserver/domain_rotation.go",
@@ -656,7 +660,11 @@
     },
     {
       "path": "internal/udpserver/embedded.go",
-      "sha256_lf": "3ec52ebeb217aac60582b0402a7d898b7ae516a4ce1a15b750f27292c525c91c"
+      "sha256_lf": "4c619b0f6287ffa9963ef4223cf2ca78a65661a6d534fcf14e82ac87e4e84689"
+    },
+    {
+      "path": "internal/udpserver/embedded_dns.go",
+      "sha256_lf": "afc17365c45034bc7d7adeb8021cd290c3ba2d96a5d9500d44c502ba4497206c"
     },
     {
       "path": "internal/udpserver/invalid_cookie_tracker.go",
@@ -671,6 +679,10 @@
       "sha256_lf": "d6b77e8bacf36d7727b8bd61bfd4784b6695b534e8c46caa7362a3592178ef9c"
     },
     {
+      "path": "internal/udpserver/response_budget.go",
+      "sha256_lf": "da6f49b3954e6df2045dc4cde0e92c7251a3834e8287b5f31543dc4d11ea72df"
+    },
+    {
       "path": "internal/udpserver/reuseport_other.go",
       "sha256_lf": "5fd5458b666846c007617bd1e15915ca15f1dfce4d96dc54741b723ce8a424d5"
     },
@@ -680,7 +692,7 @@
     },
     {
       "path": "internal/udpserver/server.go",
-      "sha256_lf": "db01c34bd31b037a9d7733a425674ebac02ae25323382f73ab0151a396d5e536"
+      "sha256_lf": "87820e1022f8bc69a0d3aa5f1fb6229934b30eaaa5a76ca5b197a225545f2b95"
     },
     {
       "path": "internal/udpserver/server_admission.go",
@@ -692,11 +704,11 @@
     },
     {
       "path": "internal/udpserver/server_deferred.go",
-      "sha256_lf": "a1aefd2817e23570b29dea50fdfb41197ace10953bb912dac7a536fb5cff2af9"
+      "sha256_lf": "382e72ce5ae42b3358bd635498e6581ed9d477dc09000532f49cbca19fc52fc9"
     },
     {
       "path": "internal/udpserver/server_doh.go",
-      "sha256_lf": "731a41ebe1d85dba7f48b2365c2f2c40c6bb50b721a6626de1e10c55ca29a813"
+      "sha256_lf": "cea10dfa8d30a05a17e0ff5ff1be4dfeb19eba64193ff54f2c11f4502209d479"
     },
     {
       "path": "internal/udpserver/server_doh_coexist.go",
@@ -712,11 +724,11 @@
     },
     {
       "path": "internal/udpserver/server_ingress.go",
-      "sha256_lf": "c963e7a94f310805066176edbc02875aa82256ae212c74500017568b5578d9cb"
+      "sha256_lf": "09418aa518f0ca8d8f3110547851b35b8bf7eccf6de15fb81ec13915b14b4f3b"
     },
     {
       "path": "internal/udpserver/server_postsession.go",
-      "sha256_lf": "9351df818542bba8bf632f69b4d020a4d8ea0c4902ec0dba5b595dfa77807645"
+      "sha256_lf": "864f9061465f010599a90873026db3ee7285ac3ebd93880e72f3376d4d7a37de"
     },
     {
       "path": "internal/udpserver/server_replay.go",
@@ -724,11 +736,11 @@
     },
     {
       "path": "internal/udpserver/server_runtime.go",
-      "sha256_lf": "6ba7aeb342b0a2798efd232681782f90c8ee527f740daf4c4dfba13d7ab9614b"
+      "sha256_lf": "5703b5b7c6d7c8e7333e9759b876c83345cf103acf1b199be0774b8ccf16521f"
     },
     {
       "path": "internal/udpserver/server_session.go",
-      "sha256_lf": "b6f91589aa9faf4479b8769b51e1a61c10f5af0c10e5bd5bb51af1aaf2f28be6"
+      "sha256_lf": "8b2e89c8a1f1b46a3cff620f7c76781c0ce418a2072e284c297dd23e9448a911"
     },
     {
       "path": "internal/udpserver/server_sni_router.go",
@@ -736,7 +748,7 @@
     },
     {
       "path": "internal/udpserver/server_tcp.go",
-      "sha256_lf": "9364e2708e8dc652d7afb682f3397095c62f7944322777bb8cb9229c3812b398"
+      "sha256_lf": "890a1b1f70923d1e7da9f59adbf7b05c8b988f23ff312e68c36fefe96889b76e"
     },
     {
       "path": "internal/udpserver/server_tls.go",
@@ -752,11 +764,11 @@
     },
     {
       "path": "internal/udpserver/session.go",
-      "sha256_lf": "da590f343c333d82e63c9daee94dde5d2a5f2bf6c552020ee2026e870e7bd31e"
+      "sha256_lf": "1360d608730c75a16bdde89f98bc3fa0ab847c5c757cb9dcb22e558f9dbe84c8"
     },
     {
       "path": "internal/udpserver/socks5_upstream.go",
-      "sha256_lf": "513357d092522f441ff7cb64a60aa02542165a11fe8c634b01f1d6cda0417ce6"
+      "sha256_lf": "33b9be1ad16025b7a069d422c43095e07d045bcc2b3121151dc2b1f347d97b63"
     },
     {
       "path": "internal/udpserver/stream_server.go",

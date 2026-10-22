@@ -1,7 +1,9 @@
 SHELL := /bin/sh
+# Go 1.26.1 can corrupt memory during overlapped UDP I/O on Windows (golang/go#77975).
+export GOTOOLCHAIN ?= go1.26.9
 
 APP_NAME := WhiteDNS Desktop
-DEFAULT_VERSION := 1.2.4
+DEFAULT_VERSION := 1.3.1
 VERSION_FROM_ARGS := $(shell set -- $(MAKECMDGOALS); while [ "$$1" != "" ]; do if [ "$$1" = "--version" ]; then shift; if [ "$$1" != "" ]; then printf '%s' "$$1"; fi; exit; fi; shift; done)
 VERSION ?= $(if $(VERSION_FROM_ARGS),$(VERSION_FROM_ARGS),$(DEFAULT_VERSION))
 APP_VERSION := $(strip $(VERSION))
@@ -10,8 +12,6 @@ RELEASE_ASSET_PREFIX ?= WhiteDNS-Desktop
 ROOT_DIR := ..
 MASTERDNS_DIR := $(ROOT_DIR)/MasterDnsVPN
 COTTENDNS_DIR := $(ROOT_DIR)/CottenDNS
-COTTENDNS_ATTRIBUTION_FILES := SOAR_LICENSE.txt QUIC_GO_LICENSE.txt QPACK_LICENSE.txt THIRD_PARTY_NOTICES.md
-PACKAGE_LICENSE_DIR ?=
 COTTENDNS_VERSION := $(shell sed -n 's/.*"commit": "\([^"]*\)".*/\1/p' "$(ROOT_DIR)/vendor/cottendns.json")
 WAILS ?= wails
 GO_BUILD_CACHE ?= $(CURDIR)/.cache/go-build
@@ -230,6 +230,7 @@ prepare-embedded-client:
 	@: > clients/.keep
 	$(MAKE) masterdns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
 	$(MAKE) cottendns-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
+	$(MAKE) soar-client-target TARGET_GOOS="$(TARGET_GOOS)" TARGET_GOARCH="$(TARGET_GOARCH)"
 
 prepare-embedded-macos-clients:
 	$(MAKE) prepare-embedded-client TARGET_GOOS=darwin TARGET_GOARCH="$(MACOS_CLIENT_ARCH)"
@@ -417,8 +418,7 @@ package-linux-fedora-rpm-docker: validate-version
 package-all: all
 
 stage-artifacts:
-	@set -e; \
-	if [ -z "$(PLATFORM)" ]; then \
+	@if [ -z "$(PLATFORM)" ]; then \
 		printf 'PLATFORM is required\n' >&2; \
 		exit 1; \
 	fi; \
@@ -426,7 +426,6 @@ stage-artifacts:
 		printf 'build/bin does not exist; run a package target first\n' >&2; \
 		exit 1; \
 	fi; \
-	$(MAKE) package-assets; \
 	rm -rf "build/releases/$(PLATFORM)"; \
 	mkdir -p "build/releases/$(PLATFORM)"; \
 	cp -R build/bin/. "build/releases/$(PLATFORM)/"; \
@@ -495,24 +494,34 @@ archive-artifacts: validate-version
 package-helper: dns-clients xray-core package-assets
 
 package-assets:
-	@set -e; \
-	license_dir="$(PACKAGE_LICENSE_DIR)"; \
-	if [ -z "$$license_dir" ]; then \
-		license_dir="build/bin/licenses"; \
-		if [ -d "$(MACOS_APP_RESOURCES_DIR)" ]; then license_dir="$(MACOS_APP_RESOURCES_DIR)/licenses"; fi; \
-	fi; \
-	mkdir -p "$$license_dir"; \
-	cp "$(ROOT_DIR)/LICENSE.MD" "$$license_dir/WhiteDNS-LICENSE.MD"; \
-	for component in CottenDNS MasterDnsVPN StormDNS; do \
-		mkdir -p "$$license_dir/$$component"; \
-		cp "$(ROOT_DIR)/$$component/LICENSE" "$$license_dir/$$component/LICENSE"; \
-	done; \
-	for attribution in $(COTTENDNS_ATTRIBUTION_FILES); do \
-		cp "$(COTTENDNS_DIR)/$$attribution" "$$license_dir/CottenDNS/$$attribution"; \
-	done; \
-	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/NOTICE.cottendns.txt" "$$license_dir/CottenDNS/NOTICE.cottendns.txt"; \
-	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/data/THIRD_PARTY.md" "$$license_dir/CottenDNS/DISCOVERY_DATA_NOTICES.md"; \
-	printf 'Packaged component licenses in %s\n' "$$license_dir"
+	mkdir -p build/bin/licenses
+	cp ../THIRD_PARTY_NOTICES.md build/bin/THIRD_PARTY_NOTICES.md
+	cp ../LICENSE.MD build/bin/licenses/WhiteDNS-LICENSE.txt
+	cp ../vendor/licenses/Xray-LICENSE.txt build/bin/licenses/Xray-LICENSE.txt
+	cp "$$(go list -m -f '{{.Dir}}' github.com/wailsapp/wails/v2)/LICENSE" build/bin/licenses/Wails-LICENSE.txt
+	cp ../Soar/third_party/soar/LICENSE build/bin/licenses/Soar-LICENSE.txt
+	cp ../Soar/third_party/soar/WHITEDNS_CHANGES.md build/bin/licenses/Soar-WHITEDNS-CHANGES.md
+	cp ../Soar/data/THIRD_PARTY.md build/bin/licenses/Soar-DATA-NOTICES.md
+	cp ../MasterDnsVPN/LICENSE build/bin/licenses/MasterDNS-LICENSE.txt
+	cp ../CottenDNS/LICENSE build/bin/licenses/CottenDNS-LICENSE.txt
+	cp ../CottenDNS/SOAR_LICENSE.txt build/bin/licenses/CottenMax-Soar-LICENSE.txt
+	cp ../CottenDNS/QUIC_GO_LICENSE.txt build/bin/licenses/CottenMax-QUIC-GO-LICENSE.txt
+	cp ../CottenDNS/QPACK_LICENSE.txt build/bin/licenses/CottenMax-QPACK-LICENSE.txt
+	cp ../CottenDNS/THIRD_PARTY_NOTICES.md build/bin/licenses/CottenMax-THIRD-PARTY-NOTICES.md
+	cp ../CottenDNS/internal/cottenmax/engine/NOTICE.cottendns.txt build/bin/licenses/CottenMax-CHANGES.txt
+	cp ../CottenDNS/internal/cottenmax/engine/data/THIRD_PARTY.md build/bin/licenses/CottenMax-DATA-NOTICES.md
+	cp ../StormDNS/LICENSE build/bin/licenses/StormDNS-LICENSE.txt
+	cp "$$(go env GOROOT)/LICENSE" build/bin/licenses/Go-LICENSE.txt
+	@set -e; for module in golang.org/x/crypto golang.org/x/sys; do \
+		(cd ../Soar && go mod download "$$module"); \
+		dir=$$(cd ../Soar && go list -m -f '{{.Dir}}' "$$module"); \
+		cp "$$dir/LICENSE" "build/bin/licenses/$$(basename "$$module")-LICENSE.txt"; \
+	done
+	@if [ -d "$(MACOS_APP_RESOURCES_DIR)" ]; then \
+		cp build/bin/THIRD_PARTY_NOTICES.md "$(MACOS_APP_RESOURCES_DIR)/THIRD_PARTY_NOTICES.md"; \
+		cp -R build/bin/licenses "$(MACOS_APP_RESOURCES_DIR)/"; \
+	fi
+	@printf 'Runtime helpers and proxy cores are packaged with the app\n'
 
 test: test-backend test-frontend
 
@@ -530,7 +539,7 @@ test-stormdns: test-masterdns
 test-cottendns:
 	cd $(COTTENDNS_DIR) && go test ./...
 
-dns-clients: masterdns-client cottendns-client
+dns-clients: masterdns-client cottendns-client soar-client
 
 masterdns-client: stormdns-client
 
@@ -580,12 +589,6 @@ cottendns-client-target:
 	test -n "$(COTTENDNS_VERSION)" || { echo "Missing CottenDNS source pin" >&2; exit 1; }; \
 	(cd "$(COTTENDNS_DIR)" && GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -buildvcs=false -trimpath -ldflags "$(HELPER_GO_LDFLAGS) -X cottendns-go/internal/version.BuildVersion=$(COTTENDNS_VERSION)" -o "../desktop/clients/$$helper" ./cmd/client); \
 	chmod 755 "clients/$$helper"; \
-	cp "$(COTTENDNS_DIR)/LICENSE" "clients/COTTENDNS_LICENSE.txt"; \
-	for attribution in $(COTTENDNS_ATTRIBUTION_FILES); do \
-		cp "$(COTTENDNS_DIR)/$$attribution" "clients/$$attribution"; \
-	done; \
-	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/NOTICE.cottendns.txt" "clients/NOTICE.cottendns.txt"; \
-	cp "$(COTTENDNS_DIR)/internal/cottenmax/engine/data/THIRD_PARTY.md" "clients/DISCOVERY_DATA_NOTICES.md"; \
 	printf 'Built %s\n' "clients/$$helper"
 
 xray-core:
@@ -652,3 +655,16 @@ ifneq ($(VERSION_FROM_ARGS),)
 $(VERSION_FROM_ARGS):
 	@:
 endif
+
+.PHONY: soar-client soar-client-target
+soar-client:
+	$(MAKE) soar-client-target TARGET_GOOS=$(GOOS_VALUE) TARGET_GOARCH=$(GOARCH_VALUE)
+
+soar-client-target:
+	@set -e; \
+	if [ -z "$(TARGET_GOOS)" ] || [ -z "$(TARGET_GOARCH)" ]; then printf 'Target OS and arch required\n' >&2; exit 1; fi; \
+	helper="soar-client-$(TARGET_GOOS)-$(TARGET_GOARCH)"; \
+	if [ "$(TARGET_GOOS)" = "windows" ]; then helper="$$helper.exe"; fi; \
+	mkdir -p clients "$(GO_BUILD_CACHE)"; \
+	(cd ../Soar && CGO_ENABLED=0 GOCACHE="$(GO_BUILD_CACHE)" GOOS="$(TARGET_GOOS)" GOARCH="$(TARGET_GOARCH)" go build -mod=readonly -trimpath -buildvcs=false -ldflags "$(HELPER_GO_LDFLAGS)" -o "../desktop/clients/$$helper" .); \
+	chmod 755 "clients/$$helper"

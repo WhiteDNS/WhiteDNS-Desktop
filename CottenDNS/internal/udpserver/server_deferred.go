@@ -38,6 +38,55 @@ func (s *Server) deferredConnectAttemptTimeout() time.Duration {
 	return timeout
 }
 
+// Include admission queue time in the existing connection budget. Starting a
+// new full-length dial after a long queue wait strands clients that already
+// received SYN_ACK and are waiting for the reliable connect result.
+func (s *Server) deferredConnectRun(packet VpnProto.Packet, run func(context.Context)) func(context.Context) {
+	deadline := time.Now().Add(s.deferredConnectAttemptTimeout())
+	return func(parent context.Context) {
+		if parent.Err() != nil {
+			return
+		}
+		ctx, cancel := context.WithDeadline(parent, deadline)
+		defer cancel()
+		if ctx.Err() != nil {
+			if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				s.rejectExpiredDeferredConnect(packet)
+			}
+			return
+		}
+		run(ctx)
+		// The deadline can expire between the admission check and the task's
+		// own initial cancellation check. Do not leave that narrow race silent.
+		if parent.Err() == nil && errors.Is(ctx.Err(), context.DeadlineExceeded) && s.isDeferredPacketStillTracked(packet) {
+			s.rejectExpiredDeferredConnect(packet)
+		}
+	}
+}
+
+func (s *Server) rejectExpiredDeferredConnect(packet VpnProto.Packet) {
+	if !s.shouldExecuteDeferredPacket(packet) {
+		return
+	}
+	record, ok := s.sessions.Get(packet.SessionID)
+	if !ok {
+		return
+	}
+	stream := record.getOrCreateStream(packet.StreamID, s.streamARQConfig(record.DownloadCompression), nil, s.log)
+	if stream == nil || stream.ARQ == nil {
+		record.enqueueOrphanReset(Enums.PACKET_STREAM_RST, packet.StreamID, 0)
+		s.finalizeStreamArtifacts(packet.SessionID, packet.StreamID)
+		return
+	}
+	packetType := uint8(Enums.PACKET_STREAM_CONNECT_FAIL)
+	if packet.PacketType == Enums.PACKET_SOCKS5_SYN {
+		packetType = Enums.PACKET_SOCKS5_TTL_EXPIRED
+	}
+	stream.ARQ.SendControlPacketWithTTL(packetType, packet.SequenceNum, 0, 0, nil,
+		Enums.DefaultPacketPriority(packetType), true, nil, s.cfg.StreamFailurePacketTTL())
+	s.finalizeStreamArtifacts(packet.SessionID, packet.StreamID)
+}
+
 func (s *Server) processDeferredDNSQuery(ctx context.Context, sessionID uint16, sessionCookie uint8, sequenceNum uint16, downloadCompression uint8, downloadMTUBytes int, assembledQuery []byte) {
 	if ctx != nil && ctx.Err() != nil {
 		return
@@ -50,7 +99,7 @@ func (s *Server) processDeferredDNSQuery(ctx context.Context, sessionID uint16, 
 		return
 	}
 
-	rawResponse := s.buildDNSQueryResponsePayload(assembledQuery, sessionID, sequenceNum)
+	rawResponse := s.buildDNSQueryResponsePayloadContext(ctx, assembledQuery, sessionID, sequenceNum)
 	if len(rawResponse) == 0 {
 		return
 	}

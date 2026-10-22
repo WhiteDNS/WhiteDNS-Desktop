@@ -250,6 +250,20 @@ func NormalizeState(state model.AppState) model.AppState {
 	state.ConnectionProfiles = normalizeConnections(state.ConnectionProfiles)
 	state.ResolverProfiles = normalizeResolvers(state.ResolverProfiles)
 	state.SettingsProfiles = normalizeSettingsProfiles(state.SettingsProfiles)
+	for _, p := range state.ConnectionProfiles {
+		if p.ImportType == model.ImportTypeSoar {
+			found := false
+			for _, setting := range state.SettingsProfiles {
+				if setting.ID == model.DefaultSoarSettingsID {
+					found = true
+				}
+			}
+			if !found {
+				state.SettingsProfiles = append(state.SettingsProfiles, model.DefaultSoarSettingsProfile())
+			}
+			break
+		}
+	}
 	state.V2RayProfiles = normalizeV2RayProfiles(state.V2RayProfiles)
 	state.V2RaySubscriptions = normalizeV2RaySubscriptions(state.V2RaySubscriptions)
 	state.V2RaySettingsProfiles = normalizeV2RaySettingsProfiles(state.V2RaySettingsProfiles)

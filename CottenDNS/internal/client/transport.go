@@ -21,8 +21,10 @@ import (
 	"errors"
 	"io"
 	"net"
+	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -107,13 +109,12 @@ func (c *Client) newQueryTransport(resolverLabel string) (queryExchanger, error)
 	case transportDoH, transportDoH3, transportDoQ:
 		return c.newEncryptedQueryTransport(resolverLabel)
 	case transportDoT:
-		conn, err := c.dialDoTResolver(resolverLabel, tcpQueryDialTimeout)
-		if err != nil {
-			return nil, err
-		}
 		// DoT is the TCP/53 wire format inside TLS, so the framing exchanger is
-		// reused verbatim â€” only the dial differs.
-		return &tcpQueryTransport{conn: conn}, nil
+		// reused verbatim — including its TLS dial when a damaged stream needs
+		// to be replaced before a later probe.
+		return newStreamQueryTransport(func(timeout time.Duration) (net.Conn, error) {
+			return c.dialDoTResolver(resolverLabel, timeout)
+		}, tcpQueryDialTimeout)
 	case transportTCP:
 		return newTCPQueryTransport(resolverLabel, tcpQueryDialTimeout)
 	default:
@@ -164,20 +165,43 @@ func resolverHostWithPort(resolverLabel string, port int) string {
 // reused across the many queries a probe sends, so there is no per-query
 // handshake cost.
 type tcpQueryTransport struct {
-	conn net.Conn
+	// exchangeMu keeps this synchronous exchanger's query/reply pairs together;
+	// mu protects connection replacement against concurrent cancellation/Close.
+	// Close never waits for exchangeMu, so it can interrupt an in-flight read.
+	exchangeMu  sync.Mutex
+	mu          sync.Mutex
+	conn        net.Conn
+	dial        func(time.Duration) (net.Conn, error)
+	dialTimeout time.Duration
+	closed      bool
 }
 
 func newTCPQueryTransport(resolverLabel string, dialTimeout time.Duration) (*tcpQueryTransport, error) {
-	d := net.Dialer{Timeout: dialTimeout}
-	conn, err := d.Dial("tcp", resolverLabel)
+	return newStreamQueryTransport(func(timeout time.Duration) (net.Conn, error) {
+		d := net.Dialer{Timeout: timeout}
+		return d.Dial("tcp", resolverLabel)
+	}, dialTimeout)
+}
+
+func newStreamQueryTransport(dial func(time.Duration) (net.Conn, error), dialTimeout time.Duration) (*tcpQueryTransport, error) {
+	conn, err := dial(dialTimeout)
 	if err != nil {
 		return nil, err
 	}
-	return &tcpQueryTransport{conn: conn}, nil
+	return &tcpQueryTransport{conn: conn, dial: dial, dialTimeout: dialTimeout}, nil
 }
 
 func (t *tcpQueryTransport) exchange(packet []byte, timeout time.Duration) ([]byte, error) {
-	if t == nil || t.conn == nil {
+	if t == nil {
+		return nil, net.ErrClosed
+	}
+	deadline := time.Now().Add(timeout)
+	t.exchangeMu.Lock()
+	defer t.exchangeMu.Unlock()
+	t.mu.Lock()
+	closed, conn := t.closed, t.conn
+	t.mu.Unlock()
+	if closed {
 		return nil, net.ErrClosed
 	}
 	if len(packet) < 2 {
@@ -185,31 +209,88 @@ func (t *tcpQueryTransport) exchange(packet []byte, timeout time.Duration) ([]by
 	}
 	expectedID := binary.BigEndian.Uint16(packet[:2])
 
-	deadline := time.Now().Add(timeout)
-	_ = t.conn.SetDeadline(deadline)
+	if conn == nil {
+		if t.dial == nil {
+			return nil, net.ErrClosed
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			return nil, os.ErrDeadlineExceeded
+		}
+		if t.dialTimeout > 0 && remaining > t.dialTimeout {
+			remaining = t.dialTimeout
+		}
+		var err error
+		conn, err = t.dial(remaining)
+		if err != nil {
+			return nil, err
+		}
+		t.mu.Lock()
+		if t.closed {
+			t.mu.Unlock()
+			_ = conn.Close()
+			return nil, net.ErrClosed
+		}
+		t.conn = conn
+		t.mu.Unlock()
+	}
+	if err := conn.SetDeadline(deadline); err != nil {
+		t.discardConnection(conn)
+		return nil, err
+	}
 
-	if err := writeTCPDNSFramed(t.conn, packet); err != nil {
+	if err := writeTCPDNSFramed(conn, packet); err != nil {
+		t.discardConnection(conn)
 		return nil, err
 	}
 
 	// TCP is ordered, but tolerate a stray non-matching message defensively.
 	for attempts := 0; attempts < 8; attempts++ {
-		resp, err := readTCPDNSFramed(t.conn)
+		resp, err := readTCPDNSFramed(conn)
 		if err != nil {
+			// A timeout may already have consumed a prefix or partial body.
+			// Discard the stream rather than letting the next probe interpret
+			// those remaining bytes as a new DNS frame. The caller decides
+			// whether to retry; that later exchange gets a fresh connection.
+			t.discardConnection(conn)
 			return nil, err
 		}
 		if len(resp) >= 2 && binary.BigEndian.Uint16(resp[:2]) == expectedID {
 			return resp, nil
 		}
 	}
+	t.discardConnection(conn)
 	return nil, errors.New("too many mismatched dns responses over tcp")
 }
 
 func (t *tcpQueryTransport) Close() error {
-	if t == nil || t.conn == nil {
+	if t == nil {
 		return nil
 	}
-	return t.conn.Close()
+	t.mu.Lock()
+	if t.closed {
+		t.mu.Unlock()
+		return nil
+	}
+	t.closed = true
+	conn := t.conn
+	t.conn = nil
+	t.mu.Unlock()
+	if conn != nil {
+		return conn.Close()
+	}
+	return nil
+}
+
+func (t *tcpQueryTransport) discardConnection(conn net.Conn) error {
+	t.mu.Lock()
+	if t.conn != conn {
+		t.mu.Unlock()
+		return nil
+	}
+	t.conn = nil
+	t.mu.Unlock()
+	return conn.Close()
 }
 
 // writeTCPDNSFramed writes a 2-byte length prefix followed by the DNS message.

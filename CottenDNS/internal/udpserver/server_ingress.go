@@ -18,7 +18,7 @@ import (
 	VpnProto "cottendns-go/internal/vpnproto"
 )
 
-func (s *Server) handlePacket(packet []byte) []byte {
+func (s *Server) handlePacket(packet []byte, tcp ...bool) []byte {
 	if s.cottenMax != nil {
 		if response, matched := s.cottenMax.Exchange(packet); matched {
 			return response
@@ -39,7 +39,7 @@ func (s *Server) handlePacket(packet []byte) []byte {
 
 	decision := s.domainMatcher.Match(parsed)
 	if decision.Action == domainMatcher.ActionProcess {
-		response := s.handleTunnelCandidate(packet, parsed, decision)
+		response := s.handleTunnelCandidate(packet, parsed, decision, tcp...)
 		if response != nil {
 			return response
 		}
@@ -54,7 +54,7 @@ func (s *Server) handlePacket(packet []byte) []byte {
 	return s.buildNoDataResponseLiteLogged(packet, parsed, "domain-match-no-data")
 }
 
-func (s *Server) handleTunnelCandidate(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision) []byte {
+func (s *Server) handleTunnelCandidate(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, tcp ...bool) []byte {
 	// Encryption-method auto-detection: the upstream frame is fully encrypted, so
 	// the client's method is discovered by trying each candidate codec. s.codecs
 	// is pre-ordered AEAD-first (see SetCodecSet), so iterating from index 0 tries
@@ -71,7 +71,7 @@ func (s *Server) handleTunnelCandidate(packet []byte, parsed DnsParser.LitePacke
 	if codecIdx != startIdx {
 		s.preferredCodec.Store(int32(codecIdx))
 	}
-	return s.handleDecodedTunnelPacket(packet, parsed, decision, vpnPacket)
+	return s.handleDecodedTunnelPacket(packet, parsed, decision, vpnPacket, tcp...)
 }
 
 func (s *Server) handlePreparedIngress(packet []byte, prepared preparedIngress) []byte {
@@ -86,13 +86,13 @@ func (s *Server) handlePreparedIngress(packet []byte, prepared preparedIngress) 
 	return s.handleDecodedTunnelPacket(packet, prepared.parsed, prepared.decision, vpnPacket)
 }
 
-func (s *Server) handleDecodedTunnelPacket(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, vpnPacket VpnProto.Packet) []byte {
+func (s *Server) handleDecodedTunnelPacket(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, vpnPacket VpnProto.Packet, tcp ...bool) []byte {
 	return s.handleReplayProtectedPacket(packet, parsed, decision, vpnPacket, func() []byte {
-		return s.handleNewDecodedTunnelPacket(packet, parsed, decision, vpnPacket)
+		return s.handleNewDecodedTunnelPacket(packet, parsed, decision, vpnPacket, tcp...)
 	})
 }
 
-func (s *Server) handleNewDecodedTunnelPacket(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, vpnPacket VpnProto.Packet) []byte {
+func (s *Server) handleNewDecodedTunnelPacket(packet []byte, parsed DnsParser.LitePacket, decision domainMatcher.Decision, vpnPacket VpnProto.Packet, tcp ...bool) []byte {
 
 	if vpnPacket.PacketType == Enums.PACKET_SESSION_CLOSE {
 		s.handleSessionCloseNotice(vpnPacket, time.Now())
@@ -109,7 +109,7 @@ func (s *Server) handleNewDecodedTunnelPacket(packet []byte, parsed DnsParser.Li
 			return s.buildNoDataResponseLiteLogged(packet, parsed, fmt.Sprintf("post-session-unhandled-%s", Enums.PacketTypeName(vpnPacket.PacketType)))
 		}
 
-		return s.serveQueuedOrPong(packet, decision.RequestName, validation.record, time.Now())
+		return s.serveQueuedOrPong(packet, decision.RequestName, validation.record, time.Now(), tcp...)
 	}
 
 	switch vpnPacket.PacketType {
@@ -118,7 +118,7 @@ func (s *Server) handleNewDecodedTunnelPacket(packet []byte, parsed DnsParser.Li
 	case Enums.PACKET_MTU_DOWN_REQ:
 		return s.handleMTUDownRequest(packet, parsed, decision, vpnPacket)
 	case Enums.PACKET_SESSION_INIT:
-		return s.handleSessionInitRequest(packet, decision, vpnPacket)
+		return s.handleSessionInitRequest(packet, decision, vpnPacket, tcp...)
 	default:
 		return s.buildNoDataResponseLiteLogged(packet, parsed, fmt.Sprintf("pre-session-unhandled-%s", Enums.PacketTypeName(vpnPacket.PacketType)))
 	}

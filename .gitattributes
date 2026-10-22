@@ -1,0 +1,2 @@
+# Wire vectors are compared byte-for-byte with Go's LF-terminated JSON output.
+Soar/third_party/soar/testdata/vectors.json text eol=lf

@@ -4,6 +4,10 @@ export type RuntimeType = "" | "masterdns" | "v2ray";
 export interface ConnectionProfile {
   id: string;
   name: string;
+  soarSettings?: SoarSettings;
+  bootstrapResolvers?: string[];
+  subscription?: SubscriptionSource;
+  remoteId?: string;
   importType: ImportType;
   domain: string;
   domains: string[];
@@ -12,7 +16,7 @@ export interface ConnectionProfile {
   resolverProfileId: string;
 }
 
-export type ImportType = "masterdns" | "stormdns" | "cottendns";
+export type ImportType = "masterdns" | "stormdns" | "cottendns" | "soar";
 
 export type CottenDNSOptionValue = string | number | boolean | string[];
 
@@ -611,4 +615,13 @@ export interface ParallelTestState {
   error: string;
   startedAt: number;
   finishedAt: number;
+}
+
+export interface SoarSettings {
+ transport:string;discovery:boolean;country:string;discoveryWant:number;discoveryConcurrency:number;discoveryPaceMs:number;
+ safeQName:number;maxQName:number;maxAnswer:number;holdMs:number;maxInflight:number;maxPathWindow:number;maxStreams:number;
+ streamWindowKiB:number;sendBufferKiB:number;sessionIdleSeconds:number;dialTimeoutSeconds:number;
+}
+export interface SubscriptionSource {
+ url:string;remoteId:string;allowHttp:boolean;updatedAt:number;intervalHours:number;upload:number;download:number;total:number;expiresAt:number;
 }

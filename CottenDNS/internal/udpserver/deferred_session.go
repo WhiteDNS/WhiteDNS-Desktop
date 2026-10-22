@@ -23,9 +23,12 @@ type deferredSessionLane struct {
 }
 
 type deferredSessionTask struct {
-	lane deferredSessionLane
-	run  func(context.Context)
+	lane       deferredSessionLane
+	generation uint64
+	run        func(context.Context)
 }
+
+type deferredSessionRun struct{ cancel context.CancelFunc }
 
 type deferredSessionWorker struct {
 	jobs    chan deferredSessionTask
@@ -38,8 +41,10 @@ type deferredSessionProcessor struct {
 	workers            []deferredSessionWorker
 	mu                 sync.Mutex
 	laneWorker         map[deferredSessionLane]int
+	lanePending        map[deferredSessionLane]int32
+	laneGeneration     map[deferredSessionLane]uint64
 	cancelled          map[deferredSessionLane]struct{}
-	running            map[deferredSessionLane]context.CancelFunc
+	running            map[deferredSessionLane]*deferredSessionRun
 	sessionPending     map[uint16]int32
 	sessionPendingCap  int32
 	sessionPressureLog throttledLogState
@@ -101,8 +106,10 @@ func newDeferredSessionProcessor(workerCount int, queueLimit int, log *logger.Lo
 		log:               log,
 		workers:           workers,
 		laneWorker:        make(map[deferredSessionLane]int, 128),
+		lanePending:       make(map[deferredSessionLane]int32, 128),
+		laneGeneration:    make(map[deferredSessionLane]uint64, 128),
 		cancelled:         make(map[deferredSessionLane]struct{}, 128),
-		running:           make(map[deferredSessionLane]context.CancelFunc, 128),
+		running:           make(map[deferredSessionLane]*deferredSessionRun, 128),
 		sessionPending:    make(map[uint16]int32, 64),
 		sessionPendingCap: deriveDeferredSessionPendingCap(workerCount, queueLimit),
 	}
@@ -151,6 +158,7 @@ func (p *deferredSessionProcessor) Enqueue(lane deferredSessionLane, run func(co
 
 	p.mu.Lock()
 	delete(p.cancelled, lane)
+	task.generation = p.laneGeneration[lane]
 	if !p.canAcceptSessionLocked(lane.sessionID) {
 		p.mu.Unlock()
 		return false
@@ -183,21 +191,26 @@ func (p *deferredSessionProcessor) RemoveSession(sessionID uint16) {
 		return
 	}
 	p.mu.Lock()
-	for lane, cancel := range p.running {
+	for lane, running := range p.running {
 		if lane.sessionID == sessionID {
-			cancel()
+			running.cancel()
 			delete(p.running, lane)
 		}
 	}
 	for lane := range p.laneWorker {
 		if lane.sessionID == sessionID {
 			p.cancelled[lane] = struct{}{}
-			delete(p.laneWorker, lane)
+			p.laneGeneration[lane]++
 		}
 	}
 	p.compactQueuesLocked(func(lane deferredSessionLane) bool {
 		return lane.sessionID == sessionID
 	})
+	for lane := range p.laneWorker {
+		if lane.sessionID == sessionID {
+			p.clearIdleLaneLocked(lane)
+		}
+	}
 	p.mu.Unlock()
 }
 
@@ -206,12 +219,11 @@ func (p *deferredSessionProcessor) RemoveLane(lane deferredSessionLane) {
 		return
 	}
 	p.mu.Lock()
-	if cancel, ok := p.running[lane]; ok {
-		cancel()
+	if running, ok := p.running[lane]; ok {
+		running.cancel()
 		delete(p.running, lane)
 	}
-
-	delete(p.laneWorker, lane)
+	p.laneGeneration[lane]++
 
 	if _, ok := p.cancelled[lane]; !ok {
 		p.cancelled[lane] = struct{}{}
@@ -220,6 +232,7 @@ func (p *deferredSessionProcessor) RemoveLane(lane deferredSessionLane) {
 	p.compactQueuesLocked(func(candidate deferredSessionLane) bool {
 		return candidate == lane
 	})
+	p.clearIdleLaneLocked(lane)
 
 	p.mu.Unlock()
 }
@@ -230,7 +243,7 @@ func (p *deferredSessionProcessor) FinalizeLane(lane deferredSessionLane) {
 	}
 	p.mu.Lock()
 
-	delete(p.laneWorker, lane)
+	p.laneGeneration[lane]++
 	if _, ok := p.cancelled[lane]; !ok {
 		p.cancelled[lane] = struct{}{}
 	}
@@ -238,6 +251,7 @@ func (p *deferredSessionProcessor) FinalizeLane(lane deferredSessionLane) {
 	p.compactQueuesLocked(func(candidate deferredSessionLane) bool {
 		return candidate == lane
 	})
+	p.clearIdleLaneLocked(lane)
 
 	p.mu.Unlock()
 }
@@ -253,11 +267,11 @@ func (p *deferredSessionProcessor) runDeferredWorker(ctx context.Context, worker
 				return
 			}
 			func() {
-				taskCtx, cancel := p.beginTaskContext(ctx, task.lane)
+				taskCtx, running := p.beginTaskContext(ctx, task.lane, task.generation)
 				defer func() {
-					cancel()
+					running.cancel()
 					worker.pending.Add(-1)
-					p.finishLane(task.lane, workerIdx)
+					p.finishLane(task.lane, running)
 					if recovered := recover(); recovered != nil && p.log != nil {
 						p.log.Debugf(
 							"Deferred Session Worker Panic, Worker: %d, Session: %d, Stream: %d, Error: %v",
@@ -274,26 +288,33 @@ func (p *deferredSessionProcessor) runDeferredWorker(ctx context.Context, worker
 	}
 }
 
-func (p *deferredSessionProcessor) beginTaskContext(parent context.Context, lane deferredSessionLane) (context.Context, context.CancelFunc) {
+func (p *deferredSessionProcessor) beginTaskContext(parent context.Context, lane deferredSessionLane, generation ...uint64) (context.Context, *deferredSessionRun) {
 	taskCtx, cancel := context.WithCancel(parent)
+	running := &deferredSessionRun{cancel: cancel}
 	if p == nil {
-		return taskCtx, cancel
+		return taskCtx, running
 	}
 
 	p.mu.Lock()
 	if _, cancelled := p.cancelled[lane]; cancelled {
 		cancel()
 		p.mu.Unlock()
-		return taskCtx, func() {}
+		return taskCtx, running
 	}
-	p.running[lane] = cancel
+	if len(generation) > 0 && generation[0] != p.laneGeneration[lane] {
+		cancel()
+		p.mu.Unlock()
+		return taskCtx, running
+	}
+	p.running[lane] = running
 	p.mu.Unlock()
-	return taskCtx, cancel
+	return taskCtx, running
 }
 
 func (p *deferredSessionProcessor) enqueueToExistingWorkerLocked(workerIdx int, task deferredSessionTask) bool {
 	worker := &p.workers[workerIdx]
 	worker.pending.Add(1)
+	p.lanePending[task.lane]++
 	p.sessionPending[task.lane.sessionID]++
 	select {
 	case worker.jobs <- task:
@@ -301,6 +322,7 @@ func (p *deferredSessionProcessor) enqueueToExistingWorkerLocked(workerIdx int, 
 		return true
 	default:
 		worker.pending.Add(-1)
+		p.decrementLanePendingLocked(task.lane)
 		p.decrementSessionPendingLocked(task.lane.sessionID)
 		return false
 	}
@@ -309,6 +331,7 @@ func (p *deferredSessionProcessor) enqueueToExistingWorkerLocked(workerIdx int, 
 func (p *deferredSessionProcessor) tryEnqueueLocked(workerIdx int, task deferredSessionTask) bool {
 	worker := &p.workers[workerIdx]
 	worker.pending.Add(1)
+	p.lanePending[task.lane]++
 	p.sessionPending[task.lane.sessionID]++
 	select {
 	case worker.jobs <- task:
@@ -316,24 +339,22 @@ func (p *deferredSessionProcessor) tryEnqueueLocked(workerIdx int, task deferred
 		return true
 	default:
 		worker.pending.Add(-1)
+		p.decrementLanePendingLocked(task.lane)
 		p.decrementSessionPendingLocked(task.lane.sessionID)
 		return false
 	}
 }
 
-func (p *deferredSessionProcessor) finishLane(lane deferredSessionLane, workerIdx int) {
+func (p *deferredSessionProcessor) finishLane(lane deferredSessionLane, completed *deferredSessionRun) {
 	if p == nil {
 		return
 	}
 	p.mu.Lock()
-	if mappedWorker, ok := p.laneWorker[lane]; ok && mappedWorker == workerIdx {
-		delete(p.laneWorker, lane)
-	}
-	if cancel, ok := p.running[lane]; ok {
-		cancel()
+	if running, ok := p.running[lane]; ok && running == completed {
+		running.cancel()
 		delete(p.running, lane)
 	}
-	delete(p.cancelled, lane)
+	p.decrementLanePendingLocked(lane)
 	p.decrementSessionPendingLocked(lane.sessionID)
 	p.mu.Unlock()
 }
@@ -359,7 +380,7 @@ func (p *deferredSessionProcessor) compactWorkerLocked(workerIdx int, drop func(
 		case task := <-worker.jobs:
 			if p.shouldDropTaskLocked(task.lane, drop) {
 				worker.pending.Add(-1)
-				delete(p.laneWorker, task.lane)
+				p.decrementLanePendingLocked(task.lane)
 				p.decrementSessionPendingLocked(task.lane.sessionID)
 				dropped++
 				continue
@@ -372,6 +393,27 @@ func (p *deferredSessionProcessor) compactWorkerLocked(workerIdx int, drop func(
 			return dropped
 		}
 	}
+}
+
+// The mapping belongs to all queued and running tasks in a lane. Removing it
+// after only one task finishes lets a retry move to another worker and execute
+// concurrently with the original stream's remaining fragments.
+func (p *deferredSessionProcessor) decrementLanePendingLocked(lane deferredSessionLane) {
+	if pending := p.lanePending[lane]; pending > 1 {
+		p.lanePending[lane] = pending - 1
+		return
+	}
+	delete(p.lanePending, lane)
+	p.clearIdleLaneLocked(lane)
+}
+
+func (p *deferredSessionProcessor) clearIdleLaneLocked(lane deferredSessionLane) {
+	if p.lanePending[lane] != 0 {
+		return
+	}
+	delete(p.laneWorker, lane)
+	delete(p.laneGeneration, lane)
+	delete(p.cancelled, lane)
 }
 
 func (p *deferredSessionProcessor) canAcceptSessionLocked(sessionID uint16) bool {

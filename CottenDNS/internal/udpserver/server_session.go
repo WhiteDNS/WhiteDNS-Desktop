@@ -20,6 +20,7 @@ import (
 	DnsParser "cottendns-go/internal/dnsparser"
 	domainMatcher "cottendns-go/internal/domainmatcher"
 	Enums "cottendns-go/internal/enums"
+	"cottendns-go/internal/fec"
 	"cottendns-go/internal/security"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
@@ -342,7 +343,7 @@ func (s *Server) finalizeStreamArtifacts(sessionID uint16, streamID uint16) {
 	s.removeSOCKS5SynFragmentsForStream(sessionID, streamID)
 }
 
-func (s *Server) serveQueuedOrPong(questionPacket []byte, requestName string, record *sessionRuntimeView, now time.Time) []byte {
+func (s *Server) serveQueuedOrPong(questionPacket []byte, requestName string, record *sessionRuntimeView, now time.Time, tcp ...bool) []byte {
 	if record == nil {
 		return nil
 	}
@@ -352,16 +353,22 @@ func (s *Server) serveQueuedOrPong(questionPacket []byte, requestName string, re
 	// Only hand this query what its record type can carry: anything larger would
 	// fall back to a TXT answer the resolver strips, losing it until an ARQ
 	// retransmit. It stays queued for the next TXT/NULL/HTTPS/AAAA query instead.
-	capacity := DnsParser.MatchingFrameCapacity(questionPacket, s.tunnelBaseDomain(requestName), s.cfg.ARecordDataDelivery, s.cfg.AAAARecordDataDelivery)
-	if capacity != dnsResponseUnlimited {
-		capacity -= maxVPNFrameHeaderLen
-		if record.ResponseMode&security.DownstreamEncryptedFlag != 0 {
-			capacity -= record.Codec.CiphertextOverhead()
-		}
+	capacity := s.responsePayloadCapacity(questionPacket, s.tunnelBaseDomain(requestName), record.ResponseMode, record.Codec, isTCPResponse(tcp))
+	if s.resetBudgetStalledSession(questionPacket, requestName, record, capacity, now, isTCPResponse(tcp)) {
+		return s.buildInvalidSessionErrorResponse(questionPacket, requestName, record.ID, record.ResponseMode, record.LegacySessionID, record.Codec)
 	}
 
-	if pkt, ok := s.dequeueSessionResponse(sessionID, now, capacity); ok {
-		return s.buildSessionVPNResponse(questionPacket, requestName, record, *pkt)
+	var blocked bool
+	pkt, ok := s.dequeueSessionResponse(sessionID, now, capacity, &blocked)
+	if blocked {
+		s.noteBudgetBlocked(sessionID, capacity, now)
+	}
+	if ok {
+		response := s.buildSessionVPNResponse(questionPacket, requestName, record, *pkt)
+		if len(response) > 0 {
+			s.noteBudgetDelivered(sessionID, len(pkt.Payload))
+		}
+		return response
 	}
 
 	payload := s.nextPongPayload()
@@ -382,13 +389,21 @@ const (
 
 // dequeueSessionResponse pops the next packet to send. capacity is the largest
 // payload the answering record type can carry; only packets that fit are taken.
-func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time, capacity int) (*VpnProto.Packet, bool) {
+func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time, capacity int, blocked ...*bool) (*VpnProto.Packet, bool) {
 	record, ok := s.sessions.Get(sessionID)
 	if !ok {
 		return nil, false
 	}
 	limited := capacity < dnsResponseUnlimited
-	fits := func(p *serverStreamTXPacket) bool { return len(p.Payload) <= capacity }
+	fits := func(p *serverStreamTXPacket) bool {
+		if len(p.Payload) <= capacity {
+			return true
+		}
+		if len(blocked) > 0 && blocked[0] != nil {
+			*blocked[0] = true
+		}
+		return false
+	}
 
 	record.mu.Lock()
 	if dup := record.LastPackedControlBlock; dup == nil || len(dup.Payload) <= capacity {
@@ -443,7 +458,9 @@ func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time, capacit
 		var selectedStreamID uint16
 
 		if id == -1 {
-			p, _, popOk := record.OrphanQueue.Pop(func(p VpnProto.Packet) uint64 {
+			p, popOk := record.OrphanQueue.PopAnyIf(5, func(p VpnProto.Packet) bool {
+				return fits(&serverStreamTXPacket{Payload: p.Payload})
+			}, func(p VpnProto.Packet) uint64 {
 				return Enums.PacketTypeStreamKey(p.StreamID, p.PacketType)
 			})
 			if popOk {
@@ -468,7 +485,7 @@ func (s *Server) dequeueSessionResponse(sessionID uint16, now time.Time, capacit
 				record.deactivateStream(uint16(id))
 				continue
 			}
-			if limited {
+			if limited && (!fecActive || capacity < record.DownloadMTUBytes+fec.ShardHeaderSize+VpnProto.FECUnitHeaderSize+2) {
 				// Small carrier: take the highest-priority packet that fits
 				// (ACKs and control first, as usual) and bypass FEC, whose
 				// shards are data-sized. ARQ still covers anything left queued.
@@ -821,6 +838,9 @@ func (s *Server) nextUnknownInvalidDropMode(packet VpnProto.Packet) uint8 {
 }
 
 func deferredSessionLaneForPacket(packet VpnProto.Packet) deferredSessionLane {
+	if packet.PacketType == Enums.PACKET_DNS_QUERY_REQ {
+		return deferredSessionLane{sessionID: packet.SessionID, streamID: packet.SequenceNum}
+	}
 	return deferredSessionLane{
 		sessionID: packet.SessionID,
 		streamID:  packet.StreamID,
@@ -846,6 +866,7 @@ func (s *Server) dispatchDeferredSessionPacket(packet VpnProto.Packet, run func(
 	switch packet.PacketType {
 	case Enums.PACKET_DNS_QUERY_REQ:
 		processor = s.deferredDNSSession
+		run = s.deferredDNSRun(run)
 	case Enums.PACKET_STREAM_SYN, Enums.PACKET_SOCKS5_SYN:
 		processor = s.deferredConnectSession
 	default:
@@ -869,7 +890,7 @@ func buildPreSessionPacketTypes() [256]bool {
 	return values
 }
 
-func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domainMatcher.Decision, vpnPacket VpnProto.Packet) []byte {
+func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domainMatcher.Decision, vpnPacket VpnProto.Packet, tcp ...bool) []byte {
 	if vpnPacket.SessionID != 0 || len(vpnPacket.Payload) != sessionInitDataSize {
 		return nil
 	}
@@ -878,12 +899,20 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 	resolvedUpload := resolveCompressionType(requestedUpload, s.uploadCompressionMask)
 	resolvedDownload := resolveCompressionType(requestedDownload, s.downloadCompressionMask)
 
-	record, reused, err := s.sessions.findOrCreate(
+	downloadLimit := 0
+	if !isTCPResponse(tcp) {
+		downloadLimit = s.responsePayloadCapacity(questionPacket, decision.BaseDomain, vpnPacket.Payload[0], vpnPacket.IngressCodec, false, true)
+		if downloadLimit < minSessionMTU {
+			return nil
+		}
+	}
+	record, reused, err := s.sessions.findOrCreateWithDownloadLimit(
 		vpnPacket.Payload,
 		resolvedUpload,
 		resolvedDownload,
 		s.cfg.MaxPacketsPerBatch,
 		vpnPacket.LegacySessionID,
+		downloadLimit,
 		vpnPacket.IngressCodec,
 	)
 	if err != nil {
@@ -901,6 +930,13 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 	}
 	if record == nil {
 		return nil
+	}
+	policy := s.clientPolicy
+	if !isTCPResponse(tcp) {
+		capacity := min(downloadLimit, record.DownloadMTUBytes)
+		if policy.MaxDownloadMTU == 0 || policy.MaxDownloadMTU > capacity {
+			policy.MaxDownloadMTU = capacity
+		}
 	}
 	record.streamCleanup = s.cleanupStreamArtifacts
 
@@ -927,7 +963,7 @@ func (s *Server) handleSessionInitRequest(questionPacket []byte, decision domain
 		record.Cookie,
 		compression.PackPair(record.UploadCompression, record.DownloadCompression),
 		record.VerifyCode,
-		s.clientPolicy,
+		policy,
 		record.LegacySessionID,
 	)
 

@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"cottendns-go/internal/arq"
@@ -129,6 +130,10 @@ func (c *Client) handleHTTPPlain(ctx context.Context, conn net.Conn, br *bufio.R
 // using the same target-payload format as SOCKS5 CONNECT so the server-side
 // handler can connect to the target without changes.
 func (c *Client) openHTTPTunnel(ctx context.Context, streamConn net.Conn, host string, port uint16, proxyVersion byte, rawConn net.Conn) {
+	if c.cottenMax.Load() != nil {
+		c.serveCottenMaxStream(ctx, streamConn, net.JoinHostPort(host, strconv.Itoa(int(port))), proxyVersion, rawConn)
+		return
+	}
 	streamID, ok := c.get_new_stream_id()
 	if !ok {
 		c.log.Errorf("❌ <red>Failed to get new stream ID for HTTP proxy</red>")

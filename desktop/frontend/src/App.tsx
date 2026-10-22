@@ -290,6 +290,14 @@ function importTypeLabel(value?: string): string {
   return normalized === "soar" ? "Soar" : normalized === "stormdns" ? "StormDNS" : normalized === "cottendns" ? "CottenDNS" : "MasterDNS";
 }
 
+function settingsEngineLabel(profile?: SettingsProfile, engine?: string): string {
+  const importType = normalizeImportType(engine || profile?.importType);
+  if (importType !== "cottendns") {
+    return importTypeLabel(importType);
+  }
+  return profile?.cottenDnsOptions?.TUNNEL_MODE === "cottenmax" ? "CottenDNS / Max beta" : "CottenDNS / Normal";
+}
+
 function normalizeConnectionProfile(profile: ConnectionProfile): ConnectionProfile {
   const domains = normalizeConnectionDomains(profile.domains?.length ? profile.domains : [profile.domain]);
   return {
@@ -1755,7 +1763,7 @@ function DashboardPage({
   const runtimeEndpoint = proxyEndpoint(runtime.listenIp, runtime.listenPort);
   const selectedSettingsEndpoint = selectedSettings ? proxyEndpoint(selectedSettings.listenIp, selectedSettings.listenPort) : "";
   const selectedEngineEndpoint = dnsEngineProxyEndpoint(selectedSettings, selectedConnection?.importType);
-  const selectedEngineName = importTypeLabel(selectedConnection?.importType || selectedSettings?.importType);
+  const selectedEngineName = settingsEngineLabel(selectedSettings, selectedConnection?.importType);
   const endpoint = runtimeEndpoint || selectedSettingsEndpoint || "-";
   const localProxyEndpoint = proxyEndpoint(runtime.localProxyIp, runtime.listenPort);
   const publicProxyEndpoint = localProxyEndpoint
@@ -2178,7 +2186,7 @@ function DashboardPage({
           <AlertTitle>Setup required</AlertTitle>
           <AlertDescription>
             {missingConnection
-              ? "Connection profile needs a MasterDNS/StormDNS domain and encryption key."
+              ? "Connection profile needs a tunnel domain and encryption key."
               : "Resolver profile needs at least one valid resolver."}
           </AlertDescription>
           <AlertAction>
@@ -3645,7 +3653,10 @@ function ConnectionsPage({
                 revealable
               />
               {draft.importType !== "soar" && <SelectField
-                label="Encryption"
+                label={normalizeImportType(draft.importType) === "cottendns" ? "Normal-mode encryption" : "Encryption"}
+                description={normalizeImportType(draft.importType) === "cottendns"
+                  ? "CottenMax uses its own authenticated ChaCha20-Poly1305 transport. Both modes use the same encryption key above."
+                  : undefined}
                 value={draft.encryptionMethod}
                 onChange={(encryptionMethod) => setDraft({ ...draft, encryptionMethod: Number(encryptionMethod) })}
                 options={[
@@ -4296,6 +4307,10 @@ function SettingsPage({
 
   async function saveSettingsDraft() {
     onError("");
+    if (normalizeImportType(draft.importType) === "cottendns" && cottenMaxHasHardQueryBudget(draft, cottenDnsSchema)) {
+      onError("CottenMax does not support hard DNS query-rate caps yet. Select Normal mode to keep the cap, or explicitly turn the cap off before saving Max.");
+      return;
+    }
     try {
       const nextState = await backend.saveSettingsProfile(draft);
       onState(nextState);
@@ -4434,7 +4449,7 @@ function SettingsPage({
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <Badge variant="secondary">{importTypeLabel(profile.importType)}</Badge>
+                        <Badge variant="secondary">{settingsEngineLabel(profile)}</Badge>
                       </td>
                       <td className="min-w-0 px-3 py-3">
                         <span className="block truncate font-mono text-xs">{proxyEndpoint(profile.listenIp, profile.listenPort)}</span>
@@ -4997,6 +5012,12 @@ function cottenDNSOptionValue(
   return definition.defaultValue ?? fallback;
 }
 
+function cottenMaxHasHardQueryBudget(profile: SettingsProfile, schema: CottenDNSOptionDefinition[]): boolean {
+  return cottenDNSOptionValue(profile, schema, "TUNNEL_MODE", "legacy") === "cottenmax" &&
+    ["QUERY_RATE_LIMIT_PER_SECOND", "QUERY_RATE_LIMIT_PER_RESOLVER_PER_SECOND", "QUERY_RATE_LIMIT_PER_DOMAIN_PER_SECOND"]
+      .some((key) => Number(cottenDNSOptionValue(profile, schema, key, 0)) > 0);
+}
+
 function cottenDNSNumberBounds(key: string): { min?: number; max?: number } {
   switch (key) {
     case "LISTEN_PORT":
@@ -5024,7 +5045,9 @@ function CottenDNSSettingsFields({
     schema.find((option) => option.key === "CONFIG_PRESET")?.defaultValue ?? "default",
   );
   const presetName = String(overrides.CONFIG_PRESET || defaultPresetName);
+  const modeOption = schema.find((option) => option.key === "TUNNEL_MODE");
   const groups = schema
+    .filter((option) => option.key !== "TUNNEL_MODE")
     .reduce<Array<{ name: string; options: CottenDNSOptionDefinition[] }>>((result, option) => {
       const existing = result.find((group) => group.name === option.group);
       if (existing) {
@@ -5118,6 +5141,43 @@ function CottenDNSSettingsFields({
           Clear overrides
         </Button>
       </div>
+
+      {cottenMaxHasHardQueryBudget(draft, schema) && <Alert variant="destructive">
+        <AlertTitle>Hard query-rate cap needs Normal mode</AlertTitle>
+        <AlertDescription>CottenMax does not support this cap yet. Select Normal to retain the cap, or turn it off explicitly before saving Max.</AlertDescription>
+      </Alert>}
+      {modeOption && (
+        <section className="rounded-lg border bg-card p-4 sm:p-5" aria-labelledby="cottendns-mode-title">
+          <div className="grid gap-4 md:grid-cols-[minmax(12rem,20rem)_minmax(0,1fr)]">
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <h3 id="cottendns-mode-title" className="text-sm font-semibold">Choose your CottenDNS mode</h3>
+                {effectiveValue(modeOption) === "cottenmax" && <Badge variant="secondary">Beta</Badge>}
+              </div>
+              <SelectField
+                label={modeOption.label}
+                value={String(effectiveValue(modeOption))}
+                options={(modeOption.choices || []).map((choice) => [String(choice.value), choice.label])}
+                onChange={(next) => updateOption(modeOption.key, next)}
+                description="Uses this settings profile and your existing connection profile."
+              />
+              {Object.prototype.hasOwnProperty.call(overrides, modeOption.key) && (
+                <Button type="button" size="sm" variant="ghost" onClick={() => clearOption(modeOption.key)}>
+                  <RotateCcw />
+                  Use default mode
+                </Button>
+              )}
+            </div>
+            <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
+              <p className="font-medium text-foreground">One domain and key for Normal and Max</p>
+              <p>CottenMax is a beta transport inside CottenDNS. Your domain, encryption key and resolver profile stay the same.</p>
+              <p>Max requires the updated CottenDNS server. That server accepts both modes on the same listener; an older server supports Normal only.</p>
+              <p>Save settings, then reconnect to apply a mode change. If Max cannot connect, select Normal CottenDNS, save and reconnect. Switching is manual.</p>
+              <p>Start with the default Max options. HTTP/3, DoQ, discovery and query shaping are optional in the categories below.</p>
+            </div>
+          </div>
+        </section>
+      )}
 
       <div className="grid min-h-[31rem] overflow-hidden rounded-lg border bg-card lg:grid-cols-[16rem_minmax(0,1fr)]">
         <aside className="border-b bg-muted/20 p-3 lg:border-b-0 lg:border-r">
@@ -5320,6 +5380,7 @@ function ScannerPage({
   }, [running]);
 
   const selectedConnection = state.connectionProfiles.find((profile) => profile.id === connectionProfileId) || state.connectionProfiles[0];
+  const cottenScan = normalizeImportType(selectedConnection?.importType) === "cottendns";
   const connectionReady = Boolean(connectionDomains(selectedConnection).length && selectedConnection?.encryptionKey.trim());
   const progress = scanner.total > 0 ? Math.round((scanner.completed / scanner.total) * 100) : 0;
   const elapsed = scanner.startedAt ? formatElapsed(scanner.startedAt, scanner.finishedAt || now) : "-";
@@ -5419,7 +5480,7 @@ function ScannerPage({
             <Download />
             File
           </Button>
-          <Button variant="outline" disabled={!running} onClick={pauseOrResume}>
+          <Button variant="outline" disabled={!running || cottenScan} onClick={pauseOrResume}>
             {scanner.paused ? <Play /> : <Pause />}
             {scanner.paused ? "Resume" : "Pause"}
           </Button>
@@ -5461,6 +5522,7 @@ function ScannerPage({
                   </SelectContent>
                 </Select>
                 <FieldDescription>{connectionDomainSummary(selectedConnection) || "Domain required"}</FieldDescription>
+                {cottenScan && <FieldDescription>Uses the selected CottenDNS settings, including Normal/Max and DNS transport. Max Auto tests UDP and TCP independently.</FieldDescription>}
               </Field>
               <NumberField
                 label="Scan parallel"
@@ -5504,6 +5566,7 @@ function ScannerPage({
                   { label: "Completed", value: scanner.completed },
                   { label: "Total", value: scanner.total },
                   { label: "Valid", value: scanner.valid },
+                  { label: "Testing paths", value: scanner.testingPaths?.length ?? 0 },
                   { label: "Rejected", value: scanner.rejected },
                   { label: "Parallel", value: scanner.scanParallel || scanParallel },
                 ]}
@@ -5515,6 +5578,8 @@ function ScannerPage({
                   <AlertDescription>{scanner.error}</AlertDescription>
                 </Alert>
               )}
+              {!!scanner.testingPaths?.length && <div className="rounded-lg border p-3 text-xs"><p className="mb-2 font-medium">Testing DNS paths</p><p className="break-words font-mono">{scanner.testingPaths.slice(0, 12).join(" · ")}{scanner.testingPaths.length > 12 ? ` · +${scanner.testingPaths.length - 12} more` : ""}</p></div>}
+              {!!scanner.workingPaths?.length && <div className="rounded-lg border p-3 text-xs"><p className="mb-2 font-medium">Working DNS paths ({scanner.workingPaths.length})</p><p className="break-words font-mono">{scanner.workingPaths.slice(0, 12).join(" · ")}{scanner.workingPaths.length > 12 ? ` · +${scanner.workingPaths.length - 12} more` : ""}</p></div>}
               {scanner.mode === "connection-upgrade" && scanner.restartAvailable && !scanner.autoRestart && (
                 <div className="flex flex-wrap gap-2 rounded-lg border bg-background/70 p-3">
                   <Button type="button" size="sm" onClick={() => applyUpgrade("save")}>
@@ -6869,7 +6934,7 @@ function SelectField<T extends string | number>({
     <Field>
       <FieldLabel>{label}</FieldLabel>
       <Select value={String(value)} disabled={disabled} onValueChange={(nextValue) => onChange(nextValue as T)}>
-        <SelectTrigger className="w-full">
+        <SelectTrigger className="w-full" aria-label={label}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>

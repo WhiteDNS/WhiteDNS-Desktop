@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -586,10 +586,11 @@ func TestDeferredSessionProcessorFinalizeLaneKeepsRunningTaskAlive(t *testing.T)
 
 	lane := deferredSessionLane{sessionID: 10, streamID: 13}
 	taskCtx, cancel := processor.beginTaskContext(context.Background(), lane)
-	defer cancel()
+	defer cancel.cancel()
 
 	processor.mu.Lock()
 	processor.laneWorker[lane] = 0
+	processor.lanePending[lane] = 1
 	processor.mu.Unlock()
 
 	processor.FinalizeLane(lane)
@@ -604,8 +605,8 @@ func TestDeferredSessionProcessorFinalizeLaneKeepsRunningTaskAlive(t *testing.T)
 	_, laneExists := processor.laneWorker[lane]
 	_, runningExists := processor.running[lane]
 	processor.mu.Unlock()
-	if laneExists {
-		t.Fatal("expected finalized lane mapping to be removed")
+	if !laneExists {
+		t.Fatal("expected running finalized lane to remain assigned until its task finishes")
 	}
 	if !runningExists {
 		t.Fatal("expected running task cancel func to remain until finish")
@@ -681,6 +682,7 @@ func TestDeferredSessionProcessorCompactKeepsCancelledMarkerForInFlightTask(t *t
 	processor.cancelled[lane] = struct{}{}
 	processor.laneWorker[lane] = 0
 	processor.sessionPending[lane.sessionID] = 1
+	processor.lanePending[lane] = 2 // One running/dequeued task and one queued duplicate.
 	processor.workers[0].pending.Store(1)
 	processor.workers[0].jobs <- duplicate
 	dropped := processor.compactWorkerLocked(0, func(candidate deferredSessionLane) bool {
@@ -697,7 +699,7 @@ func TestDeferredSessionProcessorCompactKeepsCancelledMarkerForInFlightTask(t *t
 	}
 
 	taskCtx, cancel := processor.beginTaskContext(context.Background(), lane)
-	defer cancel()
+	defer cancel.cancel()
 	select {
 	case <-taskCtx.Done():
 	default:

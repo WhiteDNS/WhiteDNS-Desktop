@@ -27,6 +27,8 @@ import (
 // is lowercased server-side before decoding, and the EDNS cookie is stripped by
 // the recursive resolver before the query ever reaches the server.
 type QueryShaping struct {
+	EncryptedPaddingBlockSize int
+
 	// EDNSUDPSize is the requestor's UDP payload size advertised in the OPT
 	// record. 0 omits the OPT record entirely.
 	EDNSUDPSize uint16
@@ -254,7 +256,7 @@ func BuildTunnelQuestionPacketShaped(normalizedDomain string, domainQname []byte
 
 	writeEDNSOPT(packet, offset, shaping)
 
-	return packet, nil
+	return PadEncryptedDNSQuery(packet, shaping.EncryptedPaddingBlockSize)
 }
 
 func PrepareTunnelDomainQname(domain string) (string, []byte, error) {

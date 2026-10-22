@@ -1,6 +1,6 @@
 module whitedns-desktop
 
-go 1.23.0
+go 1.25.0
 
 toolchain go1.26.9
 
@@ -41,12 +41,12 @@ require (
 	github.com/wailsapp/go-webview2 v1.0.22 // indirect
 	github.com/wailsapp/mimetype v1.4.1 // indirect
 	go.uber.org/mock v0.4.0 // indirect
-	golang.org/x/crypto v0.33.0 // indirect
+	golang.org/x/crypto v0.51.0 // indirect
 	golang.org/x/exp v0.0.0-20240506185415-9bf2ced13842 // indirect
-	golang.org/x/mod v0.23.0 // indirect
-	golang.org/x/net v0.35.0
-	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0
-	golang.org/x/text v0.22.0 // indirect
-	golang.org/x/tools v0.30.0 // indirect
+	golang.org/x/mod v0.36.0 // indirect
+	golang.org/x/net v0.54.0
+	golang.org/x/sync v0.20.0 // indirect
+	golang.org/x/sys v0.44.0
+	golang.org/x/text v0.37.0 // indirect
+	golang.org/x/tools v0.45.0 // indirect
 )

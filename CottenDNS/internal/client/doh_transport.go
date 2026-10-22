@@ -4,7 +4,7 @@
 // Github: https://github.com/TaJirax/CottenDns
 // Year: 2026
 // ==============================================================================
-// doh_transport.go — DNS-over-HTTPS resolver transport (RFC 8484), used when
+// doh_transport.go â€” DNS-over-HTTPS resolver transport (RFC 8484), used when
 // RESOLVER_TRANSPORT=doh. Unlike UDP/TCP/DoT there is no persistent framed
 // stream: each query is an HTTP POST whose body is the raw DNS wire-format
 // message, and the response body is the wire-format answer. HTTP/2 multiplexes
@@ -12,9 +12,9 @@
 // connection set per resolver host automatically.
 //
 // Two users of this file:
-//   - dohQueryTransport — the synchronous exchanger used by MTU probing,
+//   - dohQueryTransport â€” the synchronous exchanger used by MTU probing,
 //     session init and health rechecks (implements queryExchanger).
-//   - dohDataManager    — the data-plane sender, which mirrors tcpDataManager:
+//   - dohDataManager    â€” the data-plane sender, which mirrors tcpDataManager:
 //     it posts asynchronously and pushes answers into the SAME rxChannel the UDP
 //     reader feeds, so handleInboundPacket treats every transport identically.
 // ==============================================================================
@@ -22,16 +22,14 @@
 package client
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"io"
 	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	Enums "cottendns-go/internal/enums"
+	"cottendns-go/internal/resolvertransport"
 )
 
 const (
@@ -43,8 +41,6 @@ const (
 	dohDataQueueCapacity = 256
 	dohControlQueueCap   = 64
 )
-
-var errDoHStatus = errors.New("doh: non-200 response")
 
 // newDoHHTTPClient builds the shared HTTP/2 client used by both DoH users. The
 // resolver is addressed by IP in the URL, while SNI/verification come from the
@@ -77,6 +73,7 @@ func (c *Client) sharedDoHHTTPClient() *http.Client {
 }
 
 func (c *Client) closeSharedDoHHTTPClient() {
+	c.closeSharedEncryptedDNSClient()
 	c.dohHTTPMu.Lock()
 	defer c.dohHTTPMu.Unlock()
 	if c.dohHTTP == nil {
@@ -96,33 +93,7 @@ func (c *Client) dohEndpoint(resolverLabel string) string {
 
 // dohExchange performs one DoH round trip and returns the wire-format answer.
 func dohExchange(ctx context.Context, httpClient *http.Client, endpoint string, packet []byte) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(packet))
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Content-Type", dohContentType)
-	req.Header.Set("Accept", dohContentType)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
-	}()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, errDoHStatus
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, dohMaxResponse))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) < 12 {
-		return nil, errDoHStatus
-	}
-	return body, nil
+	return resolvertransport.ExchangeHTTP(ctx, httpClient, endpoint, packet)
 }
 
 // ---------------------------------------------------------------------------
@@ -135,10 +106,7 @@ type dohQueryTransport struct {
 }
 
 func (c *Client) newDoHQueryTransport(resolverLabel string) (queryExchanger, error) {
-	return &dohQueryTransport{
-		httpClient: c.sharedDoHHTTPClient(),
-		endpoint:   c.dohEndpoint(resolverLabel),
-	}, nil
+	return c.newEncryptedQueryTransport(resolverLabel)
 }
 
 func (t *dohQueryTransport) exchange(packet []byte, timeout time.Duration) ([]byte, error) {
@@ -159,9 +127,7 @@ func (t *dohQueryTransport) Close() error {
 // ---------------------------------------------------------------------------
 
 type dohDataManager struct {
-	client     *Client
-	httpClient *http.Client
-
+	client   *Client
 	mu       sync.Mutex
 	ctx      context.Context
 	cancel   context.CancelFunc
@@ -180,10 +146,9 @@ type dohDataJob struct {
 
 func newDoHDataManager(c *Client) *dohDataManager {
 	return &dohDataManager{
-		client:     c,
-		httpClient: c.sharedDoHHTTPClient(),
-		controlQ:   make(chan dohDataJob, dohControlQueueCap),
-		dataQ:      make(chan dohDataJob, dohDataQueueCapacity),
+		client:   c,
+		controlQ: make(chan dohDataJob, dohControlQueueCap),
+		dataQ:    make(chan dohDataJob, dohDataQueueCapacity),
 	}
 }
 
@@ -265,12 +230,11 @@ func (m *dohDataManager) worker(ctx context.Context) {
 }
 
 func (m *dohDataManager) exchangeJob(ctx context.Context, job dohDataJob) {
-	endpoint := m.client.dohEndpoint(job.addr.String())
 	m.client.trackResolverSend(job.body, job.addr.String(), "", job.serverKey, job.now)
 	m.client.txTotalBytes.Add(uint64(len(job.body)))
 	reqCtx, cancel := context.WithTimeout(ctx, m.client.resolverRequestTimeout())
 	defer cancel()
-	response, err := dohExchange(reqCtx, m.httpClient, endpoint, job.body)
+	response, err := m.client.exchangeEncryptedDNS(reqCtx, job.addr.String(), job.body)
 	if err != nil || len(response) < 12 || (response[2]&0x80) == 0 {
 		return
 	}

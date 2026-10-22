@@ -97,6 +97,21 @@ func NewWithFile(name, rawLevel, filePath string) *Logger {
 	}
 }
 
+// Close releases the optional log file; repeated calls are safe.
+func (l *Logger) Close() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.fileWriter == nil {
+		return nil
+	}
+	err := l.fileWriter.Close()
+	l.fileWriter = nil
+	return err
+}
+
 func parseLevel(raw string) int {
 	switch strings.ToUpper(strings.TrimSpace(raw)) {
 	case "DEBUG":

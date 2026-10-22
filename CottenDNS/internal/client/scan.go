@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"cottendns-go/internal/config"
 	"errors"
 )
 
@@ -14,6 +15,9 @@ type ResolverScanSummary struct {
 // RunResolverScan classifies resolvers without starting listeners or a session.
 func (c *Client) RunResolverScan(ctx context.Context) (ResolverScanSummary, error) {
 	defer c.closeResolverCacheLog()
+	if c.cfg.TunnelMode == config.TunnelCottenMax {
+		return c.runCottenMaxResolverScan(ctx)
+	}
 	summary := ResolverScanSummary{Total: len(c.connections)}
 	if summary.Total == 0 {
 		c.logResolverScanComplete(summary)
@@ -28,6 +32,9 @@ func (c *Client) RunResolverScan(ctx context.Context) (ResolverScanSummary, erro
 	// instead of jumping only after every resolver has been tested. The
 	// authoritative totals still arrive in the WD_SCAN event=complete line below.
 	c.scanTelemetryActive.Store(true)
+	if c.log != nil {
+		c.log.Machinef("WD_SCAN event=started total=%d", summary.Total)
+	}
 	err := c.RunInitialMTUTests(ctx)
 	c.scanTelemetryActive.Store(false)
 	c.cfg.FastConnect = fastConnect
@@ -44,6 +51,12 @@ func (c *Client) RunResolverScan(ctx context.Context) (ResolverScanSummary, erro
 	return summary, nil
 }
 
+func (c *Client) emitScanTesting(resolver, transport string) {
+	if c != nil && c.log != nil && c.scanTelemetryActive.Load() && resolver != "" {
+		c.log.Machinef("WD_SCAN event=testing resolver=%s transport=%s", resolver, transport)
+	}
+}
+
 // emitScanResult reports one resolver's outcome to the UI in real time while a
 // -scan-only run is in progress. It is a no-op during a normal tunnel run, so
 // the shared MTU probe path stays quiet unless RunResolverScan armed it.
@@ -55,6 +68,9 @@ func (c *Client) emitScanResult(resolverLabel string, valid bool) {
 		c.log.Machinef("WD_SCAN event=valid resolver=%s", resolverLabel)
 	} else {
 		c.log.Machinef("WD_SCAN event=rejected resolver=%s", resolverLabel)
+	}
+	if c.cfg.TunnelMode != config.TunnelCottenMax {
+		c.log.Machinef("WD_SCAN event=path resolver=%s transport=%s usable=%t", resolverLabel, c.cfg.ResolverTransport, valid)
 	}
 }
 

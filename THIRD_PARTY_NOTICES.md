@@ -29,3 +29,7 @@ Frontend and other Go dependency licenses remain those of their respective autho
 ## Resolver datasets
 
 The Iranian resolver/range snapshots come from KevinNet DNS, commit a331430 (2026-05-26), under the MIT License. The complete attribution and permission notice is retained in `Soar/data/THIRD_PARTY.md` and included in release packages as `licenses/Soar-DATA-NOTICES.md`.
+
+## CottenMax
+
+CottenMax is an optional mode inside CottenDNS based on Lantern Soar v0.2.3. It uses the existing CottenDNS domain and credential. Its modified engine notice, Soar Apache-2.0 license, resolver dataset notices, and QUIC/QPACK license texts are distributed separately under `licenses/CottenMax-*`. The independent WhiteDNS Soar engine retains its own source pin and notices above.

@@ -17,10 +17,68 @@
 # - Defines payload encryption and the shared key that must match the server.
 # ------------------------------------------------------------------------------
 
+# Existing engine (default), including compatibility with older servers:
+TUNNEL_MODE = "legacy"
+# Alternative: TUNNEL_MODE = "cottenmax" within the same CottenDNS profile.
+# Uses the same DOMAINS, ENCRYPTION_KEY and resolver list. No extra key or file.
+# Upgraded servers accept both modes on the same listener. No silent downgrade.
+# Includes safe startup/background size discovery, held polls, ephemeral session
+# keys, and byte-range retransmission with implicit upload ACKs.
+# See docs/COTTENMAX_EXPERIMENT.md for supported settings and local tests.
+# Old experimental public pins remain readable only for migration; new profiles
+# derive the server identity internally from the existing shared credential.
+# COTTENMAX_SERVER_PUBLIC_KEY = ""
+# Optional authenticated Soar resolver discovery. Disabled by default.
+RESOLVER_DISCOVERY_ENABLED = false
+RESOLVER_DISCOVERY_COUNTRY = ""
+# Deliberate range sampling is opt-in; zero only tries known candidate lists.
+RESOLVER_DISCOVERY_SAMPLE_RANGES = 0
+# Max only: 0 disables held polls; 100..1500 uses 100ms steps. Default 500.
+COTTENMAX_HOLD_MILLISECONDS = 500
+
+# Optional CottenMax resilience controls. Defaults retain the current fast path.
+# Standby domains are lazy: no queries until the active domain fails. Each server
+# must accept its domain and the same existing ENCRYPTION_KEY. Streams already
+# open are not replayed or migrated between servers.
+COTTENMAX_FAILOVER_AFTER_MILLISECONDS = 3000
+COTTENMAX_SAFE_QNAME = 101
+COTTENMAX_MAX_QNAME = 253
+COTTENMAX_MAX_ANSWER = 1232
+COTTENMAX_MAX_PATH_WINDOW = 256
+COTTENMAX_MAX_INFLIGHT = 256
+# Experimental: recent authenticated near-cap answers avoid a false size
+# downgrade under random loss. May slow healthy paths; default remains off.
+COTTENMAX_QNAME_LOSS_GUARD = false
+COTTENMAX_SESSION_IDLE_MILLISECONDS = 90000
+
+# Optional authenticated resolver discovery (Max only). Every cached candidate
+# must authenticate again. Cache files contain endpoints, never credentials.
+# Empty cache path disables persistence. Relative paths use the config directory.
+RESOLVER_DISCOVERY_CACHE_FILE = ""
+# Optional user-supplied network label: change it when moving networks.
+RESOLVER_DISCOVERY_NETWORK_ID = ""
+RESOLVER_DISCOVERY_CANDIDATES = []
+RESOLVER_DISCOVERY_WANT = 16
+RESOLVER_DISCOVERY_CONCURRENCY = 16
+RESOLVER_DISCOVERY_PACE_MILLISECONDS = 20
+
+# Optional Max label-count shaping; extra separators reduce payload capacity.
+# This changes name layout, not the tunnel identity or encryption key.
+QNAME_LABEL_COUNT_JITTER = false
+
+# Encrypted resolver hop options (dot/doh/doh3/doq). Padding is rejected on
+# plaintext modes. Zero disables it; 128 is a common optional block size.
+# Padding hides some query lengths only on this hop and costs bandwidth.
+DNS_PADDING_BLOCK_SIZE = 0
+RESOLVER_DOQ_PORT = 853
+# Explicit doh3 -> TLS DoH fallback only. No plaintext fallback for these modes.
+RESOLVER_HTTP3_FALLBACK = false
+
 # Tunnel domains used to build DNS queries.
 # Must match server DOMAIN values exactly.
 # At least one domain is required.
-# All domains must be handled by the same server. Do not use different domains across multiple servers.
+# Legacy domains must be handled by the same server. Max may fail over to
+# independently configured servers sharing the existing encryption key.
 DOMAINS = ["v.domain.com"]
 
 # Domain rotation. Backup tunnel domains on the SAME server, never queried while
@@ -186,19 +244,28 @@ RESOLVER_IP_MODE = "auto"
 #   "tcp"            - TCP/53 only, for networks that block or truncate UDP/53.
 #   "dot"            - DNS-over-TLS (RFC 7858), normally :853.
 #   "doh"            - DNS-over-HTTPS (RFC 8484), normally :443.
+#   "doh3"           - DoH over HTTP/3, normally UDP/443.
+#   "doq"            - DNS-over-QUIC (RFC 9250), normally UDP/853.
 # The server serves TCP/53 by default (TCP_LISTENER_ENABLED), so no server change
 # is needed to use TCP.
 #
 # DoT/DoH are opt-in DISGUISE transports: they make the resolver hop look like
 # ordinary encrypted DNS where plain 53 is fingerprinted. "auto" never escalates
 # into them — you choose them deliberately. Choosing one is not a commitment
-# though: if the TLS port is blocked (a common censorship response) the client
+# in legacy mode: if the TLS port is blocked (a common censorship response) the client
 # falls back to UDP and then TCP/53 on its own, so you degrade to the survival
-# path instead of losing the tunnel. They require DOT_LISTENER_ENABLED /
-# DOH_LISTENER_ENABLED on the server (both off by default).
+# path instead of losing the tunnel. A direct encrypted connection to your
+# server requires DOT_LISTENER_ENABLED / DOH_LISTENER_ENABLED (off by default).
+# A recursive encrypted resolver can also forward to your server over UDP/53.
+# CottenMax supports "dot" with verified TLS and NO plaintext fallback.
+# "auto" in Max can try TCP/53 if a previously working UDP path stalls.
+# Max also supports doh, doh3 and doq with verified TLS and no plaintext fallback.
+# doh3 uses HTTP/3 over UDP/443; doq uses QUIC over UDP/853 by default.
+# Both require a compatible encrypted recursive resolver. Neither changes the
+# recursive-to-authoritative hop, which normally remains DNS on port 53.
 RESOLVER_TRANSPORT = "auto"
 
-# Encrypted-resolver settings (used only by "dot"/"doh").
+# Encrypted-resolver settings (used by dot/doh/doh3/doq).
 # RESOLVER_TLS_SERVER_NAME is the SNI + certificate name presented to the
 # resolver; leave empty to use the resolver IP (which then needs an IP SAN or a
 # pin). Resolver entries keep their DNS port; these ports are used instead.
@@ -214,10 +281,11 @@ RESOLVER_DOH_PATH = "/dns-query"
 #      hash or a "sha256/..." prefix. This is the right way to use a server that
 #      fell back to a self-signed certificate.
 #   2. empty pin (default) - normal hostname/CA verification.
-#   3. RESOLVER_TLS_INSECURE_SKIP_VERIFY - last resort, off by default.
-# The tunnel payload is AEAD-encrypted regardless, so option 3 never exposes
-# traffic; prefer pinning anyway, because an unverified hop can be transparently
-# intercepted and that interception is itself a censorship signal.
+#   3. RESOLVER_TLS_INSECURE_SKIP_VERIFY - legacy only, off by default.
+#      Max requires CA/hostname verification or a valid configured pin.
+# CottenMax authenticates its tunnel independently. Legacy payload protection
+# depends on DATA_ENCRYPTION_METHOD; select an authenticated cipher deliberately.
+# Prefer certificate validation or a trusted pin for the encrypted resolver hop.
 RESOLVER_TLS_PIN = ""
 RESOLVER_TLS_INSECURE_SKIP_VERIFY = false
 
@@ -238,8 +306,11 @@ RESOLVER_RATE_LIMIT_ENABLED = true
 #   QUERY_RATE_LIMIT_PER_SECOND               total for this client
 #   QUERY_RATE_LIMIT_PER_RESOLVER_PER_SECOND  per destination resolver IP
 #   QUERY_RATE_LIMIT_PER_DOMAIN_PER_SECOND    per tunnel domain (DOMAINS)
-# 0 = scope off (default). Set a cap just under the observed limit, e.g. 5 for
-# a 6/sec limit. Queries are queued and evenly spaced, never dropped.
+# 0 = scope off (default). Each rate accepts any positive number, including
+# fractional rates (e.g. 0.5), 500, 1000, or higher; there is no fixed upper cap.
+# Set a cap just under your network's observed limit. Queries are queued and
+# evenly spaced, never dropped. For a total budget of 500 queries/sec, set
+# QUERY_RATE_LIMIT_PER_SECOND = 500 and leave the other two scopes at 0.
 # Turning on ANY scope automatically: forces all *_DUPLICATION_COUNT to 1,
 # disables ADAPTIVE_DUPLICATION and session-init racing, sets
 # MTU_BACKGROUND_PARALLELISM = 1, caps RECHECK_BATCH_SIZE at 2, and skips pings

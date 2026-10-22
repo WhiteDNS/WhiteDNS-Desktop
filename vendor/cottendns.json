@@ -1,6 +1,8 @@
 {
-  "repository": "https://github.com/WhiteDNS/CottenDNS.git",
-  "commit": "1f3cc524dddbc9d59ca2b312f4408a813efa8f71",
+  "repository": "https://github.com/WhiteDNS/CottenDNS",
+  "commit": "e50a43ef75ad10ae2ffbfa106d13c50de3e77624",
   "directory": "CottenDNS",
-  "update": "Replace CottenDNS with `git archive <reviewed-full-sha>` and update this file in the same commit. Never vendor a dirty working tree."
+  "update": "Reviewed PR #15 TCP recovery and embedded-server fixes, retaining CottenMax dual transport and capacity support.",
+  "base_commit": "e50a43ef75ad10ae2ffbfa106d13c50de3e77624",
+  "source_snapshot": "CottenDNS/COTTEN_CORE_SNAPSHOT.json"
 }

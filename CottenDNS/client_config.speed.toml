@@ -10,3 +10,59 @@ DOMAINS = ["REPLACE_WITH_YOUR_DELEGATED_DOMAIN"]
 
 # Paste the key generated on the server side.
 ENCRYPTION_KEY = ""
+
+# CottenMax is a mode inside this same profile; keep the domain and key above.
+TUNNEL_MODE = "legacy"
+STANDBY_DOMAINS = []
+RESOLVER_DISCOVERY_ENABLED = false
+RESOLVER_DISCOVERY_COUNTRY = ""
+RESOLVER_DISCOVERY_SAMPLE_RANGES = 0
+COTTENMAX_HOLD_MILLISECONDS = 500
+RESOLVER_TRANSPORT = "auto"
+# Choices: auto, udp, tcp, dot, doh, doh3, doq. Encrypted modes require a
+# compatible resolver; Max never downgrades an encrypted hop to plaintext.
+RESOLVER_TLS_SERVER_NAME = ""
+RESOLVER_TLS_PIN = ""
+RESOLVER_TLS_INSECURE_SKIP_VERIFY = false
+RESOLVER_DOT_PORT = 853
+RESOLVER_DOH_PORT = 443
+RESOLVER_DOH_PATH = "/dns-query"
+QNAME_LABEL_LENGTH = 63
+
+# Optional CottenMax resilience controls. Defaults retain the current fast path.
+# Standby domains are lazy: no queries until the active domain fails. Each server
+# must accept its domain and the same existing ENCRYPTION_KEY. Streams already
+# open are not replayed or migrated between servers.
+COTTENMAX_FAILOVER_AFTER_MILLISECONDS = 3000
+COTTENMAX_SAFE_QNAME = 101
+COTTENMAX_MAX_QNAME = 253
+COTTENMAX_MAX_ANSWER = 1232
+COTTENMAX_MAX_PATH_WINDOW = 256
+COTTENMAX_MAX_INFLIGHT = 256
+# Experimental: recent authenticated near-cap answers avoid a false size
+# downgrade under random loss. May slow healthy paths; default remains off.
+COTTENMAX_QNAME_LOSS_GUARD = false
+COTTENMAX_SESSION_IDLE_MILLISECONDS = 90000
+
+# Optional authenticated resolver discovery (Max only). Every cached candidate
+# must authenticate again. Cache files contain endpoints, never credentials.
+# Empty cache path disables persistence. Relative paths use the config directory.
+RESOLVER_DISCOVERY_CACHE_FILE = ""
+# Optional user-supplied network label: change it when moving networks.
+RESOLVER_DISCOVERY_NETWORK_ID = ""
+RESOLVER_DISCOVERY_CANDIDATES = []
+RESOLVER_DISCOVERY_WANT = 16
+RESOLVER_DISCOVERY_CONCURRENCY = 16
+RESOLVER_DISCOVERY_PACE_MILLISECONDS = 20
+
+# Optional Max label-count shaping; extra separators reduce payload capacity.
+# This changes name layout, not the tunnel identity or encryption key.
+QNAME_LABEL_COUNT_JITTER = false
+
+# Encrypted resolver hop options (dot/doh/doh3/doq). Padding is rejected on
+# plaintext modes. Zero disables it; 128 is a common optional block size.
+# Padding hides some query lengths only on this hop and costs bandwidth.
+DNS_PADDING_BLOCK_SIZE = 0
+RESOLVER_DOQ_PORT = 853
+# Explicit doh3 -> TLS DoH fallback only. No plaintext fallback for these modes.
+RESOLVER_HTTP3_FALLBACK = false

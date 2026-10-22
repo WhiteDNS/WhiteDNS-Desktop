@@ -79,7 +79,7 @@ func TestLoadClientResolversSupportsScopedIPv6(t *testing.T) {
 	}
 }
 
-func TestLoadClientResolversDropsDuplicateIPsEvenWithDifferentPorts(t *testing.T) {
+func TestLoadClientResolversKeepsDistinctPortsAndDropsDuplicateEndpoints(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "client_resolvers.txt")
 
@@ -97,11 +97,11 @@ func TestLoadClientResolversDropsDuplicateIPsEvenWithDifferentPorts(t *testing.T
 		t.Fatalf("LoadClientResolvers returned error: %v", err)
 	}
 
-	if len(resolvers) != 1 {
-		t.Fatalf("unexpected resolver count: got=%d want=%d", len(resolvers), 1)
+	if len(resolvers) != 2 {
+		t.Fatalf("unexpected resolver count: got=%d want=%d", len(resolvers), 2)
 	}
-	if resolvers[0].IP != "8.8.8.8" || resolvers[0].Port != 53 {
-		t.Fatalf("unexpected resolver entry: %+v", resolvers[0])
+	if resolvers[0].IP != "8.8.8.8" || resolvers[0].Port != 53 || resolvers[1].IP != "8.8.8.8" || resolvers[1].Port != 5353 {
+		t.Fatalf("unexpected resolver entries: %+v", resolvers)
 	}
 	if resolverMap["8.8.8.8"] != 53 {
 		t.Fatalf("unexpected resolver map port: got=%d want=%d", resolverMap["8.8.8.8"], 53)
@@ -128,8 +128,8 @@ bad ip
 		t.Fatalf("LoadClientResolvers returned error: %v", err)
 	}
 
-	if len(resolvers) != 2 {
-		t.Fatalf("unexpected resolver count: got=%d want=%d", len(resolvers), 2)
+	if len(resolvers) != 3 {
+		t.Fatalf("unexpected resolver count: got=%d want=%d", len(resolvers), 3)
 	}
 	if resolverMap["8.8.8.8"] != 53 {
 		t.Fatalf("unexpected port for 8.8.8.8: got=%d want=%d", resolverMap["8.8.8.8"], 53)

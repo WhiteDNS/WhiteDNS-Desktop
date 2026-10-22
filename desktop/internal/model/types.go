@@ -584,6 +584,8 @@ type ScannerState struct {
 	Invalid                     int      `json:"invalid"`
 	Duplicates                  int      `json:"duplicates"`
 	ValidResolvers              []string `json:"validResolvers"`
+	TestingPaths                []string `json:"testingPaths"`
+	WorkingPaths                []string `json:"workingPaths"`
 	Error                       string   `json:"error"`
 	StartedAt                   int64    `json:"startedAt"`
 	FinishedAt                  int64    `json:"finishedAt"`

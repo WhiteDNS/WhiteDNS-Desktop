@@ -118,6 +118,8 @@ type activeProcess struct {
 	progressSeen            bool
 	lastProgress            model.ConnectionProgress
 	progressChangedAt       time.Time
+	tunnelReady             chan struct{}
+	tunnelReadyOnce         sync.Once
 	done                    chan struct{}
 	waitErr                 error
 }
@@ -319,6 +321,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		mtuResolverStateFile: mtuResolverStateFile,
 		masterPIDFile:        masterPIDFile,
 		done:                 make(chan struct{}),
+		tunnelReady:          make(chan struct{}),
 	}
 	m.mu.Lock()
 	m.active = active
@@ -336,6 +339,12 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		return stormDNSReadinessError(err)
 	}
 	m.debugLogf(debugLogs, "Debug Desktop MasterDNS local port is ready: %s:%d", masterSettings.ListenIP, masterSettings.ListenPort)
+	if engine == model.ImportTypeCottenDNS {
+		if err := m.waitForTunnelReady(ctx, active); err != nil {
+			_ = m.Stop()
+			return err
+		}
+	}
 	if err := m.startXray(ctx, cfg, active); err != nil {
 		_ = m.Stop()
 		return err
@@ -436,6 +445,10 @@ func masterDNSLaunchEnv(cfg storm.LaunchConfig, mtuScanControlFile string) []str
 
 func (m *Manager) ResolveClientBinary(ctx context.Context) (string, error) {
 	return m.resolveBinary(ctx)
+}
+
+func (m *Manager) ResolveClientBinaryForEngine(ctx context.Context, engine string) (string, error) {
+	return m.resolveBinaryForEngine(ctx, engine)
 }
 
 func (m *Manager) resolveBinary(ctx context.Context) (string, error) {
@@ -1205,6 +1218,9 @@ func (m *Manager) recordProgress(active *activeProcess, progress model.Connectio
 	now := time.Now()
 	m.mu.Lock()
 	if m.active == active {
+		if progress.Phase == "connected" && active.tunnelReady != nil {
+			active.tunnelReadyOnce.Do(func() { close(active.tunnelReady) })
+		}
 		if !active.progressSeen || connectionProgressChanged(active.lastProgress, progress) {
 			active.progressChangedAt = now
 		}
@@ -1212,6 +1228,21 @@ func (m *Manager) recordProgress(active *activeProcess, progress model.Connectio
 		active.lastProgress = progress
 	}
 	m.mu.Unlock()
+}
+
+func (m *Manager) waitForTunnelReady(ctx context.Context, active *activeProcess) error {
+	timer := time.NewTimer(m.options.StartTimeout)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-active.done:
+		return errors.New("CottenDNS stopped before the tunnel was verified")
+	case <-timer.C:
+		return errors.New("CottenDNS opened its local proxy but did not verify a tunnel connection; check the matching server build, domain/key and resolvers")
+	case <-active.tunnelReady:
+		return nil
+	}
 }
 
 func (m *Manager) recordSessionInitProgress(active *activeProcess, retry bool) (model.ConnectionProgress, bool) {

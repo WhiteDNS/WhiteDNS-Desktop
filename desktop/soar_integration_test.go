@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/profiles"
 	runtimemgr "whitedns-desktop/internal/runtime"
@@ -35,7 +36,23 @@ func TestWriteSoarUIFixture(t *testing.T) {
 	state.SelectedConnectionProfileID = p.ID
 	state.SettingsProfiles = append(state.SettingsProfiles, model.DefaultSoarSettingsProfile())
 	state.SelectedSettingsProfileID = model.DefaultSoarSettingsID
+	state.ConnectionProfiles = append(state.ConnectionProfiles, model.ConnectionProfile{ID: "cotten-ui", Name: "Cotten Test", ImportType: model.ImportTypeCottenDNS, Domain: "a.example", Domains: []string{"a.example"}, EncryptionKey: "shared-test-key", EncryptionMethod: 5, ResolverProfileID: model.DefaultResolverProfileID})
+	cotten := model.DefaultCottenDNSSettingsProfile()
+	cotten.ID, cotten.Name = "cotten-ui-settings", "CottenMax Settings"
+	cottenOptions := map[string]any{"TUNNEL_MODE": "cottenmax", "RESOLVER_TRANSPORT": "auto"}
+	cotten.CottenDNSOptions = &cottenOptions
+	state.SettingsProfiles = append(state.SettingsProfiles, cotten)
+
 	raw, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixture := map[string]any{}
+	if err := json.Unmarshal(raw, &fixture); err != nil {
+		t.Fatal(err)
+	}
+	fixture["_cottenSchema"] = cottendns.Schema()
+	raw, err = json.Marshal(fixture)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -19,11 +19,13 @@ var (
 )
 
 type ScannerEvent struct {
-	Event    string
-	Resolver string
-	Total    int
-	Valid    int
-	Rejected int
+	Event     string
+	Resolver  string
+	Transport string
+	Usable    bool
+	Total     int
+	Valid     int
+	Rejected  int
 }
 
 type MTUResolverStateEvent struct {
@@ -55,11 +57,13 @@ func ParseScannerEvent(line string) (ScannerEvent, bool) {
 		return ScannerEvent{}, false
 	}
 	return ScannerEvent{
-		Event:    event,
-		Resolver: fields["resolver"],
-		Total:    atoi(fields["total"]),
-		Valid:    atoi(fields["valid"]),
-		Rejected: atoi(fields["rejected"]),
+		Event:     event,
+		Resolver:  fields["resolver"],
+		Transport: fields["transport"],
+		Usable:    fields["usable"] == "true" || fields["transfer_verified"] == "true",
+		Total:     atoi(fields["total"]),
+		Valid:     atoi(fields["valid"]),
+		Rejected:  atoi(fields["rejected"]),
 	}, true
 }
 

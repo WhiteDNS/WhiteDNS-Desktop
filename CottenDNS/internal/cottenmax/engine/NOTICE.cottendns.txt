@@ -1,0 +1,79 @@
+# CottenDNS transport copy
+
+This directory is derived from Lantern's `github.com/getlantern/soar` v0.2.3,
+commit `a8af533d82284f5e6ab13b706552596c108bacf2`, under Apache-2.0. The
+original license, specification, and embedded data notices are retained.
+Wire vectors and tests remain local validation material and are excluded from
+the beta source publication. The upstream command, benchmark, and data generator
+are excluded.
+The package name remains `soar` to keep the changes easy to compare upstream.
+
+CottenDNS modifications (updated 2026-10-21):
+
+- `client.go`: held polls retain their hold-aware deadlines even when later
+  polls arrive first; immediate data queries retain fast loss recovery with
+  the RTO's variance margin and a minimum 50ms allowance for reordering.
+  Automatic transport selection probes UDP and TCP independently from startup;
+  both paths carry live streams with independent authentication, sizing,
+  congestion and recovery state. Short startup authentication probes do not
+  become idle beacons. Statistics distinguish observed wire sizes from limits.
+  Failed QNAME-size discovery is retried with exponential backoff (10s to 1m)
+  on existing traffic so a replacement forwarder can regain capacity; short
+  queries remain the fallback and only an authenticated padded probe promotes it.
+  Authenticated late answers/hellos refresh the path RTT after latency changes
+  without double-counting delivery or congestion credit; invalid replies cannot.
+  The optional QNameLossGuard experiment (off by default) keeps the larger
+  QNAME cap only with authenticated near-cap proof fresher than one path RTO;
+  smaller/forged replies do not suppress safe-size fallback. Loss and
+  congestion accounting remain active.
+  Optional size/window/idle limits and encrypted-query padding are configured by
+  the surrounding adapter; defaults retain the existing fast path.
+- `dnswire.go`: optional label-length/count shaping with exact separator budget
+  accounting. Defaults retain ordinary Soar label splitting; parsing remains
+  compatible with the independent upstream implementation.
+- `discover.go`: an optional address-family predicate applies to every candidate
+  source, including cached/system/bundled/sampled endpoints. The adapter adds
+  bounded, expiring per-domain/profile cache hints; paths reauthenticate.
+  Discovery budgets count distinct resolvers, allowing both UDP/TCP paths per
+  candidate without double-counting the requested resolver diversity.
+- `session.go`: an in-flight packet owns its ACK ranges. They are removed from
+  the pending ACK queue on send and requeued on loss, avoiding redundant ACK
+  frames in every query and upload starvation with short names.
+- `roundtripper.go`: `DialConfirmed` exposes the existing OPENED wait directly
+  for local SOCKS/HTTP proxies.
+- `tcp.go`: cancel an in-progress TCP/TLS resolver dial when its client/path closes.
+  Back off accept-then-close loops until the connection proves authenticated
+  tunnel progress; a previously proven connection can reconnect immediately.
+  Bound concurrent resolver TCP/TLS handshakes independently of UDP startup.
+  Replace half-open sockets after repeated actual query timeouts and sustained
+  lack of authenticated progress. Close the captured socket outside the client
+  lock; account old-query losses and discard stale queued messages before redial
+  resumes that path. Retain congestion/loss history while clearing old suspension.
+- `server.go`: preserve the UDP amplification budget through CottenDNS's
+  reply-address wrapper. Stream transports remain exempt, as upstream. Disable
+  upstream's environment-controlled plaintext packet trace; app settings use TOML.
+- `vectors_test.go`: normalize Windows checkout line endings. The JSON vector
+  content and wire encoding are unchanged.
+- `cottenmax_*_test.go`: recovery, ACK ownership, wrapped-source budget and
+  bidirectional compatibility tests against the independently pinned module,
+  mid-session TCP fallback and dial cancellation.
+
+The surrounding client adapter raises the adaptive congestion-window ceiling
+from 32 to 256 queries, with a default global limit of 256. Optional bounded
+settings expose these ceilings. Initial windows remain small; delivery grows
+them and consecutive losses reduce them. Recovery and shaping add no tunnel
+handshake or new cryptographic primitive. Optional TLS/QUIC resolver transports
+have their own connection setup. The adapter's multi-domain failover uses
+independent authenticated sessions and does not migrate existing streams. See
+docs/COTTENMAX_OPTIONS.md in the source checkout.
+
+Capacity extension, 2026-10-21: client/server stream ceilings can reach 512
+when explicitly enabled by the CottenDNS server. The bounded control queue is
+2048 entries, retaining at least one quarter of its capacity as headroom for
+the three control frames per admitted stream. Existing server admission
+defaults remain 256 and all flow-control, aggregate stream and byte limits
+remain in force. The wire encoding and cryptography are unchanged.
+
+Production code imports this copy. The upstream module in go.mod is retained
+only for independent interoperability tests and the tagged performance
+comparison. Do not replace that comparator with this package.

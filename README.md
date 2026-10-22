@@ -79,3 +79,14 @@ diagnostics; please check any log you attach before posting it.
 Report vulnerabilities privately to the official WhiteDNS team via the channel
 above rather than opening a public issue. Section 6 of the license covers
 security research and responsible disclosure.
+
+## CottenMax beta on the current Desktop client
+
+The `beta/cottenmax-20261021` branch combines the latest main interface with the reviewed CottenDNS core [`e50a43ef`](https://github.com/WhiteDNS/CottenDNS/commit/e50a43ef75ad10ae2ffbfa106d13c50de3e77624), including [PR #15](https://github.com/WhiteDNS/CottenDNS/pull/15). [Debug builds and test results](https://github.com/WhiteDNS/WhiteDNS-Desktop/actions?query=branch%3Abeta%2Fcottenmax-20261021) are available as workflow artifacts; these are beta builds, with no stable app release published by this update.
+
+Select a CottenDNS connection and a CottenDNS settings profile. Open **Settings → CottenDNS → CottenDNS mode**, select **CottenMax (beta)**, save and reconnect. The existing domain, key and resolver profile are reused.
+
+- Normal and Max coexist on an updated Max-enabled CottenDNS server. If Max cannot connect, switch back to Normal using the same profile.
+- UDP, TCP and automatic UDP/TCP selection apply to actual tunnel connections and Max resolver scanning. Encrypted DNS, padding, standby domains, discovery and query shaping remain optional.
+- Scans show testing and verified DNS paths. Max connection readiness waits for the core's authenticated tunnel-transfer marker.
+- Max options stay inside CottenDNS. The current main Soar engine, subscriptions and other engine controls remain available.

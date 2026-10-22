@@ -1,6 +1,7 @@
 package client
 
 import (
+	"cottendns-go/internal/config"
 	"net"
 	"strconv"
 )
@@ -17,32 +18,37 @@ const (
 // StatusSnapshot is a race-safe, presentation-neutral view of the live client.
 // It lets terminal and desktop frontends render status without scraping logs.
 type StatusSnapshot struct {
-	Phase               string
-	Transport           string
-	FamilyMode          string
-	ProxyAddress        string
-	LocalDNSAddress     string
-	LocalDNSEnabled     bool
-	ConfiguredResolvers int
-	ConfiguredIPv4      int
-	ConfiguredIPv6      int
-	ActiveResolvers     int
-	ActiveIPv4          int
-	ActiveIPv6          int
-	UploadMTU           int
-	DownloadMTU         int
-	ActiveStreams       int
-	TXBytes             uint64
-	RXBytes             uint64
-	LossPerMille        uint64
-	RXDrops             uint64
-	TXDrops             uint64
-	Recoveries          uint64
-	StreamDialFailures  uint64
-	StreamWriteFailures uint64
-	TXQueue             int
-	EncodedQueue        int
-	RXQueue             int
+	TunnelMode           string
+	Phase                string
+	Transport            string
+	FamilyMode           string
+	ProxyAddress         string
+	LocalDNSAddress      string
+	LocalDNSEnabled      bool
+	ConfiguredResolvers  int
+	ConfiguredIPv4       int
+	ConfiguredIPv6       int
+	ActiveResolvers      int
+	ActiveIPv4           int
+	ActiveIPv6           int
+	ActiveUDPPaths       int
+	ActiveTCPPaths       int
+	CottenMaxQNameBytes  int
+	CottenMaxAnswerBytes int
+	UploadMTU            int
+	DownloadMTU          int
+	ActiveStreams        int
+	TXBytes              uint64
+	RXBytes              uint64
+	LossPerMille         uint64
+	RXDrops              uint64
+	TXDrops              uint64
+	Recoveries           uint64
+	StreamDialFailures   uint64
+	StreamWriteFailures  uint64
+	TXQueue              int
+	EncodedQueue         int
+	RXQueue              int
 }
 
 func (c *Client) TerminalUIMode() string {
@@ -57,6 +63,7 @@ func (c *Client) StatusSnapshot() StatusSnapshot {
 		return StatusSnapshot{Phase: "stopped"}
 	}
 	s := StatusSnapshot{
+		TunnelMode:          c.cfg.TunnelMode,
 		Phase:               clientPhaseName(c.runtimePhase.Load()),
 		Transport:           c.activeTransport().String(),
 		FamilyMode:          c.cfg.ResolverIPMode,
@@ -109,6 +116,51 @@ func (c *Client) StatusSnapshot() StatusSnapshot {
 	}
 	if c.rxChannel != nil {
 		s.RXQueue = len(c.rxChannel)
+	}
+	if c.cfg.TunnelMode == config.TunnelCottenMax {
+		s.Transport = "cottenmax/" + c.cfg.ResolverTransport
+		s.ActiveStreams = int(c.cottenMaxStreams.Load())
+		s.ActiveResolvers, s.ActiveIPv4, s.ActiveIPv6 = 0, 0, 0
+		if engine := c.cottenMax.Load(); engine != nil {
+			if s.Phase != "stopped" {
+				if engine.Established() {
+					s.Phase = "connected"
+				} else {
+					s.Phase = "connecting"
+				}
+			}
+			var loss float64
+			pathCount := 0
+			seen := make(map[string]bool)
+			for _, p := range engine.PathStats() {
+				if !p.Healthy {
+					continue
+				}
+				pathCount++
+				if p.Transport == "tcp" {
+					s.ActiveTCPPaths++
+				} else {
+					s.ActiveUDPPaths++
+				}
+				s.CottenMaxQNameBytes = max(s.CottenMaxQNameBytes, min(p.NameLen, p.ObservedNameLen))
+				s.CottenMaxAnswerBytes = max(s.CottenMaxAnswerBytes, min(p.AnswerLimit, p.ObservedAnswer))
+				loss += p.Loss
+				if seen[p.Resolver] {
+					continue
+				}
+				seen[p.Resolver] = true
+				s.ActiveResolvers++
+				host, _, _ := net.SplitHostPort(p.Resolver)
+				if resolverAddressIsIPv6(host) {
+					s.ActiveIPv6++
+				} else {
+					s.ActiveIPv4++
+				}
+			}
+			if pathCount > 0 {
+				s.LossPerMille = uint64(1000 * loss / float64(pathCount))
+			}
+		}
 	}
 	return s
 }

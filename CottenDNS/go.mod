@@ -7,7 +7,7 @@
 
 module cottendns-go
 
-go 1.25.0
+go 1.26.0
 
 require (
 	github.com/BurntSushi/toml v1.4.0
@@ -15,12 +15,14 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.10.1
 	github.com/charmbracelet/x/term v0.2.1
+	github.com/getlantern/soar v0.2.3
 	github.com/klauspost/compress v1.18.5
 	github.com/klauspost/reedsolomon v1.14.1
 	github.com/pierrec/lz4/v4 v4.1.26
-	golang.org/x/crypto v0.49.0
-	golang.org/x/net v0.51.0
-	golang.org/x/sys v0.42.0
+	github.com/quic-go/quic-go v0.63.0
+	golang.org/x/crypto v0.54.0
+	golang.org/x/net v0.56.0
+	golang.org/x/sys v0.47.0
 )
 
 require (
@@ -36,7 +38,8 @@ require (
 	github.com/muesli/ansi v0.0.0-20230316100256-276c6243b2f6 // indirect
 	github.com/muesli/cancelreader v0.2.2 // indirect
 	github.com/muesli/termenv v0.16.0 // indirect
+	github.com/quic-go/qpack v0.6.0 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/xo/terminfo v0.0.0-20220910002029-abceb7e1c41e // indirect
-	golang.org/x/text v0.35.0 // indirect
+	golang.org/x/text v0.40.0 // indirect
 )

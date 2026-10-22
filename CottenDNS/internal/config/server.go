@@ -26,13 +26,16 @@ import (
 )
 
 type ServerConfig struct {
-	ConfigDir    string `toml:"-"`
-	ConfigPath   string `toml:"-"`
-	ConfigPreset string `toml:"CONFIG_PRESET"`
-	ProtocolType string `toml:"PROTOCOL_TYPE"`
-	UDPHost      string `toml:"UDP_HOST"`
-	UDPPort      int    `toml:"UDP_PORT"`
-	UDPReaders   int    `toml:"UDP_READERS"`
+	TunnelMode          string `toml:"TUNNEL_MODE"`
+	CottenMaxKeyFile    string `toml:"COTTENMAX_KEY_FILE"`
+	CottenMaxMaxStreams int    `toml:"COTTENMAX_MAX_STREAMS"`
+	ConfigDir           string `toml:"-"`
+	ConfigPath          string `toml:"-"`
+	ConfigPreset        string `toml:"CONFIG_PRESET"`
+	ProtocolType        string `toml:"PROTOCOL_TYPE"`
+	UDPHost             string `toml:"UDP_HOST"`
+	UDPPort             int    `toml:"UDP_PORT"`
+	UDPReaders          int    `toml:"UDP_READERS"`
 	// UDPIPv6Enabled adds a dedicated udp6 tunnel listener on UDPIPv6Host at the
 	// same UDP port, alongside the IPv4 listener, so IPv4 and IPv6 clients are
 	// served together. Like the TCP side it never relies on platform dual-stack
@@ -168,36 +171,36 @@ type ServerConfig struct {
 	MinAllowedClientCompressionMinSize     int     `toml:"MIN_ALLOWED_CLIENT_COMPRESSION_MIN_SIZE"`
 	MinAllowedClientARQInitialRTOSeconds   float64 `toml:"MIN_ALLOWED_CLIENT_ARQ_INITIAL_RTO_SECONDS"`
 
-	MaxDNSResponseBytes               int      `toml:"MAX_DNS_RESPONSE_BYTES"`
-	DropLogIntervalSecs               float64  `toml:"DROP_LOG_INTERVAL_SECONDS"`
-	InvalidCookieWindowSecs           float64  `toml:"INVALID_COOKIE_WINDOW_SECONDS"`
-	InvalidCookieErrorThreshold       int      `toml:"INVALID_COOKIE_ERROR_THRESHOLD"`
-	SessionTimeoutSecs                float64  `toml:"SESSION_TIMEOUT_SECONDS"`
-	SessionCleanupIntervalSecs        float64  `toml:"SESSION_CLEANUP_INTERVAL_SECONDS"`
-	ClosedSessionRetentionSecs        float64  `toml:"CLOSED_SESSION_RETENTION_SECONDS"`
-	SessionInitReuseTTLSeconds        float64  `toml:"SESSION_INIT_REUSE_TTL_SECONDS"`
-	RecentlyClosedStreamTTLSeconds    float64  `toml:"RECENTLY_CLOSED_STREAM_TTL_SECONDS"`
-	RecentlyClosedStreamCap           int      `toml:"RECENTLY_CLOSED_STREAM_CAP"`
-	TerminalStreamRetentionSeconds    float64  `toml:"TERMINAL_STREAM_RETENTION_SECONDS"`
-	MaxPacketsPerBatch                int      `toml:"MAX_PACKETS_PER_BATCH"`
-	PacketBlockControlDuplication     int      `toml:"PACKET_BLOCK_CONTROL_DUPLICATION"`
-	DNSUpstreamServers                []string `toml:"DNS_UPSTREAM_SERVERS"`
-	DNSUpstreamTimeoutSecs            float64  `toml:"DNS_UPSTREAM_TIMEOUT"`
-	DNSInflightWaitTimeoutSecs        float64  `toml:"DNS_INFLIGHT_WAIT_TIMEOUT_SECONDS"`
-	SOCKSConnectTimeoutSecs           float64  `toml:"SOCKS_CONNECT_TIMEOUT"`
-	DNSFragmentAssemblyTimeoutSecs    float64  `toml:"DNS_FRAGMENT_ASSEMBLY_TIMEOUT"`
-	StreamSetupAckTTLSeconds          float64  `toml:"STREAM_SETUP_ACK_TTL_SECONDS"`
-	StreamResultPacketTTLSeconds      float64  `toml:"STREAM_RESULT_PACKET_TTL_SECONDS"`
-	StreamFailurePacketTTLSeconds     float64  `toml:"STREAM_FAILURE_PACKET_TTL_SECONDS"`
-	DNSCacheMaxRecords                int      `toml:"DNS_CACHE_MAX_RECORDS"`
-	DNSCacheTTLSeconds                float64  `toml:"DNS_CACHE_TTL_SECONDS"`
-	UseExternalSOCKS5                 bool     `toml:"USE_EXTERNAL_SOCKS5"`
-	SOCKS5Auth                        bool     `toml:"SOCKS5_AUTH"`
-	SOCKS5User                        string   `toml:"SOCKS5_USER"`
-	SOCKS5Pass                        string   `toml:"SOCKS5_PASS"`
-	ForwardIP                         string   `toml:"FORWARD_IP"`
-	ForwardPort                       int      `toml:"FORWARD_PORT"`
-	Domain                            []string `toml:"DOMAIN"`
+	MaxDNSResponseBytes            int      `toml:"MAX_DNS_RESPONSE_BYTES"`
+	DropLogIntervalSecs            float64  `toml:"DROP_LOG_INTERVAL_SECONDS"`
+	InvalidCookieWindowSecs        float64  `toml:"INVALID_COOKIE_WINDOW_SECONDS"`
+	InvalidCookieErrorThreshold    int      `toml:"INVALID_COOKIE_ERROR_THRESHOLD"`
+	SessionTimeoutSecs             float64  `toml:"SESSION_TIMEOUT_SECONDS"`
+	SessionCleanupIntervalSecs     float64  `toml:"SESSION_CLEANUP_INTERVAL_SECONDS"`
+	ClosedSessionRetentionSecs     float64  `toml:"CLOSED_SESSION_RETENTION_SECONDS"`
+	SessionInitReuseTTLSeconds     float64  `toml:"SESSION_INIT_REUSE_TTL_SECONDS"`
+	RecentlyClosedStreamTTLSeconds float64  `toml:"RECENTLY_CLOSED_STREAM_TTL_SECONDS"`
+	RecentlyClosedStreamCap        int      `toml:"RECENTLY_CLOSED_STREAM_CAP"`
+	TerminalStreamRetentionSeconds float64  `toml:"TERMINAL_STREAM_RETENTION_SECONDS"`
+	MaxPacketsPerBatch             int      `toml:"MAX_PACKETS_PER_BATCH"`
+	PacketBlockControlDuplication  int      `toml:"PACKET_BLOCK_CONTROL_DUPLICATION"`
+	DNSUpstreamServers             []string `toml:"DNS_UPSTREAM_SERVERS"`
+	DNSUpstreamTimeoutSecs         float64  `toml:"DNS_UPSTREAM_TIMEOUT"`
+	DNSInflightWaitTimeoutSecs     float64  `toml:"DNS_INFLIGHT_WAIT_TIMEOUT_SECONDS"`
+	SOCKSConnectTimeoutSecs        float64  `toml:"SOCKS_CONNECT_TIMEOUT"`
+	DNSFragmentAssemblyTimeoutSecs float64  `toml:"DNS_FRAGMENT_ASSEMBLY_TIMEOUT"`
+	StreamSetupAckTTLSeconds       float64  `toml:"STREAM_SETUP_ACK_TTL_SECONDS"`
+	StreamResultPacketTTLSeconds   float64  `toml:"STREAM_RESULT_PACKET_TTL_SECONDS"`
+	StreamFailurePacketTTLSeconds  float64  `toml:"STREAM_FAILURE_PACKET_TTL_SECONDS"`
+	DNSCacheMaxRecords             int      `toml:"DNS_CACHE_MAX_RECORDS"`
+	DNSCacheTTLSeconds             float64  `toml:"DNS_CACHE_TTL_SECONDS"`
+	UseExternalSOCKS5              bool     `toml:"USE_EXTERNAL_SOCKS5"`
+	SOCKS5Auth                     bool     `toml:"SOCKS5_AUTH"`
+	SOCKS5User                     string   `toml:"SOCKS5_USER"`
+	SOCKS5Pass                     string   `toml:"SOCKS5_PASS"`
+	ForwardIP                      string   `toml:"FORWARD_IP"`
+	ForwardPort                    int      `toml:"FORWARD_PORT"`
+	Domain                         []string `toml:"DOMAIN"`
 	// AdvertiseDomains are the tunnel domains this server tells clients about
 	// (domain rotation). Clients keep them as standby and switch to them when
 	// their configured domains get blocked. Entries not in DOMAIN are ignored.
@@ -208,7 +211,7 @@ type ServerConfig struct {
 	// server, instead of an empty answer a prober could notice. Names inside a
 	// DOMAIN are ignored (they would need glue this server cannot know).
 	// Empty (default) = unchanged behavior.
-	ZoneNS []string `toml:"ZONE_NS"`
+	ZoneNS                            []string `toml:"ZONE_NS"`
 	MinVPNLabelLength                 int      `toml:"MIN_VPN_LABEL_LENGTH"`
 	SupportedUploadCompressionTypes   []int    `toml:"SUPPORTED_UPLOAD_COMPRESSION_TYPES"`
 	SupportedDownloadCompressionTypes []int    `toml:"SUPPORTED_DOWNLOAD_COMPRESSION_TYPES"`
@@ -274,6 +277,9 @@ type ServerConfigFlagBinder struct {
 	flagToField map[string]string
 }
 
+// DefaultServerConfig returns independent defaults for managed embeddings.
+func DefaultServerConfig() ServerConfig { return defaultServerConfig() }
+
 func defaultServerConfig() ServerConfig {
 	workers := min(max(runtime.NumCPU(), 1), 16)
 
@@ -281,6 +287,8 @@ func defaultServerConfig() ServerConfig {
 
 	return ServerConfig{
 		ConfigPreset:                      "default",
+		TunnelMode:                        TunnelLegacy,
+		CottenMaxMaxStreams:               256,
 		ProtocolType:                      "SOCKS5",
 		UDPHost:                           "0.0.0.0",
 		UDPPort:                           53,
@@ -443,6 +451,11 @@ func LoadServerConfigWithOverrides(filename string, overrides ServerConfigOverri
 }
 
 func finalizeServerConfig(cfg ServerConfig) (ServerConfig, error) {
+	mode, err := normalizeTunnelMode(cfg.TunnelMode)
+	if err != nil {
+		return cfg, err
+	}
+	cfg.TunnelMode = mode
 	cfg.ConfigPreset = normalizeConfigPresetName(cfg.ConfigPreset)
 	if !isKnownServerConfigPreset(cfg.ConfigPreset) {
 		return cfg, fmt.Errorf("invalid CONFIG_PRESET: %q (valid: %s)", cfg.ConfigPreset, serverConfigPresetNames)
@@ -530,6 +543,9 @@ func finalizeServerConfig(cfg ServerConfig) (ServerConfig, error) {
 	// TCP/53 uses its own length-framed buffer and is unaffected by this limit.
 	cfg.MaxPacketSize = clampInt(defaultIntBelow(cfg.MaxPacketSize, 1, 4096), 512, 4096)
 	cfg.MaxStreamsPerSession = clampInt(defaultIntBelow(cfg.MaxStreamsPerSession, 1, 4096), 16, 65535)
+	if cfg.CottenMaxMaxStreams < 1 || cfg.CottenMaxMaxStreams > 512 {
+		return cfg, fmt.Errorf("COTTENMAX_MAX_STREAMS must be 1..512")
+	}
 	cfg.MaxActiveSessions = clampInt(defaultIntBelow(cfg.MaxActiveSessions, 1, 2048), 1, 65535)
 	cfg.MaxAllowedClientPacketDuplication = clampOptionalServerInt(cfg.MaxAllowedClientPacketDuplication, 1, 15)
 	cfg.MaxAllowedClientSetupPacketDuplication = clampOptionalServerInt(cfg.MaxAllowedClientSetupPacketDuplication, 1, 15)
@@ -980,6 +996,9 @@ func NewServerConfigFlagBinder(fs *flag.FlagSet) (*ServerConfigFlagBinder, error
 		binder.flagToField[flagName] = field.Name
 		target := valueElem.Field(i)
 		usage := fmt.Sprintf("Override %s from config file", tomlTag)
+		if detail := optionHelp(tomlTag, true); detail != "" {
+			usage += ": " + detail
+		}
 
 		switch target.Kind() {
 		case reflect.String:

@@ -191,7 +191,7 @@ func (s *Server) serveDNSOverStream(ctx context.Context, ln net.Listener, transp
 // handleTCPConn services one TCP connection using the server's packet handler.
 func (s *Server) handleTCPConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
-	serveTCPDNSMessagesWithOptions(ctx, conn, s.safeHandlePacket, s.tcpServerOptions())
+	serveTCPDNSMessagesWithOptions(ctx, conn, s.safeHandlePacketTCP, s.tcpServerOptions())
 }
 
 // serveTCPDNSMessages reads a sequence of RFC 1035 §4.2.2 length-prefixed DNS

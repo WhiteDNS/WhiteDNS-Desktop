@@ -19,7 +19,7 @@ const (
 )
 
 type udpAssociationEndpoint struct {
-	conn     *net.UDPConn
+	conn     net.Conn
 	lastUsed time.Time
 }
 
@@ -173,7 +173,12 @@ func (c *udpAssociationConn) endpointFor(host string, port uint16) (*udpAssociat
 	if addr.IP.To4() != nil {
 		network = "udp4"
 	}
-	conn, err := net.DialUDP(network, nil, addr)
+	var conn net.Conn
+	if c.monitor != nil && c.monitor.embeddedDialContext != nil {
+		conn, err = c.monitor.embeddedDialContext(context.Background(), network, addr.String())
+	} else {
+		conn, err = net.DialUDP(network, nil, addr)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -22,6 +22,7 @@ import (
 	"cottendns-go/internal/logger"
 	"cottendns-go/internal/runtimepath"
 	"cottendns-go/internal/security"
+	"cottendns-go/internal/tunnelinfo"
 	UDPServer "cottendns-go/internal/udpserver"
 	"cottendns-go/internal/version"
 )
@@ -36,6 +37,8 @@ func main() {
 	configPath := flag.String("config", "server_config.toml", "Path to server configuration file")
 	logPath := flag.String("log", "", "Path to log file (optional)")
 	versionFlag := flag.Bool("version", false, "Print version and exit")
+	capabilitiesFlag := flag.Bool("capabilities", false, "Print supported tunnel modes and DNS transports, then exit")
+	checkConfigFlag := flag.Bool("check-config", false, "Validate configuration without opening listeners or generating keys")
 	metricsAddress := flag.String("metrics-address", "", "Optional HTTP health/Prometheus listen address (for example 127.0.0.1:9090)")
 	configFlags, err := config.NewServerConfigFlagBinder(flag.CommandLine)
 	if err != nil {
@@ -48,14 +51,28 @@ func main() {
 		fmt.Printf("CottenDns Server Version: %s\n", version.GetVersion())
 		return
 	}
+	if *capabilitiesFlag {
+		fmt.Println("cottendns-normal cottenmax dns-udp dns-tcp shared-key")
+		return
+	}
 
 	resolvedConfigPath := runtimepath.Resolve(*configPath)
 
 	cfg, err := config.LoadServerConfigWithOverrides(resolvedConfigPath, configFlags.Overrides())
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Server startup failed: %v\n", err)
-		waitForExitInput()
+		if !*checkConfigFlag {
+			waitForExitInput()
+		}
 		os.Exit(1)
+	}
+	if *checkConfigFlag {
+		if len(cfg.Domain) == 0 {
+			fmt.Fprintln(os.Stderr, "Server configuration has no allowed domains")
+			os.Exit(1)
+		}
+		fmt.Println("Server configuration is valid")
+		return
 	}
 
 	var log *logger.Logger
@@ -88,6 +105,7 @@ func main() {
 	}
 
 	srv := UDPServer.New(cfg, log, codec)
+	srv.SetCottenMaxSecret(keyInfo.Key)
 
 	// Encryption-method auto-detection: build a codec per method from the shared
 	// key so the server adapts to whatever method the client uses, with the
@@ -133,6 +151,9 @@ func main() {
 	}
 
 	log.Infof("\U0001F680 <green>Server Configuration Loaded</green>")
+	for _, line := range tunnelinfo.Server(cfg) {
+		log.Infof("%s", line)
+	}
 	if len(cfg.Domain) > 0 {
 		log.Infof(
 			"\U0001F310 <green>Allowed Domains: <cyan>%s</cyan>, Min Label:<cyan>%d</cyan></green>",

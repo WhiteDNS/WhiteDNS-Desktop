@@ -100,6 +100,7 @@ func (c *Client) resetRuntimeBindings(resetSession bool) {
 	c.streamsMu.Unlock()
 	c.bumpStreamSetVersion()
 
+	c.clearPendingDNSQueries()
 	c.dnsResponses = fragmentStore.New[dnsFragmentKey](c.cfg.EffectiveDNSResponseFragmentStoreCap())
 
 	if c.localDNSCache != nil {

@@ -504,6 +504,12 @@ package-assets:
 	cp ../Soar/data/THIRD_PARTY.md build/bin/licenses/Soar-DATA-NOTICES.md
 	cp ../MasterDnsVPN/LICENSE build/bin/licenses/MasterDNS-LICENSE.txt
 	cp ../CottenDNS/LICENSE build/bin/licenses/CottenDNS-LICENSE.txt
+	cp ../CottenDNS/SOAR_LICENSE.txt build/bin/licenses/CottenMax-Soar-LICENSE.txt
+	cp ../CottenDNS/QUIC_GO_LICENSE.txt build/bin/licenses/CottenMax-QUIC-GO-LICENSE.txt
+	cp ../CottenDNS/QPACK_LICENSE.txt build/bin/licenses/CottenMax-QPACK-LICENSE.txt
+	cp ../CottenDNS/THIRD_PARTY_NOTICES.md build/bin/licenses/CottenMax-THIRD-PARTY-NOTICES.md
+	cp ../CottenDNS/internal/cottenmax/engine/NOTICE.cottendns.txt build/bin/licenses/CottenMax-CHANGES.txt
+	cp ../CottenDNS/internal/cottenmax/engine/data/THIRD_PARTY.md build/bin/licenses/CottenMax-DATA-NOTICES.md
 	cp ../StormDNS/LICENSE build/bin/licenses/StormDNS-LICENSE.txt
 	cp "$$(go env GOROOT)/LICENSE" build/bin/licenses/Go-LICENSE.txt
 	@set -e; for module in golang.org/x/crypto golang.org/x/sys; do \

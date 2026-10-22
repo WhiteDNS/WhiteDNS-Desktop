@@ -20,12 +20,14 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
     GetValidatorState:async()=>({status:'idle',results:[],ports:[],ranges:[],retained:0}),
     GetScannerState:async()=>({status:'idle',results:[],validResolvers:[],total:0,completed:0}),
     GetParallelTestState:async()=>({status:'idle',candidates:[],resolverResults:[],selectedPresetIds:[]}),
-    GetParallelTestPresetOptions:async()=>[],GetCottenDNSOptionSchema:async()=>[],
+    GetParallelTestPresetOptions:async()=>[],GetCottenDNSOptionSchema:async()=>current._cottenSchema||[],
+    SaveSettingsProfile:async profile=>{window.testCalls.push(["save-settings",profile]);current.settingsProfiles=current.settingsProfiles.map(p=>p.id===profile.id?profile:p);return clone();},
     GetDefaultSettingsProfile:async()=>current.settingsProfiles[0],
     CheckFirewallStatus:async()=>({supported:false,enabled:false,message:'Synthetic test'}),
     RefreshSubscriptions:async due=>{window.testCalls.push(['refresh',due]);return clone();},
     ImportSubscription:async(address,allow)=>{window.testCalls.push(['import',address,allow]);return clone();},
     SelectConnectionProfile:async id=>{current.selectedConnectionProfileId=id;return clone();},
+    SelectSettingsProfile:async id=>{current.selectedSettingsProfileId=id;return clone();},
     SaveConnectionProfile:async profile=>{window.testCalls.push(['save',profile]);current.connectionProfiles=current.connectionProfiles.map(p=>p.id===profile.id?profile:p);return clone();},
    };
    window.go={main:{App:new Proxy(methods,{get:(object,key)=>object[key]||async function(){return [];}})}};
@@ -57,6 +59,22 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
   for(const width of [1440,900,600]){await page.setViewportSize({width,height:1000});await page.screenshot({path:path.join(out,`soar-settings-${width}.png`),fullPage:true});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'page overflow');}
   await dialog.getByRole('button',{name:'Save',exact:true}).click();await dialog.waitFor({state:'hidden'});
   assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c[0]==='save'&&c[1].soarSettings.maxQName===253&&c[1].subscription)));
-  assert.deepEqual(errors,[]);console.log('PASS: desktop subscription import/HTTP consent/refresh, Soar tuning, question-only help, presets, save and responsive views.');
+  await page.setViewportSize({width:1440,height:1000});
+  await page.locator('tr[role=button]').filter({hasText:'Cotten Test'}).click();await dialog.waitFor();
+  assert.equal(await dialog.getByRole('combobox',{name:'Normal-mode encryption',exact:true}).count(),1);
+  assert.equal(await dialog.getByRole('region',{name:'Soar advanced settings'}).count(),0);
+  await dialog.getByRole('button',{name:'Save',exact:true}).click();await dialog.waitFor({state:'hidden'});
+  assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c[0]==='save'&&c[1].id==='cotten-ui'&&c[1].encryptionKey==='shared-test-key')));
+  await page.getByRole('button',{name:'Settings',exact:true}).click();
+  await page.locator('tr[role=button]').filter({hasText:'CottenMax Settings'}).click();await dialog.waitFor();
+  await dialog.getByRole('tab',{name:'CottenDNS',exact:true}).click();
+  const mode=dialog.getByRole('combobox',{name:'CottenDNS mode',exact:true});await mode.waitFor();
+  assert.match(await mode.innerText(),/CottenMax/);
+  await mode.click();await page.getByRole('option',{name:'Normal CottenDNS',exact:true}).click();
+  await mode.click();await page.getByRole('option',{name:'CottenMax (beta)',exact:true}).click();
+  await page.screenshot({path:path.join(out,'cottenmax-settings-1440.png'),fullPage:true});
+  await dialog.getByRole('button',{name:'Save',exact:true}).click();await dialog.waitFor({state:'hidden'});
+  assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c[0]==='save-settings'&&c[1].cottenDnsOptions.TUNNEL_MODE==='cottenmax'&&c[1].cottenDnsOptions.RESOLVER_TRANSPORT==='auto')));
+  assert.deepEqual(errors,[]);console.log('PASS: desktop subscription import/HTTP consent/refresh, Soar tuning, question-only help, presets, save and responsive views; CottenMax mode switching and profile boundaries.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;server.close();});

@@ -18,6 +18,8 @@ import (
 	"github.com/charmbracelet/x/term"
 
 	"cottendns-go/internal/client"
+	"cottendns-go/internal/config"
+	"cottendns-go/internal/tunnelinfo"
 	"cottendns-go/internal/version"
 )
 
@@ -70,23 +72,26 @@ func (w *logWriter) Write(p []byte) (int, error) {
 }
 
 type model struct {
-	app       *client.Client
-	ctx       context.Context
-	cancel    context.CancelFunc
-	runDone   <-chan runDoneMsg
-	logWriter *logWriter
-	logs      []string
-	width     int
-	height    int
-	started   time.Time
-	lastAt    time.Time
-	lastTX    uint64
-	lastRX    uint64
-	upSpeed   float64
-	downSpeed float64
-	status    client.StatusSnapshot
-	stopping  bool
-	runErr    error
+	app        *client.Client
+	ctx        context.Context
+	cancel     context.CancelFunc
+	runDone    <-chan runDoneMsg
+	logWriter  *logWriter
+	logs       []string
+	width      int
+	height     int
+	started    time.Time
+	lastAt     time.Time
+	lastTX     uint64
+	lastRX     uint64
+	upSpeed    float64
+	downSpeed  float64
+	status     client.StatusSnapshot
+	stopping   bool
+	runErr     error
+	showHelp   bool
+	helpOffset int
+	guidance   []string
 }
 
 func (m model) Init() tea.Cmd {
@@ -118,7 +123,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width, m.height = msg.Width, msg.Height
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "q", "esc", "ctrl+c":
+		case "h", "?":
+			m.showHelp = !m.showHelp
+			m.helpOffset = 0
+		case "up", "k", "pgup":
+			if m.showHelp {
+				m.helpOffset = max(0, m.helpOffset-1)
+			}
+		case "down", "j", "pgdown":
+			if m.showHelp {
+				m.helpOffset++
+			}
+		case "esc":
+			if m.showHelp {
+				m.showHelp = false
+				m.helpOffset = 0
+				return m, nil
+			}
+			fallthrough
+		case "q", "ctrl+c":
 			if !m.stopping {
 				m.stopping = true
 				m.cancel()
@@ -171,9 +194,12 @@ func (m model) View() string {
 	if m.width <= 0 || m.height <= 0 {
 		return ""
 	}
-	view := m.dashboardView()
-	if m.width < 92 || lipgloss.Height(view) > m.height {
-		view = m.compactView()
+	view := m.helpView()
+	if !m.showHelp {
+		view = m.dashboardView()
+		if m.width < 92 || lipgloss.Height(view) > m.height {
+			view = m.compactView()
+		}
 	}
 	lines := strings.Split(view, "\n")
 	if len(lines) > m.height {
@@ -195,8 +221,9 @@ func (m model) compactView() string {
 		phase + "  " + formatDuration(time.Since(m.started)),
 		sectionTitle("RESOLVERS") + fmt.Sprintf("  %d / %d active", m.status.ActiveResolvers, m.status.ConfiguredResolvers),
 		familyPolicyLabel(m.status.FamilyMode),
-		sectionTitle("TUNNEL") + "  " + m.status.Transport,
-		fmt.Sprintf("MTU up %d / down %d | streams %d", m.status.UploadMTU, m.status.DownloadMTU, m.status.ActiveStreams),
+		sectionTitle("TUNNEL") + "  " + tunnelinfo.ModeLabel(m.status.TunnelMode),
+		"Resolver hop " + m.status.Transport,
+		fmt.Sprintf("%s | streams %d", tunnelSizeText(m.status), m.status.ActiveStreams),
 		"Proxy " + m.status.ProxyAddress,
 		sectionTitle("TRAFFIC"),
 		"Up " + formatSpeed(m.upSpeed) + " | down " + formatSpeed(m.downSpeed),
@@ -206,9 +233,12 @@ func (m model) compactView() string {
 	if m.status.LocalDNSEnabled {
 		lines = append(lines, "DNS "+m.status.LocalDNSAddress)
 	}
+	if m.status.TunnelMode == config.TunnelCottenMax {
+		lines = append(lines, fmt.Sprintf("DNS paths: UDP %d / TCP %d", m.status.ActiveUDPPaths, m.status.ActiveTCPPaths))
+	}
 	lines = append(lines, sectionTitle("ACTIVITY"))
 	lines = append(lines, renderActivity(m.logs, max(0, min(12, m.height-len(lines)-1)), m.width)...)
-	lines = append(lines, label.Render("q / esc: quit"))
+	lines = append(lines, label.Render("h / ?: setup help | q / esc: quit"))
 	return strings.Join(lines, "\n")
 }
 
@@ -245,8 +275,9 @@ func (m model) dashboardView() string {
 		row("Active", fmt.Sprintf("%d  [IPv4 %d / IPv6 %d]", m.status.ActiveResolvers, m.status.ActiveIPv4, m.status.ActiveIPv6)),
 		"",
 		sectionTitle("TUNNEL"),
+		row("Mode", tunnelinfo.ModeLabel(m.status.TunnelMode)),
 		row("Transport", m.status.Transport),
-		row("MTU", fmt.Sprintf("upload %d / download %d", m.status.UploadMTU, m.status.DownloadMTU)),
+		row("Sizes", tunnelSizeText(m.status)),
 		row("Streams", fmt.Sprintf("%d active", m.status.ActiveStreams)),
 		row("Proxy", m.status.ProxyAddress),
 	}, "\n")
@@ -280,6 +311,13 @@ func (m model) dashboardView() string {
 	return m.finishView(header, statusLine, columns, inner)
 }
 
+func tunnelSizeText(s client.StatusSnapshot) string {
+	if s.TunnelMode == config.TunnelCottenMax {
+		return fmt.Sprintf("QNAME %d / reply %d DNS bytes", s.CottenMaxQNameBytes, s.CottenMaxAnswerBytes)
+	}
+	return fmt.Sprintf("MTU upload %d / download %d", s.UploadMTU, s.DownloadMTU)
+}
+
 func (m model) finishView(header, statusLine, columns string, inner int) string {
 	used := lipgloss.Height(header) + lipgloss.Height(statusLine) + lipgloss.Height(columns) + 7
 	logRows := m.height - used
@@ -291,8 +329,30 @@ func (m model) finishView(header, statusLine, columns string, inner int) string 
 	}
 	activity := renderActivity(m.logs, logRows, inner-4)
 	activityPanel := panel.Width(inner).Height(logRows + 1).Render(sectionTitle("ACTIVITY") + "\n" + strings.Join(activity, "\n"))
-	footer := label.Render("q / esc: quit   •   configuration and file logs remain unchanged")
+	footer := label.Render("h / ?: setup and options   •   q / esc: quit")
 	return strings.Join([]string{header, statusLine, columns, activityPanel, footer}, "\n\n")
+}
+
+// helpView wraps before scrolling so all setup guidance remains reachable on
+// narrow terminals. It never edits the running client configuration.
+func (m model) helpView() string {
+	width := max(1, m.width)
+	content := []string{"CottenDNS setup | " + tunnelinfo.ModeLabel(m.status.TunnelMode), ""}
+	if len(m.guidance) == 0 {
+		content = append(content, "Use the same profile, delegated domain and key. Update the server before selecting CottenMax beta.", "Set TUNNEL_MODE=legacy or cottenmax and restart the client.", "Guide: COTTENMAX_OPTIONS.md (docs/ in a source checkout)")
+	} else {
+		for _, line := range m.guidance {
+			content = append(content, line, "")
+		}
+	}
+	wrapped := lipgloss.NewStyle().Width(width).Render(strings.Join(content, "\n"))
+	lines := strings.Split(wrapped, "\n")
+	rows := max(0, m.height-1)
+	offset := min(m.helpOffset, max(0, len(lines)-rows))
+	end := min(len(lines), offset+rows)
+	visible := append([]string(nil), lines[offset:end]...)
+	visible = append(visible, label.Render("↑/↓: scroll | h / esc: back | q: quit"))
+	return strings.Join(visible, "\n")
 }
 
 func row(name, text string) string {
@@ -481,6 +541,7 @@ func Run(parent context.Context, app *client.Client, intro func()) error {
 	m := model{
 		app: app, ctx: ctx, cancel: cancel, runDone: done, logWriter: w,
 		width: 100, height: 30, started: now, lastAt: now, status: app.StatusSnapshot(),
+		guidance: app.TunnelGuidance(),
 	}
 	result, err := tea.NewProgram(m, tea.WithAltScreen(), tea.WithContext(parent)).Run()
 	if err != nil {

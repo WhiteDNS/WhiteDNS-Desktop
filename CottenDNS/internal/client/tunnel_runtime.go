@@ -161,8 +161,8 @@ func (c *Client) sendOneWayDNSQuery(resolver Connection, packet []byte, deadline
 		// Best-effort one-shot over the active stream transport (e.g. the
 		// session-close burst). DoH has no one-way form, so it reuses the normal
 		// request/response exchanger and discards the answer.
-		if c.activeTransport() == transportDoH {
-			transport, err := c.newDoHQueryTransport(resolver.ResolverLabel)
+		if c.activeTransport() == transportDoH || c.activeTransport() == transportDoH3 || c.activeTransport() == transportDoQ {
+			transport, err := c.newEncryptedQueryTransport(resolver.ResolverLabel)
 			if err != nil {
 				return err
 			}

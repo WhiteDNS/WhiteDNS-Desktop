@@ -162,6 +162,10 @@ func resolverTransportChain(name string) []resolverTransport {
 		return []resolverTransport{transportDoT, transportUDP, transportTCP}
 	case "doh":
 		return []resolverTransport{transportDoH, transportUDP, transportTCP}
+	case "doh3":
+		return []resolverTransport{transportDoH3}
+	case "doq":
+		return []resolverTransport{transportDoQ}
 	default: // "auto"
 		return []resolverTransport{transportUDP, transportTCP}
 	}
@@ -651,6 +655,7 @@ func (c *Client) runConnectionMTUTest(ctx context.Context, conn *Connection, ser
 	if conn == nil {
 		return
 	}
+	c.emitScanTesting(conn.ResolverLabel, c.cfg.ResolverTransport)
 	// Registered before the recover below so it runs after it: every exit path,
 	// panic included, has updated the counters by the time progress is reported.
 	defer c.logMTUProgress(counters, total)

@@ -131,6 +131,7 @@ func (c *Client) resetRuntimeBindings(resetSession bool) {
 	c.streamsMu.Unlock()
 	c.bumpStreamSetVersion()
 
+	c.clearPendingDNSQueries()
 	c.dnsResponses = fragmentStore.New[dnsFragmentKey](c.cfg.DNSResponseFragmentStoreCap)
 
 	if c.localDNSCache != nil {
@@ -380,7 +381,7 @@ func (c *Client) StartAsyncRuntime(parentCtx context.Context) error {
 	if useStream {
 		active := c.activeTransport()
 		switch active {
-		case transportDoH:
+		case transportDoH, transportDoH3, transportDoQ:
 			c.streamData = newDoHDataManager(c)
 		case transportDoT:
 			c.streamData = newDoTDataManager(c)

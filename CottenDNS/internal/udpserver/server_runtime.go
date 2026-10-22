@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	DnsParser "cottendns-go/internal/dnsparser"
 	Enums "cottendns-go/internal/enums"
 	"cottendns-go/internal/logger"
 )
@@ -251,6 +252,11 @@ func (s *Server) readLoop(ctx context.Context, conn *net.UDPConn, queues ingress
 			return err
 		}
 
+		if s.cottenMax != nil && s.cottenMax.DispatchUDP(buffer[:n], conn, addr) {
+			s.packetPool.Put(buffer)
+			continue
+		}
+
 		// Reject ordinary DNS noise, malformed datagrams and frames that cannot
 		// be decoded with the configured shared key before they can occupy the
 		// worker queue. This ordering is essential on public UDP/53: queueing a
@@ -424,6 +430,14 @@ func (s *Server) processIngressRequest(req request, workerID int) {
 }
 
 func (s *Server) safeHandlePacket(packet []byte) (response []byte) {
+	return s.safeHandlePacketTransport(packet, false)
+}
+
+func (s *Server) safeHandlePacketTCP(packet []byte) []byte {
+	return s.safeHandlePacketTransport(packet, true)
+}
+
+func (s *Server) safeHandlePacketTransport(packet []byte, tcp bool) (response []byte) {
 	defer func() {
 		if recovered := recover(); recovered != nil {
 			if s.log != nil {
@@ -436,7 +450,11 @@ func (s *Server) safeHandlePacket(packet []byte) (response []byte) {
 		}
 	}()
 
-	return markAuthoritative(s.handlePacket(packet))
+	response = s.handlePacket(packet, tcp)
+	if !tcp {
+		response = DnsParser.BoundUDPResponse(packet, response)
+	}
+	return markAuthoritative(response)
 }
 
 func (s *Server) safeHandlePreparedIngress(packet []byte, prepared preparedIngress) (response []byte) {
@@ -448,7 +466,7 @@ func (s *Server) safeHandlePreparedIngress(packet []byte, prepared preparedIngre
 			response = nil
 		}
 	}()
-	return s.handlePreparedIngress(packet, prepared)
+	return DnsParser.BoundUDPResponse(packet, s.handlePreparedIngress(packet, prepared))
 }
 
 func (s *Server) onDrop(addr *net.UDPAddr, queueLen int, queueCap int) {

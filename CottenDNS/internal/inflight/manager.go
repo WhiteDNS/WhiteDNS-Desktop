@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -8,6 +8,7 @@
 package inflight
 
 import (
+	"context"
 	"sync"
 	"time"
 )
@@ -98,7 +99,16 @@ func (m *Manager[T]) Resolve(key string, value T, hasValue bool) {
 }
 
 func (m *Manager[T]) Wait(entry *Entry[T], timeout time.Duration) (T, bool) {
+	return m.WaitContext(context.Background(), entry, timeout)
+}
+
+// WaitContext stops waiting when this caller leaves without cancelling the
+// shared lookup needed by other callers.
+func (m *Manager[T]) WaitContext(ctx context.Context, entry *Entry[T], timeout time.Duration) (T, bool) {
 	var zero T
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	if entry == nil {
 		return zero, false
 	}
@@ -113,6 +123,8 @@ func (m *Manager[T]) Wait(entry *Entry[T], timeout time.Duration) (T, bool) {
 	defer timer.Stop()
 
 	select {
+	case <-ctx.Done():
+		return zero, false
 	case <-entry.ready:
 		if !entry.hasValue {
 			return zero, true

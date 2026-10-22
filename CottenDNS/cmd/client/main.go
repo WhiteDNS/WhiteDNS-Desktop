@@ -152,6 +152,9 @@ func main() {
 			log.Infof("\U0001F4C4 <green>Configuration loaded from: <cyan>%s</cyan></green>", resolvedConfigPath)
 			log.Infof("\U0001F5C2  <green>Connection Catalog: <cyan>%d</cyan> domain-resolver pairs</green>", len(app.Connections()))
 			log.Infof("<cyan>Resolver IP mode:</cyan> <yellow>%s</yellow> <gray>(IPv4 %d, IPv6 %d)</gray>", status.FamilyMode, status.ConfiguredIPv4, status.ConfiguredIPv6)
+			for _, line := range app.TunnelGuidance() {
+				log.Infof("%s", line)
+			}
 		}
 	}
 

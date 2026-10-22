@@ -22,12 +22,14 @@ import (
 
 	"cottendns-go/internal/arq"
 	"cottendns-go/internal/config"
+	"cottendns-go/internal/cottenmax"
 	dnsCache "cottendns-go/internal/dnscache"
 	DnsParser "cottendns-go/internal/dnsparser"
 	Enums "cottendns-go/internal/enums"
 	fragmentStore "cottendns-go/internal/fragmentstore"
 	"cottendns-go/internal/logger"
 	"cottendns-go/internal/mlq"
+	"cottendns-go/internal/resolvertransport"
 	"cottendns-go/internal/security"
 	VpnProto "cottendns-go/internal/vpnproto"
 )
@@ -219,15 +221,19 @@ type Client struct {
 	// the tunnel. All query paths (probe, session-init, health, data plane)
 	// dispatch on it. streamData carries the persistent per-resolver connections
 	// used by the data plane whenever the transport is not UDP.
-	transport  atomic.Int32
-	streamData streamDataTransport
-	dohHTTPMu  sync.Mutex
-	dohHTTP    *http.Client
+	transport      atomic.Int32
+	streamData     streamDataTransport
+	dohHTTPMu      sync.Mutex
+	dohHTTP        *http.Client
+	encryptedDNSMu sync.Mutex
+	encryptedDNS   *resolvertransport.Client
 
 	// pacer applies per-resolver adaptive rate limiting (see resolver_pacer.go).
 	pacer *resolverPacer
 	// queryLimiter is the optional global DNS query rate cap (nil = off).
-	queryLimiter *queryRateLimiter
+	queryLimiter     *queryRateLimiter
+	cottenMax        atomic.Pointer[cottenmax.Client]
+	cottenMaxStreams atomic.Int64
 
 	// Domain rotation (domain_rotation.go). domainsMu guards standbyDomains
 	// and writes to cfg.Domains; failedFullScans is Run-loop only.
@@ -257,6 +263,7 @@ type Client struct {
 	pingManager *PingManager
 
 	// DNS Management
+	pendingDNS             dnsPendingQueries
 	localDNSCache          *dnsCache.Store
 	dnsResponses           *fragmentStore.Store[dnsFragmentKey]
 	localDNSCachePersist   bool
@@ -469,11 +476,11 @@ func New(cfg config.ClientConfig, log *logger.Logger, codec *security.Codec) *Cl
 
 	runtimeBufferSize := runtimeDNSReadBufferSize(cfg.MaxDownloadMTU)
 	c := &Client{
-		cfg:                      cfg,
-		log:                      log,
-		codec:                    codec,
-		balancer:                 NewBalancer(balancerStrategy),
-		pacer:                    newResolverPacer(cfg.ResolverRateLimitEnabled),
+		cfg:      cfg,
+		log:      log,
+		codec:    codec,
+		balancer: NewBalancer(balancerStrategy),
+		pacer:    newResolverPacer(cfg.ResolverRateLimitEnabled),
 		queryLimiter: newQueryRateLimiter(
 			cfg.QueryRateLimitPerSecond,
 			cfg.QueryRateLimitPerResolverPerSecond,
@@ -572,6 +579,9 @@ func (c *Client) nextSessionInitRetryDelay(failures int) time.Duration {
 
 // Run starts the main execution loop of the client.
 func (c *Client) Run(ctx context.Context) error {
+	if c.cfg.TunnelMode == config.TunnelCottenMax {
+		return c.runCottenMax(ctx)
+	}
 	c.successMTUChecks = false
 	c.runtimePhase.Store(clientPhaseStarting)
 	defer c.runtimePhase.Store(clientPhaseStopped)
@@ -702,6 +712,7 @@ func (c *Client) Run(ctx context.Context) error {
 					return err
 				}
 				c.runtimePhase.Store(clientPhaseConnected)
+				c.logConnectionProgress("connected", 100, "mode", "normal")
 
 				c.InitVirtualStream0()
 

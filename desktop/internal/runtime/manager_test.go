@@ -1292,6 +1292,7 @@ func main() {
 	defer listener.Close()
 	fmt.Println("WD_PROGRESS phase=starting percent=5")
 	fmt.Println("WD_RESOLVERS active=1.1.1.1 standby=- valid=1.1.1.1")
+	fmt.Println("WD_PROGRESS phase=connected percent=100")
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt)
 	<-stop
@@ -1413,5 +1414,27 @@ func TestEmbeddedCottenDNSReplacesPreviouslyExtractedCore(t *testing.T) {
 	}
 	if string(got) != string(raw) {
 		t.Fatal("old extracted core survived the app update")
+	}
+}
+
+func TestCottenReadinessRequiresTunnelProofAndHonorsCancellation(t *testing.T) {
+	m := NewManager(Options{StartTimeout: 20 * time.Millisecond}, Callbacks{})
+	active := &activeProcess{done: make(chan struct{}), tunnelReady: make(chan struct{})}
+	if err := m.waitForTunnelReady(context.Background(), active); err == nil {
+		t.Fatal("local listener alone reported ready")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := m.waitForTunnelReady(ctx, active); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancellation: %v", err)
+	}
+	close(active.tunnelReady)
+	if err := m.waitForTunnelReady(context.Background(), active); err != nil {
+		t.Fatal(err)
+	}
+	exited := &activeProcess{done: make(chan struct{}), tunnelReady: make(chan struct{})}
+	close(exited.done)
+	if err := m.waitForTunnelReady(context.Background(), exited); err == nil {
+		t.Fatal("exited core reported ready")
 	}
 }

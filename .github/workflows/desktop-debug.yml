@@ -75,9 +75,16 @@ jobs:
         working-directory: desktop
         run: wails build -clean -debug -platform windows/amd64
 
+      - name: Stage engine license notices after the clean build
+        run: make -C desktop package-assets
+
       - name: Verify runnable app
         run: |
           test -f "desktop/build/bin/WhiteDNS Desktop.exe"
+          test -f "desktop/build/bin/THIRD_PARTY_NOTICES.md"
+          test -f "desktop/build/bin/licenses/Soar-LICENSE.txt"
+          test -f "desktop/build/bin/licenses/CottenMax-Soar-LICENSE.txt"
+          test -f "desktop/build/bin/licenses/CottenMax-CHANGES.txt"
 
       - name: Upload runnable app
         uses: actions/upload-artifact@v6

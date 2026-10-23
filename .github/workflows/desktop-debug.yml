@@ -27,6 +27,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set debug app version
+        shell: bash
+        run: |
+          version="$(python3 desktop/scripts/app-version.py --debug-run "$GITHUB_RUN_NUMBER" --sha "$GITHUB_SHA")"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "VITE_APP_VERSION=$version" >> "$GITHUB_ENV"
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
@@ -115,6 +122,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Set debug app version
+        shell: bash
+        run: |
+          version="$(python3 desktop/scripts/app-version.py --debug-run "$GITHUB_RUN_NUMBER" --sha "$GITHUB_SHA")"
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+          echo "VITE_APP_VERSION=$version" >> "$GITHUB_ENV"
+
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
@@ -151,7 +165,7 @@ jobs:
       - name: Build Linux packages
         run: |
           make -C desktop package-linux-distros \
-            VERSION="1.3.1-preview" \
+            VERSION="${VERSION}" \
             LINUX_PLATFORMS="linux/${{ matrix.arch }}" \
             LINUX_CLIENT_ARCH="${{ matrix.arch }}" \
             LINUX_GO_TAGS="webkit2_41" \

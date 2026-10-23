@@ -594,7 +594,7 @@ func TestManagerRuntimeConfigForcesAndPurgesMTUResolverStateFile(t *testing.T) {
 	}
 }
 
-func TestEngineValidResolverCachesAreSharedAndSeparated(t *testing.T) {
+func TestEngineValidResolverCachesRemainSeparated(t *testing.T) {
 	manager := NewManager(Options{RuntimeDir: t.TempDir()}, Callbacks{})
 	manager.persistValidResolvers(model.ImportTypeMasterDNS, model.ResolverRuntimeState{ValidResolvers: []string{"1.1.1.1", "9.9.9.9"}})
 	manager.persistValidResolvers(model.ImportTypeCottenDNS, model.ResolverRuntimeState{ValidResolvers: []string{"9.9.9.9", "8.8.8.8"}})
@@ -604,14 +604,81 @@ func TestEngineValidResolverCachesAreSharedAndSeparated(t *testing.T) {
 	if masterPath == cottenPath {
 		t.Fatalf("engine resolver caches must use separate paths: %q", masterPath)
 	}
-	got := manager.readSharedValidResolvers()
-	want := []string{"1.1.1.1", "9.9.9.9", "8.8.8.8"}
-	if !stringSlicesEqual(got, want) {
-		t.Fatalf("expected both engines to share valid resolvers, got %#v want %#v", got, want)
+	for path, want := range map[string]string{
+		masterPath: "1.1.1.1\n9.9.9.9\n",
+		cottenPath: "9.9.9.9\n8.8.8.8\n",
+	} {
+		raw, err := os.ReadFile(path)
+		if err != nil || string(raw) != want {
+			t.Fatalf("engine cache changed: got %q, err %v, want %q", raw, err, want)
+		}
 	}
-	merged := mergeResolverText("1.0.0.1\n1.1.1.1", got)
-	if !strings.Contains(merged, "8.8.8.8") || strings.Count(merged, "1.1.1.1") != 1 {
-		t.Fatalf("resolver merge did not preserve and de-duplicate peers:\n%s", merged)
+}
+
+func TestManagerDoesNotAppendHistoricalResolversToSelectedInput(t *testing.T) {
+	tempDir := t.TempDir()
+	helper := buildFakeMasterDNSHelper(t, tempDir)
+	xray := buildFakeXrayHelper(t, tempDir)
+	for _, mode := range []struct {
+		name, engine   string
+		max, discovery bool
+	}{
+		{name: "master", engine: model.ImportTypeMasterDNS},
+		{name: "cotten-normal", engine: model.ImportTypeCottenDNS},
+		{name: "cotten-max-manual", engine: model.ImportTypeCottenDNS, max: true},
+		{name: "cotten-max-discovery", engine: model.ImportTypeCottenDNS, max: true, discovery: true},
+	} {
+		for _, fromFile := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/file=%t", mode.name, fromFile), func(t *testing.T) {
+				runtimeDir := t.TempDir()
+				manager := NewManager(Options{RuntimeDir: runtimeDir, BinaryPath: helper,
+					CottenDNSBinaryPath: helper, XrayBinaryPath: xray,
+					StartTimeout: 5 * time.Second, StopTimeout: time.Second}, Callbacks{})
+				for _, engine := range []string{model.ImportTypeMasterDNS, model.ImportTypeCottenDNS, model.ImportTypeSoar} {
+					manager.persistValidResolvers(engine, model.ResolverRuntimeState{ValidResolvers: []string{"9.9.9.9:5353"}})
+				}
+				enginePort, publicPort := freePort(t), freePort(t)
+				selected := "198.51.100.1:5353\n[2001:db8::1]:5300\n"
+				cfg := storm.LaunchConfig{
+					Engine:            mode.engine,
+					Settings:          model.SettingsProfile{ListenIP: "127.0.0.1", ListenPort: publicPort},
+					MasterDNSSettings: model.SettingsProfile{ListenIP: "127.0.0.1", ListenPort: enginePort},
+					CoreEnabled:       true, CoreProtocol: "socks", PublicListenIP: "127.0.0.1", PublicListenPort: publicPort,
+					CoreConfig: fmt.Sprintf(`{"inbounds":[{"listen":"127.0.0.1","port":%d}]}`, publicPort),
+					ClientTOML: fmt.Sprintf("LISTEN_PORT = %d\nRESOLVER_DISCOVERY_ENABLED = %t\n", enginePort, mode.discovery),
+					Resolvers:  selected,
+				}
+				if mode.max {
+					options := map[string]any{"TUNNEL_MODE": "cottenmax", "RESOLVER_DISCOVERY_ENABLED": mode.discovery}
+					cfg.Settings.CottenDNSOptions = &options
+				}
+				if fromFile {
+					cfg.ResolversPath = filepath.Join(tempDir, fmt.Sprintf("%s-selected.resolvers", mode.name))
+					if err := os.WriteFile(cfg.ResolversPath, []byte(selected), 0o600); err != nil {
+						t.Fatal(err)
+					}
+					cfg.Resolvers = ""
+				}
+				if err := manager.Start(context.Background(), cfg); err != nil {
+					t.Fatal(err)
+				}
+				defer manager.Stop()
+				manager.mu.Lock()
+				resolverPath, configPath := manager.active.resolvers, manager.active.configFile
+				manager.mu.Unlock()
+				got, err := os.ReadFile(resolverPath)
+				if err != nil || string(got) != selected {
+					t.Fatalf("selected resolver input was augmented or changed: %q, err %v", got, err)
+				}
+				if mode.engine == model.ImportTypeCottenDNS {
+					config, err := os.ReadFile(configPath)
+					want := fmt.Sprintf("RESOLVER_DISCOVERY_ENABLED = %t", mode.discovery)
+					if err != nil || !strings.Contains(string(config), want) {
+						t.Fatalf("discovery preference lost: %s (%v)", config, err)
+					}
+				}
+			})
+		}
 	}
 }
 

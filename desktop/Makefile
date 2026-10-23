@@ -3,11 +3,12 @@ SHELL := /bin/sh
 export GOTOOLCHAIN ?= go1.26.9
 
 APP_NAME := WhiteDNS Desktop
-DEFAULT_VERSION := 1.3.1
+DEFAULT_VERSION := $(shell sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' frontend/package.json)
 VERSION_FROM_ARGS := $(shell set -- $(MAKECMDGOALS); while [ "$$1" != "" ]; do if [ "$$1" = "--version" ]; then shift; if [ "$$1" != "" ]; then printf '%s' "$$1"; fi; exit; fi; shift; done)
 VERSION ?= $(if $(VERSION_FROM_ARGS),$(VERSION_FROM_ARGS),$(DEFAULT_VERSION))
 APP_VERSION := $(strip $(VERSION))
 export VERSION := $(APP_VERSION)
+export VITE_APP_VERSION := $(APP_VERSION)
 RELEASE_ASSET_PREFIX ?= WhiteDNS-Desktop
 ROOT_DIR := ..
 MASTERDNS_DIR := $(ROOT_DIR)/MasterDnsVPN

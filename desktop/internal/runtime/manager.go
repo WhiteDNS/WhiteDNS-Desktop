@@ -223,22 +223,9 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	} else if info, err := os.Stat(resolversFile); err != nil || info.IsDir() {
 		return fmt.Errorf("resolver file is unavailable: %s", resolversFile)
 	}
-	sharedResolvers := m.readSharedValidResolvers()
-	if engine == model.ImportTypeSoar {
-		sharedResolvers = nil
-	}
-	if len(sharedResolvers) > 0 {
-		if !resolversOwned {
-			raw, readErr := os.ReadFile(resolversFile)
-			if readErr != nil {
-				return fmt.Errorf("read resolver file: %w", readErr)
-			}
-			resolverPayload = string(raw)
-			resolversFile = filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+".resolvers")
-			resolversOwned = true
-		}
-		resolverPayload = mergeResolverText(resolverPayload, sharedResolvers)
-	}
+	// A saved resolver profile is the user's selected input, not a starting
+	// point for silently combining previous engines' or networks' caches.
+	// Explicit engine discovery remains controlled by its runtime options.
 	mtuScanControlFile := ""
 	if engine == model.ImportTypeMasterDNS {
 		mtuScanControlFile = filepath.Join(m.options.RuntimeDir, ".wd-"+launchID+"."+engine+".mtu-scan-control")
@@ -1086,24 +1073,6 @@ func (m *Manager) engineValidResolverPath(engine string) string {
 	return filepath.Join(m.options.RuntimeDir, ".whitedns-valid-resolvers-"+normalizeDNSEngine(engine)+".txt")
 }
 
-func (m *Manager) readSharedValidResolvers() []string {
-	var raw strings.Builder
-	for _, engine := range []string{model.ImportTypeMasterDNS, model.ImportTypeCottenDNS} {
-		path := m.engineValidResolverPath(engine)
-		if path == "" {
-			continue
-		}
-		content, err := os.ReadFile(path)
-		if err != nil {
-			continue
-		}
-		raw.Write(content)
-		raw.WriteByte('\n')
-	}
-	validation := resolver.ValidateText(raw.String())
-	return validation.NormalizedResolvers
-}
-
 func (m *Manager) persistValidResolvers(engine string, state model.ResolverRuntimeState) {
 	path := m.engineValidResolverPath(engine)
 	if path == "" {
@@ -1124,14 +1093,6 @@ func (m *Manager) persistValidResolvers(engine string, state model.ResolverRunti
 	if err := os.WriteFile(path, []byte(validation.NormalizedText+"\n"), 0o600); err != nil {
 		m.debugLogf(true, "Resolver cache warning: failed to save %s valid resolvers: %v", dnsEngineDisplayName(engine), err)
 	}
-}
-
-func mergeResolverText(base string, shared []string) string {
-	parts := make([]string, 0, len(shared)+1)
-	parts = append(parts, base)
-	parts = append(parts, shared...)
-	validation := resolver.ValidateText(strings.Join(parts, "\n"))
-	return validation.NormalizedText
 }
 
 func (m *Manager) startTrafficMonitor(active *activeProcess, pid int) {

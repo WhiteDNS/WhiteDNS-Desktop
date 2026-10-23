@@ -63,6 +63,11 @@ type Manager struct {
 
 	mu     sync.Mutex
 	active *activeProcess
+	// Resource creation and teardown must finish before the next operation
+	// reuses the runtime. Stop can cancel a pending Start before taking this lock.
+	lifecycleMu         sync.Mutex
+	lifecycleGeneration uint64
+	startupCancel       context.CancelFunc
 
 	logMu          sync.Mutex
 	logWindowStart time.Time
@@ -156,9 +161,45 @@ func (m *Manager) RuntimeDir() string {
 }
 
 func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
-	if err := m.Stop(); err != nil {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	m.mu.Lock()
+	m.lifecycleGeneration++
+	generation := m.lifecycleGeneration
+	if m.startupCancel != nil {
+		m.startupCancel()
+	}
+	m.startupCancel = cancel
+	m.mu.Unlock()
+
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	defer func() {
+		m.mu.Lock()
+		if m.lifecycleGeneration == generation {
+			m.startupCancel = nil
+		}
+		m.mu.Unlock()
+	}()
+	if err := ctx.Err(); err != nil {
 		return err
 	}
+	if err := m.stopActive(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	err := m.start(ctx, cfg)
+	if ctx.Err() != nil {
+		_ = m.stopActive()
+		return ctx.Err()
+	}
+	return err
+}
+
+// start owns lifecycleMu, including failure cleanup of partially started helpers.
+func (m *Manager) start(ctx context.Context, cfg storm.LaunchConfig) error {
 	masterSettings := cfg.MasterDNSSettings
 	if masterSettings.ListenPort == 0 {
 		masterSettings = cfg.Settings
@@ -325,26 +366,26 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	go m.waitForExit(active)
 
 	if err := m.waitForPort(ctx, masterSettings.ListenIP, masterSettings.ListenPort, active); err != nil {
-		_ = m.Stop()
+		_ = m.stopActive()
 		return stormDNSReadinessError(err)
 	}
 	m.debugLogf(debugLogs, "Debug Desktop MasterDNS local port is ready: %s:%d", masterSettings.ListenIP, masterSettings.ListenPort)
 	if engine == model.ImportTypeCottenDNS {
 		if err := m.waitForTunnelReady(ctx, active); err != nil {
-			_ = m.Stop()
+			_ = m.stopActive()
 			return err
 		}
 	}
 	if err := m.startXray(ctx, cfg, active); err != nil {
-		_ = m.Stop()
+		_ = m.stopActive()
 		return err
 	}
 	if err := m.waitForPort(ctx, publicListenIP, publicListenPort, active); err != nil {
-		_ = m.Stop()
+		_ = m.stopActive()
 		return err
 	}
 	if err := m.waitForSystemProxy(ctx, active, publicListenIP, publicListenPort); err != nil {
-		_ = m.Stop()
+		_ = m.stopActive()
 		return err
 	}
 	m.debugLogf(debugLogs, "Debug Desktop public proxy port is ready: %s:%d", publicListenIP, publicListenPort)
@@ -353,6 +394,27 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 }
 
 func (m *Manager) Stop() error {
+	m.mu.Lock()
+	m.lifecycleGeneration++
+	generation := m.lifecycleGeneration
+	if m.startupCancel != nil {
+		m.startupCancel()
+		m.startupCancel = nil
+	}
+	m.mu.Unlock()
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
+	m.mu.Lock()
+	current := m.lifecycleGeneration == generation
+	m.mu.Unlock()
+	if !current {
+		// A later request owns its teardown/start sequence.
+		return nil
+	}
+	return m.stopActive()
+}
+
+func (m *Manager) stopActive() error {
 	m.mu.Lock()
 	active := m.active
 	if active == nil {
@@ -614,10 +676,19 @@ func (m *Manager) startXray(ctx context.Context, cfg storm.LaunchConfig, active 
 		_ = os.Remove(configFile)
 		return err
 	}
+	if err := ctx.Err(); err != nil {
+		_ = os.Remove(configFile)
+		return err
+	}
 
 	publicListenIP, publicListenPort := publicListenTarget(cfg)
 	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, cfg.SetSystemProxy, cfg.CoreProtocol, publicListenIP, publicListenPort)
 	if err != nil {
+		_ = os.Remove(configFile)
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
 		_ = os.Remove(configFile)
 		return err
 	}
@@ -872,6 +943,18 @@ func (m *Manager) readinessProcessState(active *activeProcess) (running bool, st
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active == active && !active.stopping {
+		select {
+		case <-active.done:
+			return false, false
+		default:
+		}
+		if active.xrayDone != nil {
+			select {
+			case <-active.xrayDone:
+				return false, false
+			default:
+			}
+		}
 		return true, false
 	}
 	return false, active != nil && active.stopping
@@ -1365,6 +1448,8 @@ func (m *Manager) waitForExit(active *activeProcess) {
 	active.waitErr = err
 	close(active.done)
 	active.cancel()
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	if m.active == active {
 		m.active = nil
@@ -1392,6 +1477,8 @@ func (m *Manager) waitForXrayExit(active *activeProcess) {
 	if active.xrayCancel != nil {
 		active.xrayCancel()
 	}
+	m.lifecycleMu.Lock()
+	defer m.lifecycleMu.Unlock()
 	m.mu.Lock()
 	activeStillCurrent := m.active == active
 	stopping := active.stopping

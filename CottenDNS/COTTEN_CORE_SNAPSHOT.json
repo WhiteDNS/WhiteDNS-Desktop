@@ -1,9 +1,9 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "e50a43ef75ad10ae2ffbfa106d13c50de3e77624",
-  "base_commit": "e50a43ef75ad10ae2ffbfa106d13c50de3e77624",
+  "commit": "7cca6c28baefa8297bd894842f3d188886d17e8f",
+  "base_commit": "7cca6c28baefa8297bd894842f3d188886d17e8f",
   "source": "Pinned production inputs; local tests, README additions and caches excluded.",
-  "source_tree_sha256_lf": "1fca1092f7ceed1143a0512f0cd122276a33028bc8c6c248528523ed7384745d",
+  "source_tree_sha256_lf": "61a2979e290f8875c5029e2f0507d1dbea0bc23064ca39191147617cbb3bcb9b",
   "soar_base": "v0.2.3",
   "files": [
     {
@@ -108,7 +108,7 @@
     },
     {
       "path": "internal/client/cottenmax.go",
-      "sha256_lf": "4903ec4a8a6320e92f5bd63b0ff11cd29810b4d66ed55f0940ca893c8c745de8"
+      "sha256_lf": "9c72e4cbbf5d40b00fe13b77d72fd9192186c3968209c5ee4073bb874b9ed694"
     },
     {
       "path": "internal/client/cottenmax_discovery.go",

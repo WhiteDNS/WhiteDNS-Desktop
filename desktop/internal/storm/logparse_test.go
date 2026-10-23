@@ -1,6 +1,9 @@
 package storm
 
-import "testing"
+import (
+	"fmt"
+	"testing"
+)
 
 func TestParseProgress(t *testing.T) {
 	progress, ok := ParseProgress("\x1b[32mWD_PROGRESS phase=mtu percent=42 completed=4 total=10 valid=3 rejected=1\x1b[0m")
@@ -9,6 +12,24 @@ func TestParseProgress(t *testing.T) {
 	}
 	if progress.Phase != "mtu" || progress.Percent != 42 || progress.Valid != 3 {
 		t.Fatalf("unexpected progress: %#v", progress)
+	}
+}
+
+func TestParseCottenMaxStartupProgress(t *testing.T) {
+	for _, stage := range []struct {
+		phase   string
+		percent int
+	}{
+		{"authenticating", 10},
+		{"verifying", 90},
+		{"retry", 10},
+		{"connected", 100},
+	} {
+		line := "WD_PROGRESS phase=" + stage.phase + " percent=" + fmt.Sprint(stage.percent)
+		progress, ok := ParseProgress(line)
+		if !ok || progress.Phase != stage.phase || progress.Percent != stage.percent {
+			t.Fatalf("lost startup stage %q: %#v", line, progress)
+		}
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"sync"
 	"time"
 
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/resolver"
 	"whitedns-desktop/internal/storm"
@@ -120,6 +121,7 @@ type activeProcess struct {
 	progressChangedAt       time.Time
 	tunnelReady             chan struct{}
 	tunnelReadyOnce         sync.Once
+	cottenMaxStartup        bool
 	done                    chan struct{}
 	waitErr                 error
 }
@@ -322,6 +324,7 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 		masterPIDFile:        masterPIDFile,
 		done:                 make(chan struct{}),
 		tunnelReady:          make(chan struct{}),
+		cottenMaxStartup:     cottenMaxStartup(cfg),
 	}
 	m.mu.Lock()
 	m.active = active
@@ -1231,18 +1234,38 @@ func (m *Manager) recordProgress(active *activeProcess, progress model.Connectio
 }
 
 func (m *Manager) waitForTunnelReady(ctx context.Context, active *activeProcess) error {
-	timer := time.NewTimer(m.options.StartTimeout)
-	defer timer.Stop()
+	// Max retries authentication and transfer verification on lossy paths. A
+	// fixed GUI deadline used to kill a recovering helper during its next
+	// attempt. Keep waiting for verified connectivity until the user stops it;
+	// local listener readiness alone must never report a connected tunnel.
+	var timeout <-chan time.Time
+	if !active.cottenMaxStartup {
+		timer := time.NewTimer(m.options.StartTimeout)
+		defer timer.Stop()
+		timeout = timer.C
+	}
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
 	case <-active.done:
+		if _, stopping := m.readinessProcessState(active); stopping {
+			return context.Canceled
+		}
 		return errors.New("CottenDNS stopped before the tunnel was verified")
-	case <-timer.C:
+	case <-timeout:
 		return errors.New("CottenDNS opened its local proxy but did not verify a tunnel connection; check the matching server build, domain/key and resolvers")
 	case <-active.tunnelReady:
 		return nil
 	}
+}
+
+func cottenMaxStartup(cfg storm.LaunchConfig) bool {
+	if normalizeDNSEngine(cfg.Engine) != model.ImportTypeCottenDNS {
+		return false
+	}
+	options := cottendns.EffectiveOptions(cottendns.OptionValues(cfg.Settings.CottenDNSOptions))
+	mode, _ := options["TUNNEL_MODE"].(string)
+	return strings.EqualFold(strings.TrimSpace(mode), "cottenmax")
 }
 
 func (m *Manager) recordSessionInitProgress(active *activeProcess, retry bool) (model.ConnectionProgress, bool) {

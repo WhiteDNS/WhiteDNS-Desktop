@@ -7058,10 +7058,28 @@ function progressLabel(phase: string, percent: number): string {
   if (phase === "ready") {
     return "Ready";
   }
+  if (phase === "authenticating") {
+    return "Authenticating tunnel";
+  }
+  if (phase === "verifying") {
+    return "Verifying tunnel data";
+  }
+  if (phase === "retry") {
+    return "Retrying tunnel";
+  }
   return `${phase} ${percent || 0}%`;
 }
 
 function progressSummary(progress: RuntimeStatus["progress"]): string {
+  if (progress.phase === "authenticating") {
+    return "Checking the server, key and resolver path";
+  }
+  if (progress.phase === "verifying") {
+    return "Waiting for a verified tunnel response before enabling the proxy";
+  }
+  if (progress.phase === "retry") {
+    return "The tunnel did not respond yet. Retrying automatically; you can stop at any time.";
+  }
   if (progress.phase === "session") {
     return progress.completed > 0 ? `Session init retrying (${progress.completed})` : "Initializing session";
   }

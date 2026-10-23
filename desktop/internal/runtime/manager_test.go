@@ -1438,3 +1438,93 @@ func TestCottenReadinessRequiresTunnelProofAndHonorsCancellation(t *testing.T) {
 		t.Fatal("exited core reported ready")
 	}
 }
+
+func TestCottenMaxReadinessRecoversBeyondNormalStartupDeadline(t *testing.T) {
+	m := NewManager(Options{StartTimeout: 15 * time.Millisecond}, Callbacks{})
+	active := &activeProcess{
+		cottenMaxStartup: true,
+		done:             make(chan struct{}),
+		tunnelReady:      make(chan struct{}),
+	}
+	m.active = active
+	result := make(chan error, 1)
+	go func() { result <- m.waitForTunnelReady(context.Background(), active) }()
+	// Simulate a failed first handshake and a recovering second attempt. Neither
+	// authentication nor an open local listener is proof of working transfer.
+	for _, phase := range []string{"authenticating", "retry", "authenticating", "verifying"} {
+		m.recordProgress(active, model.ConnectionProgress{Phase: phase, Percent: 10})
+		select {
+		case err := <-result:
+			t.Fatalf("readiness returned before verified transfer (%s): %v", phase, err)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	m.recordProgress(active, model.ConnectionProgress{Phase: "connected", Percent: 100})
+	select {
+	case err := <-result:
+		if err != nil {
+			t.Fatalf("recovered tunnel: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("verified connection did not release readiness")
+	}
+}
+
+func TestCottenMaxReadinessStopsOnCancellationAndProcessExit(t *testing.T) {
+	for _, stop := range []string{"context", "process", "user"} {
+		t.Run(stop, func(t *testing.T) {
+			m := NewManager(Options{StartTimeout: 10 * time.Millisecond}, Callbacks{})
+			active := &activeProcess{cottenMaxStartup: true, done: make(chan struct{}), tunnelReady: make(chan struct{})}
+			m.active = active
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			result := make(chan error, 1)
+			go func() { result <- m.waitForTunnelReady(ctx, active) }()
+			switch stop {
+			case "context":
+				cancel()
+			case "process":
+				close(active.done)
+			case "user":
+				m.mu.Lock()
+				active.stopping = true
+				m.active = nil
+				m.mu.Unlock()
+				close(active.done)
+			}
+			select {
+			case err := <-result:
+				if err == nil {
+					t.Fatal("stopped helper reported a verified connection")
+				}
+				if stop != "process" && !errors.Is(err, context.Canceled) {
+					t.Fatalf("stop was reported as failure instead of cancellation: %v", err)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("readiness ignored cancellation or helper exit")
+			}
+		})
+	}
+}
+
+func TestCottenMaxStartupRecoveryIsScopedToSelectedMaxMode(t *testing.T) {
+	for _, tc := range []struct {
+		engine string
+		mode   string
+		want   bool
+	}{
+		{model.ImportTypeCottenDNS, "cottenmax", true},
+		{model.ImportTypeCottenDNS, "legacy", false},
+		{model.ImportTypeCottenDNS, "", false},
+		{model.ImportTypeMasterDNS, "cottenmax", false},
+		{model.ImportTypeSoar, "cottenmax", false},
+	} {
+		t.Run(tc.engine+"/"+tc.mode, func(t *testing.T) {
+			options := map[string]any{"TUNNEL_MODE": tc.mode}
+			cfg := storm.LaunchConfig{Engine: tc.engine, Settings: model.SettingsProfile{CottenDNSOptions: &options}}
+			if got := cottenMaxStartup(cfg); got != tc.want {
+				t.Fatalf("recovery enabled=%v, want %v", got, tc.want)
+			}
+		})
+	}
+}

@@ -23,6 +23,7 @@ func (c *Client) runCottenMax(ctx context.Context) error {
 	}
 	c.runtimePhase.Store(clientPhaseConnecting)
 	defer c.runtimePhase.Store(clientPhaseStopped)
+	c.logConnectionProgress("starting", 5, "mode", "cottenmax")
 	engine, err := c.newCottenMaxEngine()
 	if err != nil {
 		return err
@@ -46,25 +47,14 @@ func (c *Client) runCottenMax(ctx context.Context) error {
 	// Start authentication immediately so a client does not wait for a local
 	// proxy request before learning its usable DNS paths. The proxy listener
 	// still starts immediately; warmup never gates fast startup.
+	startupDone := make(chan struct{})
 	go func() {
-		warmCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
-		if err := engine.Authenticate(warmCtx); err != nil {
-			if ctx.Err() == nil {
-				c.log.Warnf("CottenMax authentication failed: no authenticated DNS path; check the Max server build, domain and shared key (%v)", err)
-			}
-			return
-		}
-		if err := engine.Probe(warmCtx, 32); err != nil {
-			if ctx.Err() == nil {
-				c.log.Warnf("CottenMax authenticated, but tunnel transfer verification failed; check the matching server build and resolver path (%v)", err)
-			}
-			return
-		}
-		if ctx.Err() == nil {
-			c.runtimePhase.Store(clientPhaseConnected)
-			c.logConnectionProgress("connected", 100, "mode", "cottenmax")
-		}
+		defer close(startupDone)
+		c.runCottenMaxStartup(ctx, engine)
+	}()
+	defer func() {
+		cancelRuntime()
+		<-startupDone
 	}()
 	listener := NewTCPListener(c, c.cfg.ProtocolType)
 	if err := listener.Start(ctx, c.cfg.ListenIP, c.cfg.ListenPort); err != nil {
@@ -82,6 +72,60 @@ func (c *Client) runCottenMax(ctx context.Context) error {
 	defer c.clearPendingDNSQueries()
 	<-ctx.Done()
 	return nil
+}
+
+type cottenMaxStartup interface {
+	Authenticate(context.Context) error
+	Probe(context.Context, int) error
+}
+
+// Apps wait for authenticated transfer proof before enabling device routing.
+// Keep retrying without application traffic: a one-shot warmup timeout otherwise
+// leaves their local SOCKS listener alive but their VPN waiting forever. Each
+// stage gets its own deadline so a slow handshake cannot consume the probe's
+// entire budget. The same engine retains its resolver/session recovery state.
+func (c *Client) runCottenMaxStartup(ctx context.Context, engine cottenMaxStartup) {
+	for attempt := 1; ctx.Err() == nil; attempt++ {
+		if c.runtimePhase.Load() == clientPhaseConnected {
+			return
+		}
+		stage := "authenticating"
+		c.logConnectionProgress(stage, 10, "mode", "cottenmax", "attempt", attempt)
+		stageCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+		err := engine.Authenticate(stageCtx)
+		cancel()
+		if err == nil && ctx.Err() == nil {
+			stage = "verifying"
+			c.logConnectionProgress(stage, 90, "mode", "cottenmax", "attempt", attempt)
+			stageCtx, cancel = context.WithTimeout(ctx, 30*time.Second)
+			err = engine.Probe(stageCtx, 32)
+			cancel()
+		}
+		if ctx.Err() != nil {
+			return
+		}
+		if err == nil {
+			if c.runtimePhase.Swap(clientPhaseConnected) != clientPhaseConnected {
+				c.logConnectionProgress("connected", 100, "mode", "cottenmax")
+			}
+			return
+		}
+		// A real, confirmed proxy connection can also establish readiness while
+		// this diagnostic is running. Never overwrite it with a stale failure.
+		if c.runtimePhase.Load() == clientPhaseConnected {
+			return
+		}
+		delay := time.Second << min(attempt-1, 3)
+		c.log.Warnf("CottenMax %s failed (%v); retrying in %s. Check the resolver path, server build, domain and shared key if this persists.", stage, err, delay)
+		c.logConnectionProgress("retry", 10, "mode", "cottenmax", "stage", stage, "attempt", attempt, "retry_ms", delay.Milliseconds())
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+	}
 }
 
 // DoT encrypts and authenticates the client-to-resolver hop. The resolver is

@@ -141,6 +141,25 @@ func TestParseConnectionProfileImportsAcceptsCottenDNSScheme(t *testing.T) {
 	}
 }
 
+func TestCottenDNSSchemeTakesPrecedenceOverImportDialogDefault(t *testing.T) {
+	link := strings.Replace(encodedStormDNSProfile(t, "Cotten", "cot.example.org", "test-key", 5), "stormdns://", "cottendns://", 1)
+	for _, requested := range []string{"", model.ImportTypeMasterDNS, model.ImportTypeStormDNS, model.ImportTypeSoar} {
+		t.Run("requested="+requested, func(t *testing.T) {
+			imported, err := ParseConnectionProfileImports(link, "resolver-test", requested)
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := imported[0]
+			if p.ImportType != model.ImportTypeCottenDNS {
+				t.Fatalf("explicit cottendns:// imported as %s with dialog type %q", p.ImportType, requested)
+			}
+			if p.EncryptionMethod != 5 || p.EncryptionKey != "test-key" || p.ResolverProfileID != "resolver-test" {
+				t.Fatal("CottenDNS connection settings were altered during import")
+			}
+		})
+	}
+}
+
 func TestExportConnectionProfilesSkipsIncompleteProfiles(t *testing.T) {
 	raw, err := ExportConnectionProfiles([]model.ConnectionProfile{
 		modelConnectionProfile("Incomplete", "", "", 1),

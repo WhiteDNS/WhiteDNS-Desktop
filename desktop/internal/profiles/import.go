@@ -218,6 +218,11 @@ func importTypeFromScheme(scheme string, requested string) string {
 	if strings.EqualFold(scheme, "soar") {
 		return model.ImportTypeSoar
 	}
+	// An explicit CottenDNS link must not inherit the import dialog's
+	// MasterDNS default and subsequently run through the wrong engine.
+	if strings.EqualFold(scheme, "cottendns") {
+		return model.ImportTypeCottenDNS
+	}
 	if strings.TrimSpace(requested) != "" {
 		return model.NormalizeImportType(requested)
 	}

@@ -10,10 +10,59 @@ import (
 	"strings"
 	"testing"
 
+	"whitedns-desktop/internal/cottendns"
 	"whitedns-desktop/internal/model"
 	"whitedns-desktop/internal/profiles"
 	"whitedns-desktop/internal/storm"
 )
+
+func TestCottenDNSImportSelectsMatchingSettingsAndScannerEngine(t *testing.T) {
+	store := profiles.NewStore(filepath.Join(t.TempDir(), "state.json"))
+	app := &App{store: store, state: model.DefaultAppState()}
+	profile := model.ConnectionProfile{Name: "Cotten", ImportType: model.ImportTypeCottenDNS,
+		Domain: "cot.example.org", EncryptionKey: "test-key", EncryptionMethod: 5}
+	link, err := profiles.ExportConnectionProfile(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := app.ImportConnectionProfiles(link, model.ImportTypeMasterDNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection, err := app.scannerConnection(result.State.SelectedConnectionProfileID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if connection.ImportType != model.ImportTypeCottenDNS {
+		t.Fatalf("scanner would dispatch to %s instead of CottenDNS", connection.ImportType)
+	}
+	var matchingSettings bool
+	for _, settings := range result.State.SettingsProfiles {
+		if settings.ID == result.State.SelectedSettingsProfileID && settings.ImportType == model.ImportTypeCottenDNS {
+			matchingSettings = true
+		}
+	}
+	if !matchingSettings {
+		t.Fatal("import did not select CottenDNS settings")
+	}
+	config := cottendns.RenderScannerClientTOML(connection, nil, 8)
+	if !strings.Contains(config, "DATA_ENCRYPTION_METHOD = 5") || !strings.Contains(config, `DOMAINS = ["cot.example.org"]`) {
+		t.Fatal("scanner did not preserve imported server settings")
+	}
+	loaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, saved := range loaded.ConnectionProfiles {
+		if saved.ID == connection.ID {
+			if saved.ImportType != model.ImportTypeCottenDNS || saved.EncryptionMethod != 5 {
+				t.Fatal("CottenDNS engine or encryption method lost on persistence")
+			}
+			return
+		}
+	}
+	t.Fatal("imported CottenDNS profile was not persisted")
+}
 
 func TestImportConnectionProfilesAddsProfilesAndPersists(t *testing.T) {
 	store := profiles.NewStore(filepath.Join(t.TempDir(), "state.json"))

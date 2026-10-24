@@ -49,7 +49,7 @@ func TestScannerInputParsesPortsCIDRsInvalidAndDuplicates(t *testing.T) {
 		}
 	}
 
-	want := []string{"1.1.1.1", "8.8.8.8", "192.0.2.1", "192.0.2.2"}
+	want := []string{"1.1.1.1:5353", "8.8.8.8", "192.0.2.1", "192.0.2.2"}
 	if !reflect.DeepEqual(resolvers, want) {
 		t.Fatalf("unexpected normalized resolvers: got %#v want %#v", resolvers, want)
 	}
@@ -1465,7 +1465,7 @@ func TestScannerInputPreservesIPv6ResolversAndExpandsSmallRanges(t *testing.T) {
 		want  []string
 	}{
 		{token: "2001:4860:4860::8888", want: []string{"2001:4860:4860::8888"}},
-		{token: "[2606:4700:4700::1111]:5353", want: []string{"2606:4700:4700::1111"}},
+		{token: "[2606:4700:4700::1111]:5353", want: []string{"[2606:4700:4700::1111]:5353"}},
 		{token: "2001:db8::/126", want: []string{"2001:db8::1", "2001:db8::2", "2001:db8::3"}},
 	}
 

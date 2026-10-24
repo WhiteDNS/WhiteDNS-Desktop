@@ -26,7 +26,7 @@ func (a *App) startCottenDNSScanner(connection model.ConnectionProfile, inputPat
 			break
 		}
 	}
-	runtimeDir, err := newDNSScannerRuntimeDir()
+	runtimeDir, err := a.newDNSScannerRuntimeDir()
 	if err != nil {
 		return a.GetScannerState(), err
 	}
@@ -67,11 +67,14 @@ func (a *App) startCottenDNSScanner(connection model.ConnectionProfile, inputPat
 	a.scannerMu.Unlock()
 	cleanup = false
 	a.emit("scanner:state", snapshot)
-	go a.runCottenDNSScanner(ctx, runID, bin, configFile, inputPath, runtimeDir)
+	go func() {
+		defer cancel()
+		a.runNativeDNSScanner(ctx, runID, bin, configFile, inputPath, runtimeDir, model.ImportTypeCottenDNS)
+	}()
 	return snapshot, nil
 }
 
-func (a *App) runCottenDNSScanner(ctx context.Context, runID int64, bin, configFile, inputPath, runtimeDir string) {
+func (a *App) runNativeDNSScanner(ctx context.Context, runID int64, bin, configFile, inputPath, runtimeDir, engine string) {
 	defer os.RemoveAll(runtimeDir)
 	cmd := exec.CommandContext(ctx, bin, "-config", configFile, "-resolvers", inputPath, "-scan-only")
 	hideConsoleWindow(cmd)
@@ -86,22 +89,24 @@ func (a *App) runCottenDNSScanner(ctx context.Context, runID int64, bin, configF
 		a.finishDNSScannerRun(runID, model.ScannerFailed, err.Error())
 		return
 	}
-	drained := make(chan struct{})
-	go func() {
-		defer close(drained)
-		scanner := bufio.NewScanner(out)
-		scanner.Buffer(make([]byte, 1024), 1024*1024)
-		for scanner.Scan() {
-			a.handleDNSScannerLogLine(runID, scanner.Text())
-		}
-	}()
+	// Drain telemetry before Wait closes the pipe, including the final results
+	// of short scan-only processes.
+	scanner := bufio.NewScanner(out)
+	scanner.Buffer(make([]byte, 1024), 1024*1024)
+	for scanner.Scan() {
+		a.handleDNSScannerLogLine(runID, scanner.Text())
+	}
+	if scanner.Err() != nil {
+		_ = cmd.Process.Kill()
+	}
 	err = cmd.Wait()
-	<-drained
 	if ctx.Err() != nil {
 		a.finishDNSScannerRun(runID, model.ScannerCancelled, "DNS scanner cancelled")
+	} else if scanner.Err() != nil {
+		a.finishDNSScannerRun(runID, model.ScannerFailed, "DNS scanner output could not be read")
 	} else if err != nil {
 		a.finishDNSScannerRun(runID, model.ScannerFailed, err.Error())
 	} else {
-		a.finishDNSScannerRun(runID, model.ScannerCompleted, "CottenDNS resolver scan completed")
+		a.finishDNSScannerRun(runID, model.ScannerCompleted, dnsEngineDisplayName(engine)+" resolver scan completed")
 	}
 }

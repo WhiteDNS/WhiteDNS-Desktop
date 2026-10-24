@@ -80,3 +80,42 @@ func TestSoarRejectsInvalidKeysMultipleDomainsAndWrongWindowBounds(t *testing.T)
 		t.Fatal("unsafe query bounds accepted")
 	}
 }
+
+func TestSoarScannerUsesProfileTransportAndBoundedWorkersWithoutDiscovery(t *testing.T) {
+	options := model.DefaultSoarSettings()
+	options.Transport = "only"
+	options.MaxQName = 101
+	connection := model.ConnectionProfile{
+		ID: "scan", ImportType: model.ImportTypeSoar, Domain: "scan.example.org",
+		EncryptionKey: base64.StdEncoding.EncodeToString(make([]byte, 32)), SoarSettings: &options,
+	}
+	for _, parallel := range []int{1, 4, 200} {
+		raw, err := RenderSoarScannerConfig(connection, parallel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var cfg struct {
+			Zone string             `json:"zone"`
+			Key  string             `json:"server_public_key"`
+			Soar model.SoarSettings `json:"soar"`
+		}
+		if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
+			t.Fatalf("scan config must be JSON: %v", err)
+		}
+		if cfg.Zone != connection.Domain || cfg.Key != connection.EncryptionKey ||
+			cfg.Soar.Transport != "only" || cfg.Soar.MaxQName != 101 || cfg.Soar.Discovery ||
+			cfg.Soar.DiscoveryConcurrency != min(parallel, MaxSoarScannerParallel) {
+			t.Fatalf("wrong scan settings: %+v", cfg)
+		}
+		if strings.Contains(raw, "ENCRYPTION_METHOD") || strings.Contains(raw, "MTU") {
+			t.Fatal("MasterDNS settings leaked into Soar scanner")
+		}
+	}
+	if !options.Discovery || options.DiscoveryConcurrency != 2 {
+		t.Fatal("scanner changed the saved profile's runtime discovery settings")
+	}
+	connection.EncryptionKey = "master-key"
+	if _, err := RenderSoarScannerConfig(connection, 4); err == nil {
+		t.Fatal("scanner accepted an invalid Soar public key")
+	}
+}

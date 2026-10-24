@@ -177,11 +177,14 @@ func (a *App) StartScannerScan(request model.ScannerStartRequest) (model.Scanner
 	if model.NormalizeImportType(connection.ImportType) == model.ImportTypeCottenDNS {
 		return a.startCottenDNSScanner(connection, inputPath, inputFileName, inputTotal, inputInvalid, inputDuplicates, scanParallel)
 	}
+	if model.NormalizeImportType(connection.ImportType) == model.ImportTypeSoar {
+		return a.startSoarDNSScanner(connection, inputPath, inputFileName, inputTotal, inputInvalid, inputDuplicates, scanParallel)
+	}
 	listenPort, apiPort, err := scannerRandomPorts()
 	if err != nil {
 		return a.GetScannerState(), err
 	}
-	runtimeDir, err := newDNSScannerRuntimeDir()
+	runtimeDir, err := a.newDNSScannerRuntimeDir()
 	if err != nil {
 		return a.GetScannerState(), err
 	}
@@ -275,7 +278,7 @@ func (a *App) startConnectionUpgradeScannerRun(plan connectionUpgradeScanPlan) e
 		return fmt.Errorf("background resolver scan has no bootstrap resolvers")
 	}
 
-	runtimeDir, err := newDNSScannerRuntimeDir()
+	runtimeDir, err := a.newDNSScannerRuntimeDir()
 	if err != nil {
 		return err
 	}
@@ -918,7 +921,9 @@ func (a *App) applyDNSScannerEvent(runID int64, event storm.ScannerEvent) {
 	a.persistScannerSnapshotLocked()
 	state := cloneScannerState(a.scannerState)
 	a.scannerMu.Unlock()
-	go a.emit("scanner:state", state)
+	// Preserve telemetry order: a delayed running event must not overwrite
+	// the terminal state emitted immediately after a short scan exits.
+	a.emit("scanner:state", state)
 }
 
 func (a *App) finishDNSScannerRun(runID int64, status string, message string) {
@@ -1283,6 +1288,16 @@ func scannerInputTokens(line string) []string {
 }
 
 func scannerResolversFromToken(token string) ([]string, bool) {
+	text := strings.Trim(strings.TrimSpace(token), `"'`)
+	if endpoint, err := netip.ParseAddrPort(text); err == nil {
+		if endpoint.Port() == 0 {
+			return nil, false
+		}
+		if endpoint.Port() == 53 {
+			return []string{endpoint.Addr().Unmap().String()}, true
+		}
+		return []string{netip.AddrPortFrom(endpoint.Addr().Unmap(), endpoint.Port()).String()}, true
+	}
 	target, ok := scannerTargetWithoutPort(token)
 	if !ok {
 		return nil, false
@@ -1462,8 +1477,14 @@ func (a *App) scannerConnection(id string) (model.ConnectionProfile, error) {
 			return model.ConnectionProfile{}, fmt.Errorf("connection profile needs an encryption key")
 		}
 		engine := model.NormalizeImportType(profile.ImportType)
+		if engine == model.ImportTypeSoar {
+			if err := model.ValidateSoarProfile(profile); err != nil {
+				return model.ConnectionProfile{}, err
+			}
+			return profile, nil
+		}
 		if engine != model.ImportTypeMasterDNS && engine != model.ImportTypeCottenDNS {
-			return model.ConnectionProfile{}, fmt.Errorf("DNS scanner requires a MasterDNS or CottenDNS connection profile")
+			return model.ConnectionProfile{}, fmt.Errorf("DNS scanner requires a MasterDNS, CottenDNS or Soar connection profile")
 		}
 		return profile, nil
 	}
@@ -1727,9 +1748,13 @@ func scannerRandomPorts() (int, int, error) {
 	return listenPort, apiPort, nil
 }
 
-func newDNSScannerRuntimeDir() (string, error) {
+func (a *App) newDNSScannerRuntimeDir() (string, error) {
 	runtimeRoot := ""
-	if configDir, err := appConfigDir(); err == nil {
+	configDir := a.configDir
+	if configDir == "" {
+		configDir, _ = appConfigDir()
+	}
+	if configDir != "" {
 		runtimeRoot = filepath.Join(configDir, "runtime", dnsScannerRuntimeDirName)
 	}
 	if runtimeRoot == "" {

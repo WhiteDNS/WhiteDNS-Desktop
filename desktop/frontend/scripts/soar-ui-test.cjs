@@ -12,13 +12,17 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error('BROWSER ERROR:',e.stack)});
   await page.addInitScript(state=>{
    let current=structuredClone(state);window.testCalls=[];
+   let scan={status:'idle',mode:'manual',paused:false,phase:'',message:'',inputFileName:'',scanParallel:200,total:0,completed:0,valid:0,rejected:0,invalid:0,duplicates:0,validResolvers:[],testingPaths:[],workingPaths:[]};
    const clone=()=>structuredClone(current);
    const methods={
     GetAppState:async()=>clone(),
     ValidateResolverText:async raw=>({isValid:true,normalizedResolvers:raw.split(/\r?\n/).filter(Boolean),normalizedText:raw,invalidEntries:[]}),
     GetSystemLANIP:async()=>"127.0.0.1",
     GetValidatorState:async()=>({status:'idle',results:[],ports:[],ranges:[],retained:0}),
-    GetScannerState:async()=>({status:'idle',results:[],validResolvers:[],total:0,completed:0}),
+    GetScannerState:async()=>structuredClone(scan),
+    SelectScannerInputFile:async()=>{scan={...scan,inputFileName:'scan.resolvers',total:2};return structuredClone(scan);},
+    StartScannerScan:async request=>{window.testCalls.push(['scan',request]);scan={...scan,status:'running',phase:'probing',scanParallel:request.scanParallel,selectedConnectionProfileId:request.connectionProfileId,startedAt:Date.now()};return structuredClone(scan);},
+    CancelScannerScan:async()=>{window.testCalls.push(['cancel-scan']);scan={...scan,status:'cancelled',finishedAt:Date.now()};return structuredClone(scan);},
     GetParallelTestState:async()=>({status:'idle',candidates:[],resolverResults:[],selectedPresetIds:[]}),
     GetParallelTestPresetOptions:async()=>[],GetCottenDNSOptionSchema:async()=>current._cottenSchema||[],
     SaveSettingsProfile:async profile=>{window.testCalls.push(["save-settings",profile]);current.settingsProfiles=current.settingsProfiles.map(p=>p.id===profile.id?profile:p);return clone();},
@@ -75,6 +79,23 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
   await page.screenshot({path:path.join(out,'cottenmax-settings-1440.png'),fullPage:true});
   await dialog.getByRole('button',{name:'Save',exact:true}).click();await dialog.waitFor({state:'hidden'});
   assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c[0]==='save-settings'&&c[1].cottenDnsOptions.TUNNEL_MODE==='cottenmax'&&c[1].cottenDnsOptions.RESOLVER_TRANSPORT==='auto')));
-  assert.deepEqual(errors,[]);console.log('PASS: desktop subscription import/HTTP consent/refresh, Soar tuning, question-only help, presets, save and responsive views; CottenMax mode switching and profile boundaries.');
+  await page.getByRole('button',{name:'DNS Scanner',exact:true}).click();
+  await page.getByRole('heading',{name:'DNS Scanner',exact:true}).waitFor();
+  const scannerProfile=page.getByRole('combobox');
+  await scannerProfile.click();await page.getByRole('option',{name:'Soar Test',exact:true}).click();
+  const workers=page.getByRole('spinbutton');
+  assert.equal(await workers.getAttribute('max'),'8');assert.equal(await workers.inputValue(),'8');
+  await page.getByText(/Verifies each resolver with the Soar server public key/).waitFor();
+  await page.getByRole('button',{name:'File',exact:true}).click();
+  await page.getByRole('button',{name:'Scan',exact:true}).click();
+  assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c[0]==='scan'&&c[1].connectionProfileId==='soar-ui'&&c[1].scanParallel===8)));
+  assert.ok(await page.getByRole('button',{name:'Pause',exact:true}).isDisabled());
+  assert.ok(await page.getByRole('button',{name:'Cancel',exact:true}).isEnabled());
+  await page.screenshot({path:path.join(out,'soar-scanner-running.png'),fullPage:true});
+  await page.getByRole('button',{name:'Cancel',exact:true}).click();
+  assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c[0]==='cancel-scan')));
+  await scannerProfile.click();await page.getByRole('option',{name:'Cotten Test',exact:true}).click();
+  assert.equal(await workers.getAttribute('max'),'1000');
+  assert.deepEqual(errors,[]);console.log('PASS: desktop subscription import/HTTP consent/refresh, Soar tuning, question-only help, presets, save and responsive views; CottenMax mode switching and profile boundaries; Soar scanner selection, bounded workers, supported controls and cancellation.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;server.close();});

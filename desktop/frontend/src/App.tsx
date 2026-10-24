@@ -5382,6 +5382,9 @@ function ScannerPage({
 
   const selectedConnection = state.connectionProfiles.find((profile) => profile.id === connectionProfileId) || state.connectionProfiles[0];
   const cottenScan = normalizeImportType(selectedConnection?.importType) === "cottendns";
+  const soarScan = normalizeImportType(selectedConnection?.importType) === "soar";
+  const maxScanParallel = soarScan ? 8 : 1000;
+  const effectiveScanParallel = Math.max(1, Math.min(scanParallel, maxScanParallel));
   const connectionReady = Boolean(connectionDomains(selectedConnection).length && selectedConnection?.encryptionKey.trim());
   const progress = scanner.total > 0 ? Math.round((scanner.completed / scanner.total) * 100) : 0;
   const elapsed = scanner.startedAt ? formatElapsed(scanner.startedAt, scanner.finishedAt || now) : "-";
@@ -5402,7 +5405,7 @@ function ScannerPage({
     try {
       onState(await backend.startScannerScan({
         connectionProfileId,
-        scanParallel,
+        scanParallel: effectiveScanParallel,
       }));
     } catch (err) {
       onError(messageFromError(err));
@@ -5481,7 +5484,7 @@ function ScannerPage({
             <Download />
             File
           </Button>
-          <Button variant="outline" disabled={!running || cottenScan} onClick={pauseOrResume}>
+          <Button variant="outline" disabled={!running || cottenScan || soarScan} onClick={pauseOrResume}>
             {scanner.paused ? <Play /> : <Pause />}
             {scanner.paused ? "Resume" : "Pause"}
           </Button>
@@ -5523,13 +5526,14 @@ function ScannerPage({
                   </SelectContent>
                 </Select>
                 <FieldDescription>{connectionDomainSummary(selectedConnection) || "Domain required"}</FieldDescription>
+                {soarScan && <FieldDescription>Verifies each resolver with the Soar server public key and an HTTPS transfer. Up to 8 workers; cancel is available, pause is not supported.</FieldDescription>}
                 {cottenScan && <FieldDescription>Uses the selected CottenDNS settings, including Normal/Max and DNS transport. Max Auto tests UDP and TCP independently.</FieldDescription>}
               </Field>
               <NumberField
                 label="Scan parallel"
-                value={scanParallel}
+                value={effectiveScanParallel}
                 min={1}
-                max={1000}
+                max={maxScanParallel}
                 onChange={setScanParallel}
               />
             </FieldGroup>
@@ -5538,7 +5542,7 @@ function ScannerPage({
               <Alert variant="destructive">
                 <AlertCircle />
                 <AlertTitle>Connection profile incomplete</AlertTitle>
-                <AlertDescription>Choose a profile with domain and encryption key.</AlertDescription>
+                <AlertDescription>{soarScan ? "Choose a profile with one tunnel domain and a valid Soar server public key." : "Choose a profile with domain and encryption key."}</AlertDescription>
               </Alert>
             )}
 

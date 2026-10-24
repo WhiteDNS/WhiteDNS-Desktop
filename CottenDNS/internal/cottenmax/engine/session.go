@@ -11,9 +11,10 @@ import (
 
 // streamConfig bounds per-stream memory.
 type streamConfig struct {
-	StreamWindow uint64 // receive window per stream
-	SendBuffer   int    // bytes the app may buffer per stream
-	MaxStreams   int
+	FECDataShards, FECParityShards int
+	StreamWindow                   uint64 // receive window per stream
+	SendBuffer                     int    // bytes the app may buffer per stream
+	MaxStreams                     int
 }
 
 // ctrl is a retransmittable control frame.
@@ -53,11 +54,16 @@ type sentPkt struct {
 // session is the transport-independent half of a tunnel endpoint: streams, packet numbers,
 // acknowledgement and retransmission. The client and server drive it with their own carriers.
 type session struct {
-	mu     sync.Mutex
-	cfg    streamConfig
-	client bool
-	seal   *packetCipher
-	open   *packetCipher
+	fecSend            *packetFECEncoder
+	fecRecv            *packetFECDecoder
+	fecData, fecParity int
+	fecReady           chan struct{}
+	fecConfirmed       bool
+	mu                 sync.Mutex
+	cfg                streamConfig
+	client             bool
+	seal               *packetCipher
+	open               *packetCipher
 
 	nextPN uint64
 	sent   map[uint64]*sentPkt
@@ -91,11 +97,18 @@ type session struct {
 }
 
 func newSession(client bool, cfg streamConfig, seal, open *packetCipher) *session {
-	return &session{
+	s := &session{
 		cfg: cfg, client: client, seal: seal, open: open,
 		sent: make(map[uint64]*sentPkt), replyOf: make(map[uint64]uint64),
 		streams: make(map[uint64]*stream), done: make(chan struct{}),
 	}
+	if client && validPacketFEC(cfg.FECDataShards, cfg.FECParityShards) {
+		s.fecData, s.fecParity = cfg.FECDataShards, cfg.FECParityShards
+		s.fecRecv = newPacketFECDecoder()
+		s.fecReady = make(chan struct{})
+		s.queueCtrl(ctrl{typ: frFECConfig, id: uint64(s.fecData), val: uint64(s.fecParity)})
+	}
+	return s
 }
 
 func (s *session) wake() {
@@ -244,7 +257,7 @@ func (s *session) receive(pn uint64, frames []byte, now time.Time) (bool, error)
 	}
 	eliciting := false
 	err := parseFrames(frames, func(f *frame) error {
-		if f.typ != frAck && f.typ != frLost {
+		if f.typ != frAck && f.typ != frLost && f.typ != frFECParity {
 			eliciting = true
 		}
 		if f.typ != frAck && f.typ != frLost && f.typ != frPing {
@@ -252,6 +265,10 @@ func (s *session) receive(pn uint64, frames []byte, now time.Time) (bool, error)
 		}
 		switch {
 		case f.typ == frPing:
+		case f.typ == frFECConfig:
+			return s.configureDownloadFEC(f.id, f.val)
+		case f.typ == frFECParity:
+			return s.receiveParity(f.fec, now)
 		case f.typ == frAck:
 			s.onAck(f.ranges, now)
 		case f.typ == frLost:
@@ -304,6 +321,20 @@ func (s *session) receive(pn uint64, frames []byte, now time.Time) (bool, error)
 		s.toAck.add(pn, pn+1)
 		if len(s.toAck) > maxAckRanges {
 			s.toAck = s.toAck[len(s.toAck)-maxAckRanges:]
+		}
+	}
+	if err == nil && s.fecRecv != nil {
+		// Parity packets are not source packets and must never form a coding loop.
+		hasParity := false
+		_ = parseFrames(frames, func(f *frame) error { hasParity = hasParity || f.typ == frFECParity; return nil })
+		if !hasParity {
+			recovered, e := s.fecRecv.observe(pn, frames, now)
+			if e != nil {
+				return true, e
+			}
+			if e = s.deliverRecovered(recovered, now); e != nil {
+				return true, e
+			}
 		}
 	}
 	return true, err
@@ -474,6 +505,9 @@ func (s *session) requeue(p *sentPkt) bool {
 
 // hasData reports whether anything other than acks is waiting to be sent. Caller holds s.mu.
 func (s *session) hasData() bool {
+	if s.fecSend != nil && s.fecSend.pending() {
+		return true
+	}
 	if len(s.ctrlQ) > 0 || len(s.lostQ) > 0 {
 		return true
 	}
@@ -488,6 +522,9 @@ func (s *session) hasData() bool {
 // pendingBytes estimates the stream bytes waiting to be sent. Caller holds s.mu.
 func (s *session) pendingBytes() int {
 	n := 0
+	if s.fecSend != nil && s.fecSend.pending() {
+		n = 512
+	}
 	for _, st := range s.streams {
 		for _, r := range st.spending {
 			if r.lo < st.smax {
@@ -517,6 +554,23 @@ func (s *session) build(b []byte, budget int, now time.Time, replyTo uint64) (pn
 		p.ctrls = append(p.ctrls, c)
 		s.ctrlQ = s.ctrlQ[1:]
 		data = true
+	}
+	// Controls retain priority. Recovery bytes ride an existing solicited
+	// answer and split to its remaining budget; parity itself is best-effort.
+	if s.fecSend != nil && s.fecSend.pending() {
+		if out, ok := s.fecSend.appendParity(b, room()); ok {
+			for len(out)-start < minPlain {
+				out = append(out, frPadding)
+			}
+			if len(p.ctrls) > 0 {
+				s.sent[p.pn] = p
+				if !s.client {
+					s.replyOf[p.replyTo] = p.pn
+				}
+				pkt = p
+			}
+			return p.pn, out, true, pkt
+		}
 	}
 	if len(s.lostQ) > 0 && room() > 4 {
 		slices.Sort(s.lostQ)
@@ -596,6 +650,20 @@ func (s *session) build(b []byte, budget int, now time.Time, replyTo uint64) (pn
 			s.replyOf[p.replyTo] = p.pn
 		}
 		pkt = p
+	}
+	if s.fecSend != nil && len(p.streams) > 0 {
+		// All originals leave immediately. Flush a short tail rather than
+		// waiting for unrelated future data to fill a Reed-Solomon block.
+		flush := true
+		for _, st := range s.streams {
+			if st.wantsSend() {
+				flush = false
+				break
+			}
+		}
+		if err := s.fecSend.add(p.pn, b[start:], flush); err != nil {
+			s.closeLocked(err)
+		}
 	}
 	return p.pn, b, data, pkt
 }

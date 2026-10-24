@@ -11,7 +11,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="Licencia MIT" src="https://img.shields.io/badge/license-MIT-16a34a?style=flat-square"></a>
   <a href="https://github.com/TaJirax/cottenDNS/actions/workflows/build-go.yml"><img alt="Compilación" src="https://github.com/TaJirax/cottenDNS/actions/workflows/build-go.yml/badge.svg"></a>
-  <a href="https://github.com/TaJirax/cottenDNS/releases/latest"><img alt="Última versión" src="https://img.shields.io/github/v/release/TaJirax/cottenDNS?style=flat-square"></a>
+  <a href="https://github.com/WhiteDNS/CottenDNS/releases/latest"><img alt="Última versión" src="https://img.shields.io/github/v/release/WhiteDNS/CottenDNS?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TaJirax/cottenDNS/releases/latest">Descargar</a> ·
+  <a href="https://github.com/WhiteDNS/CottenDNS/releases/latest">Descargar</a> ·
   <a href="docs/ENGINEERING_CHANGES.md">Notas de ingeniería</a> ·
   <a href="CONFIG_PRESETS.md">Perfiles</a> ·
   <a href="https://t.me/whitedns">Telegram</a>
@@ -212,7 +212,7 @@ El puerto de monitorización `9090` es local por defecto; no lo expongas directa
 
 ### Paso 4 — Configura el cliente
 
-Descarga desde [Releases](https://github.com/TaJirax/cottenDNS/releases/latest) el archivo correspondiente a tu sistema y arquitectura. Conserva el ejecutable, `client_config.toml` y `client_resolvers.txt` en la misma carpeta.
+Descarga desde [Releases](https://github.com/WhiteDNS/CottenDNS/releases/latest) el archivo correspondiente a tu sistema y arquitectura. Conserva el ejecutable, `client_config.toml` y `client_resolvers.txt` en la misma carpeta.
 
 Empieza con esta configuración mínima y segura:
 

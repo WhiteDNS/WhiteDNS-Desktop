@@ -22,6 +22,9 @@ import (
 
 // Config configures a tunnel client.
 type Config struct {
+	// Download FEC is explicitly requested by the client; disabled adds no wire overhead.
+	FECDownloadEnabled             bool
+	FECDataShards, FECParityShards int
 	// Optional wire-transparent label shaping and encrypted-hop padding.
 	QNameLabelLength int
 	QNameLabelJitter bool
@@ -41,7 +44,7 @@ type Config struct {
 	SafeQName, MaxQName int
 	// Hold is how long the server may hold an idle poll. Default 500ms.
 	Hold time.Duration
-	// MaxInflight caps queries outstanding across all paths. Default 128; at most 1,024, which
+	// MaxInflight caps queries outstanding across all paths. Default 128; at most 4,096, which
 	// keeps pending queries well inside the DNS ID space.
 	MaxInflight int
 	// MaxPathWindow caps one path's queries outstanding. Default 32.
@@ -98,6 +101,12 @@ func (c *Config) setDefaults() {
 	if c.Hold <= 0 {
 		c.Hold = 500 * time.Millisecond
 	}
+	if c.FECDataShards == 0 {
+		c.FECDataShards = 4
+	}
+	if c.FECParityShards == 0 {
+		c.FECParityShards = 1
+	}
 	if c.MaxInflight <= 0 {
 		c.MaxInflight = 128
 	}
@@ -138,7 +147,7 @@ func (c *Config) setDefaults() {
 const (
 	// maxInflightCap caps MaxInflight whatever it's set to. With expired queries kept for
 	// lateGrace too, pending queries stay far below the 65,536 DNS IDs.
-	maxInflightCap = 1024
+	maxInflightCap = 4096
 	// maxPending is a hard ceiling on pending queries (live and expired), so a free DNS ID
 	// always exists and newTxnLocked's random pick always terminates.
 	maxPending = 60000
@@ -174,6 +183,7 @@ type Client struct {
 
 	lastDump   time.Time
 	probeUntil time.Time // short authenticated startup probe, never an idle beacon
+	scoutNext  int       // rotate through every configured path, including large resolver lists
 }
 
 type path struct {
@@ -323,6 +333,9 @@ func (cs *clientSession) isClosed() bool {
 // NewClient starts a client. It handshakes lazily on the first Dial.
 func NewClient(cfg Config) (*Client, error) {
 	cfg.setDefaults()
+	if cfg.FECDownloadEnabled && !validPacketFEC(cfg.FECDataShards, cfg.FECParityShards) {
+		return nil, errors.New("soar: download FEC needs 2..16 data shards and 1..4 parity shards")
+	}
 	if len(cfg.ServerKey) != ed25519.PublicKeySize {
 		return nil, errors.New("soar: client needs the server's Ed25519 public key")
 	}
@@ -349,10 +362,22 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	c := &Client{cfg: cfg, z: z, pc: pc, pending: make(map[uint16]*pendingQuery), tcpDialSlots: make(chan struct{}, 16),
 		wakeCh: make(chan struct{}, 1), done: make(chan struct{})}
+	// A large configured pool must not repeatedly compare each new endpoint
+	// with every UDP/TCP path already installed. Discovery still checks the
+	// current live slice, because candidates can later be pruned and re-added.
+	seen := make(map[string]bool, len(cfg.Resolvers))
 	for _, r := range cfg.Resolvers {
-		if err := c.addPathLocked(r); err != nil {
+		ua, err := net.ResolveUDPAddr("udp", r)
+		if err != nil {
 			cfg.Logger.Warn("bad resolver", "resolver", r, "err", err)
+			continue
 		}
+		addr := ua.String()
+		if seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		c.appendPathLocked(ua, r)
 	}
 	if len(c.paths) == 0 && !cfg.Discovery.Enabled {
 		pc.Close()
@@ -384,16 +409,20 @@ func (c *Client) addPathLocked(r string) error {
 			return nil
 		}
 	}
-	if c.cfg.TCP == "only" || (c.cfg.StreamOnly != nil && c.cfg.StreamOnly(r)) {
+	c.appendPathLocked(ua, r)
+	return nil
+}
+
+func (c *Client) appendPathLocked(ua *net.UDPAddr, resolver string) {
+	if c.cfg.TCP == "only" || (c.cfg.StreamOnly != nil && c.cfg.StreamOnly(resolver)) {
 		c.paths = append(c.paths, c.newPath(ua, true))
-		return nil
+		return
 	}
 	c.paths = append(c.paths, c.newPath(ua, false))
 	if c.cfg.TCP == "on" || c.cfg.TCP == "auto" {
 		c.paths[len(c.paths)-1].sibling = true
 		c.paths = append(c.paths, c.newPath(ua, true))
 	}
-	return nil
 }
 
 func (c *Client) newPath(ua *net.UDPAddr, tcp bool) *path {
@@ -1038,49 +1067,65 @@ func (c *Client) fillLocked(now time.Time) {
 	if cs.isClosed() {
 		return
 	}
-	// Keep one probe on each unverified path, so new and recovering resolvers get vetted, but
-	// only while there's real traffic: a lost probe's ack and LOST bookkeeping mustn't count, or
-	// it would beget another probe and an idle session would never go quiet.
-	busy := cs.busy() || now.Before(c.probeUntil)
-	for _, p := range c.paths {
-		if !busy {
-			break
+	// Discovery must not fill the whole flight before a working path can send
+	// stream data. Count once, then reserve only a bounded batch of actual
+	// candidates. The cursor gives every configured resolver a turn instead of
+	// repeatedly refilling failed paths at the beginning of a large list.
+	inflight, polls, scouts := 0, 0, 0
+	for _, q := range c.pending {
+		if q.expired {
+			continue
 		}
-		if c.liveQueriesLocked() >= c.cfg.MaxInflight || len(c.pending) >= maxPending {
-			break
-		}
-		if !p.verified && p.inflight == 0 && p.usable(now) {
-			c.sendDataLocked(cs, p, now, false)
+		inflight++
+		if q.scout {
+			scouts++
+		} else {
+			polls++
 		}
 	}
-	for {
-		inflight, polls := 0, 0
-		for _, q := range c.pending {
-			if !q.expired {
-				inflight++
-				if !q.scout {
-					polls++
-				}
+	scoutLimit := min(maxHelloPaths, max(c.cfg.MaxInflight/8, 1), max(c.cfg.MaxInflight-1, 0))
+	if !c.anyUsableLocked(now) || (c.cfg.MaxInflight == 1 && !c.productivePathLocked(now)) {
+		// Without a verified path there is no application traffic to reserve for.
+		scoutLimit = min(maxHelloPaths, c.cfg.MaxInflight)
+	}
+	var candidates []*path
+	if cs.busy() || now.Before(c.probeUntil) {
+		limit := min(scoutLimit-scouts, c.cfg.MaxInflight-inflight, maxPending-len(c.pending))
+		for visited := 0; visited < len(c.paths) && len(candidates) < limit; visited++ {
+			c.scoutNext %= len(c.paths)
+			p := c.paths[c.scoutNext]
+			c.scoutNext++
+			if !p.verified && p.inflight == 0 && p.usable(now) {
+				candidates = append(candidates, p)
 			}
 		}
-		if inflight >= c.cfg.MaxInflight || len(c.pending) >= maxPending {
-			return
-		}
+	}
+	trafficLimit := c.cfg.MaxInflight - len(candidates)
+	for inflight < trafficLimit && len(c.pending) < maxPending {
 		cs.mu.Lock()
 		need := cs.hasData() || polls < cs.wantQueries()
 		cs.mu.Unlock()
 		if !need {
-			return
+			break
 		}
 		p := c.pickPathLocked(now, nil)
 		if p == nil {
-			return
+			break
 		}
-		c.sendDataLocked(cs, p, now, true)
+		sent := c.sendDataWithSlotsLocked(cs, p, now, true, trafficLimit-inflight)
+		if sent == 0 {
+			break
+		}
+		inflight += sent
+		polls += sent
+	}
+	for _, p := range candidates {
+		inflight += c.sendDataWithSlotsLocked(cs, p, now, false, c.cfg.MaxInflight-inflight)
 	}
 }
 
-// pickPathLocked returns the path with a free slot and the earliest expected answer.
+// pickPathLocked returns the verified path with a free slot and the earliest
+// expected answer. Unverified paths are vetted by the separate scout budget.
 func (c *Client) pickPathLocked(now time.Time, exclude *path) *path {
 	var best *path
 	var bestScore float64
@@ -1088,7 +1133,7 @@ func (c *Client) pickPathLocked(now time.Time, exclude *path) *path {
 		if p == exclude {
 			continue
 		}
-		if !p.usable(now) || float64(p.inflight) >= p.cwnd || (!p.verified && p.inflight > 0) {
+		if !p.verified || !p.usable(now) || float64(p.inflight) >= p.cwnd {
 			continue
 		}
 		rtt := p.rto()
@@ -1150,30 +1195,49 @@ func (c *Client) sendHellosLocked(cs *clientSession, now time.Time) {
 }
 
 func (c *Client) sendDataLocked(cs *clientSession, p *path, now time.Time, allowDup bool) {
+	c.sendDataWithSlotsLocked(cs, p, now, allowDup, c.cfg.MaxInflight-c.liveQueriesLocked())
+}
+
+// sendDataWithSlotsLocked returns the number of queries sent, including a tail
+// copy, so fillLocked can account for its flight without rescanning pending.
+func (c *Client) sendDataWithSlotsLocked(cs *clientSession, p *path, now time.Time, allowDup bool, slots int) int {
 	// Checked here, before a packet is built, so every data send (fill, probes of unverified
 	// paths, the tail copy) respects the ceiling; a packet built but never sent would sit in
 	// the session's sent map with no query to fail it.
-	if len(c.pending) >= maxPending {
-		return
+	if slots <= 0 || len(c.pending) >= maxPending {
+		return 0
 	}
 	nameLen := p.nameLen
 	probe := false
 	if p.beginNameProbe(now, c.cfg.MaxQName) {
 		nameLen, probe = c.cfg.MaxQName, true
 	}
-	budget := c.z.maxPayload(nameLen) - 4 - tagLen - 1
+	wireBudget := c.z.maxPayload(nameLen) - 4 - tagLen - 1
+	budget := wireBudget
 	if !p.verified {
-		budget = minPlain // probe: don't strand data on a path that may be dead
+		budget = 0 // don't strand application or control bytes on an unverified path
 	}
-	holdClass := min(int(c.cfg.Hold/(100*time.Millisecond)), 15)
-	class := p.nextClass()
+	if probe {
+		budget = 0 // a failed size trial must not delay retransmittable traffic
+	}
+	hold := c.cfg.Hold
+	if !p.verified || probe {
+		// Explicit path/size vetting should answer immediately, rather than
+		// occupying a scout slot for the idle-poll hold interval.
+		hold = 0
+	}
+	holdClass := min(int(hold/(100*time.Millisecond)), 15)
+	class := 0
+	if !probe {
+		class = p.nextClass()
+	}
 	hdr := byte(holdClass<<4 | class)
 
 	cs.mu.Lock()
 	pn, plain, data, pkt := cs.build([]byte{hdr}, budget, now, 0)
 	if probe {
 		// Pad to the length under test (inside the seal), or a short probe would "prove" it.
-		for len(plain) < 1+budget {
+		for len(plain) < 1+wireBudget {
 			plain = append(plain, frPadding)
 		}
 	}
@@ -1184,28 +1248,34 @@ func (c *Client) sendDataLocked(cs *clientSession, p *path, now time.Time, allow
 
 	timeout := p.rto()
 	if !data {
-		timeout += c.cfg.Hold
+		timeout += hold
 	}
 	if cs.unanswered.IsZero() {
 		cs.unanswered = now
 	}
+	before := len(c.pending)
 	c.sendLocked(p, &pendingQuery{p: p, sess: cs, pn: pn, probe: probe, scout: !p.verified, poll: !data, class: class}, payload, now, timeout)
+	if len(c.pending) == before {
+		return 0
+	}
+	sent := 1
 	// The tail of an upload (often a whole request) goes out twice, on another path if there is one.
-	if dup {
+	if dup && slots > 1 {
 		// A different resolver, so the copies don't share a failure; the same one if it's all we have.
 		p2 := c.pickPathLocked(now, p)
 		if p2 == nil || !p2.verified {
 			p2 = c.pickPathLocked(now, nil)
 		}
-		if p2 != nil && p2.verified && c.liveQueriesLocked() < c.cfg.MaxInflight {
+		if p2 != nil && p2.verified {
 			cs.mu.Lock()
 			ok := cs.requeue(pkt)
 			cs.mu.Unlock()
 			if ok {
-				c.sendDataLocked(cs, p2, now, false)
+				sent += c.sendDataWithSlotsLocked(cs, p2, now, false, slots-1)
 			}
 		}
 	}
+	return sent
 }
 
 func (c *Client) sendLocked(p *path, q *pendingQuery, payload []byte, now time.Time, timeout time.Duration) {
@@ -1386,6 +1456,9 @@ func (c *Client) onHelloLocked(q *pendingQuery, reply []byte, now time.Time) {
 		return
 	}
 	cfg := streamConfig{StreamWindow: c.cfg.StreamWindow, SendBuffer: c.cfg.SendBuffer, MaxStreams: c.cfg.MaxStreams}
+	if c.cfg.FECDownloadEnabled {
+		cfg.FECDataShards, cfg.FECParityShards = c.cfg.FECDataShards, c.cfg.FECParityShards
+	}
 	cs.session = newSession(true, cfg, up, down)
 	cs.wakeFn = c.wake
 	cs.sid = sid
@@ -1402,4 +1475,15 @@ func (c *Client) observeWireSizeLocked(p *path, q *pendingQuery, answerBytes int
 	// name is two bytes longer than its presentation form without trailing dot.
 	p.observedNameLen = max(p.observedNameLen, len(q.question)-6)
 	p.observedAnswer = max(p.observedAnswer, answerBytes)
+}
+
+// A single-slot custom flight can scout a replacement once its only verified
+// paths have stopped delivering; healthy single-slot transfers keep priority.
+func (c *Client) productivePathLocked(now time.Time) bool {
+	for _, p := range c.paths {
+		if p.verified && p.usable(now) && (p.consec < 2 || now.Sub(p.lastSuccess) < max(2*p.rto(), time.Second)) {
+			return true
+		}
+	}
+	return false
 }

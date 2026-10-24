@@ -731,7 +731,10 @@ func validOptionRange(key string, value any) bool {
 	case "LISTEN_PORT", "LOCAL_DNS_PORT", "RESOLVER_DOT_PORT", "RESOLVER_DOH_PORT", "RESOLVER_DOQ_PORT":
 		port, ok := value.(int)
 		return ok && port >= 1 && port <= 65535
-	case "RESOLVER_DISCOVERY_WANT", "RESOLVER_DISCOVERY_CONCURRENCY":
+	case "RESOLVER_DISCOVERY_WANT", "COTTENMAX_MAX_INFLIGHT":
+		n, ok := value.(int)
+		return ok && n >= 1 && n <= 4096
+	case "RESOLVER_DISCOVERY_CONCURRENCY":
 		n, ok := value.(int)
 		return ok && n >= 1 && n <= 64
 	case "RESOLVER_DISCOVERY_PACE_MILLISECONDS":
@@ -761,9 +764,15 @@ func validOptionRange(key string, value any) bool {
 	case "COTTENMAX_MAX_ANSWER":
 		n, ok := value.(int)
 		return ok && n >= 512 && n <= 1232
-	case "COTTENMAX_MAX_PATH_WINDOW", "COTTENMAX_MAX_INFLIGHT":
+	case "COTTENMAX_MAX_PATH_WINDOW":
 		n, ok := value.(int)
 		return ok && n >= 1 && n <= 1024
+	case "COTTENMAX_FEC_DATA_SHARDS":
+		n, ok := value.(int)
+		return ok && n >= 2 && n <= 16
+	case "COTTENMAX_FEC_PARITY_SHARDS":
+		n, ok := value.(int)
+		return ok && n >= 1 && n <= 4
 	case "COTTENMAX_SESSION_IDLE_MILLISECONDS":
 		n, ok := value.(int)
 		return ok && n >= 1000 && n <= 90000
@@ -813,6 +822,16 @@ func optionDescription(key, fallback string) string {
 		return "Normal is the compatible default. CottenMax (beta) uses the same domain, key and resolver profile, and requires an updated CottenDNS server. Save and reconnect after switching; select Normal manually if Max cannot connect."
 	case "RESOLVER_TRANSPORT":
 		return "Transport to your DNS resolver. HTTP/3 uses UDP/443 and DoQ uses UDP/853 by default; the chosen resolver must support it. Max never falls back to plaintext from an encrypted resolver transport."
+	case "RESOLVER_DISCOVERY_WANT":
+		return "Target 1..4096 authenticated healthy discovery paths; default 16. Candidates are checked fairly while verified paths carry traffic. More active paths can increase DNS traffic and do not guarantee higher speed."
+	case "COTTENMAX_MAX_INFLIGHT":
+		return "Maximum unanswered CottenMax queries across all paths, 1..4096; default 256. Scouting shares a bounded part of this budget so large resolver lists do not block verified traffic. Higher limits can cause resolver throttling."
+	case "COTTENMAX_FEC_DOWNLOAD_ENABLED":
+		return "Recover lost download packets with Reed-Solomon parity, requested by this client. Off by default. Requires a CottenDNS server with CottenMax FEC support; adds download bandwidth. Original data is sent immediately and ARQ still handles retries."
+	case "COTTENMAX_FEC_DATA_SHARDS":
+		return "Download data shards per FEC block, 2..16; default 4. Applies when download FEC is enabled. More data shards reduce relative parity overhead but can delay recovery."
+	case "COTTENMAX_FEC_PARITY_SHARDS":
+		return "Download repair shards per FEC block, 1..4; default 1. Applies when download FEC is enabled. More repair shards can recover more loss and use more bandwidth. Upload recovery continues to use ARQ."
 	default:
 		return fallback
 	}
@@ -849,6 +868,8 @@ func optionChoices(key string) []OptionChoice {
 
 func optionGroup(key string) string {
 	switch {
+	case strings.HasPrefix(key, "COTTENMAX_FEC_"):
+		return "Delivery and failover"
 	case key == "COTTENMAX_FAILOVER_AFTER_MILLISECONDS":
 		return "Delivery and failover"
 	case key == "COTTENMAX_QNAME_LOSS_GUARD" || key == "COTTENMAX_SAFE_QNAME" || key == "COTTENMAX_MAX_QNAME" || key == "COTTENMAX_MAX_ANSWER":
@@ -936,6 +957,12 @@ func optionLabel(key string) string {
 		return "CottenMax maximum queries per path"
 	case "COTTENMAX_MAX_INFLIGHT":
 		return "CottenMax maximum total pending queries"
+	case "COTTENMAX_FEC_DOWNLOAD_ENABLED":
+		return "CottenMax download FEC"
+	case "COTTENMAX_FEC_DATA_SHARDS":
+		return "CottenMax FEC data shards"
+	case "COTTENMAX_FEC_PARITY_SHARDS":
+		return "CottenMax FEC repair shards"
 	case "COTTENMAX_SESSION_IDLE_MILLISECONDS":
 		return "CottenMax idle session retirement (ms)"
 	case "COTTENMAX_HOLD_MILLISECONDS":

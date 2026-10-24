@@ -28,6 +28,11 @@ jobs:
       - name: Run Tests
         run: go test ./...
 
+      - name: Preserve client and server configuration on upgrade
+        run: |
+          COTTENDNS_INSTALLER_SELF_TEST=1 bash client_linux_install.sh
+          COTTENDNS_INSTALLER_SELF_TEST=1 bash server_linux_install.sh
+
   e2e:
     runs-on: ubuntu-latest
 
@@ -56,7 +61,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Run race-sensitive transport tests
-        run: go test -race -timeout 180s ./internal/arq ./internal/client ./internal/clientui ./internal/udpserver
+        run: go test -race -timeout 180s ./internal/arq ./internal/client ./internal/clientui ./internal/udpserver ./internal/resolvertransport ./internal/cottenmax/...
 
   lint:
     runs-on: ubuntu-latest

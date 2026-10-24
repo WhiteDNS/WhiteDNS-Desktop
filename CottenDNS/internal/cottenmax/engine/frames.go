@@ -27,6 +27,7 @@ const (
 var errFrame = errors.New("soar: malformed frame")
 
 type frame struct {
+	fec    *fecFragment
 	typ    byte
 	id     uint64 // stream id (stream, reset, maxStream)
 	off    uint64 // stream offset
@@ -48,6 +49,14 @@ func parseFrames(b []byte, fn func(*frame) error) error {
 			// Padding runs to the end of the packet.
 			return nil
 		case f.typ == frPing:
+		case f.typ == frFECConfig:
+			f.id, f.val = r.varint(), r.varint()
+		case f.typ == frFECParity:
+			fragment, err := readFECFragment(&r)
+			if err != nil {
+				return err
+			}
+			f.fec = fragment
 		case f.typ == frAck:
 			n := r.varint()
 			if n == 0 || n > maxAckRanges*4 {

@@ -141,18 +141,10 @@ func (c *Client) probeCottenMaxScanPath(ctx context.Context, job cottenMaxScanJo
 		if timeout > 30*time.Second {
 			timeout = 30 * time.Second
 		}
-		probeCtx, cancel := context.WithTimeout(ctx, timeout)
-		err = engine.Authenticate(probeCtx)
-		if err == nil {
-			result.authenticated = true
+		result.authenticated, result.transferred = qualifyCottenMaxScanPath(ctx, engine, timeout)
+		result.valid = result.transferred
+		if result.authenticated {
 			result.domain = domain
-			// Qualify a usable path with a small byte-exact transfer first. A
-			// slow link may run out of the sizing budget and still be usable.
-			result.transferred = engine.Probe(probeCtx, 256) == nil
-			result.valid = result.transferred
-			if result.valid {
-				_ = engine.Probe(probeCtx, 8192)
-			}
 			for _, path := range engine.PathStats() {
 				if path.Verified {
 					result.nameBytes = max(result.nameBytes, min(path.NameLen, path.ObservedNameLen))
@@ -160,7 +152,6 @@ func (c *Client) probeCottenMaxScanPath(ctx context.Context, job cottenMaxScanJo
 				}
 			}
 		}
-		cancel()
 		engine.Close()
 		profile.closeSharedEncryptedDNSClient()
 		if result.valid {
@@ -168,4 +159,31 @@ func (c *Client) probeCottenMaxScanPath(ctx context.Context, job cottenMaxScanJo
 		}
 	}
 	return result
+}
+
+// Authentication must not spend the transfer proof's budget on a slow path.
+// Dead paths still use only one timeout; a qualified path gets optional sizing
+// only within the original budget, so sizing cannot add a third timeout.
+func qualifyCottenMaxScanPath(ctx context.Context, engine cottenMaxStartup, timeout time.Duration) (authenticated, transferred bool) {
+	if ctx.Err() != nil {
+		return false, false
+	}
+	sizingDeadline := time.Now().Add(timeout)
+	authCtx, cancel := context.WithTimeout(ctx, timeout)
+	err := engine.Authenticate(authCtx)
+	cancel()
+	if err != nil || ctx.Err() != nil {
+		return false, false
+	}
+	transferCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if err := engine.Probe(transferCtx, 256); err != nil || ctx.Err() != nil {
+		return true, false
+	}
+	if time.Now().Before(sizingDeadline) {
+		sizingCtx, cancel := context.WithDeadline(transferCtx, sizingDeadline)
+		_ = engine.Probe(sizingCtx, 8192)
+		cancel()
+	}
+	return true, true
 }

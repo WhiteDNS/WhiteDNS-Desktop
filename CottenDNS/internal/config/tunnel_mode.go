@@ -66,8 +66,11 @@ func validateCottenMaxClient(c ClientConfig) error {
 	if c.CottenMaxMaxAnswer < 512 || c.CottenMaxMaxAnswer > 1232 {
 		return fmt.Errorf("COTTENMAX_MAX_ANSWER must be 512..1232")
 	}
-	if c.CottenMaxMaxPathWindow < 1 || c.CottenMaxMaxPathWindow > 1024 || c.CottenMaxMaxInflight < 1 || c.CottenMaxMaxInflight > 1024 {
-		return fmt.Errorf("COTTENMAX_MAX_PATH_WINDOW/MAX_INFLIGHT must be 1..1024")
+	if c.CottenMaxMaxPathWindow < 1 || c.CottenMaxMaxPathWindow > 1024 || c.CottenMaxMaxInflight < 1 || c.CottenMaxMaxInflight > 4096 {
+		return fmt.Errorf("COTTENMAX_MAX_PATH_WINDOW must be 1..1024 and MAX_INFLIGHT 1..4096")
+	}
+	if c.CottenMaxFECDownloadEnabled && (c.CottenMaxFECDataShards < 2 || c.CottenMaxFECDataShards > 16 || c.CottenMaxFECParityShards < 1 || c.CottenMaxFECParityShards > 4) {
+		return fmt.Errorf("COTTENMAX_FEC_DATA_SHARDS must be 2..16 and PARITY_SHARDS 1..4")
 	}
 	if c.CottenMaxSessionIdleMilliseconds < 1000 || c.CottenMaxSessionIdleMilliseconds > 90000 {
 		return fmt.Errorf("COTTENMAX_SESSION_IDLE_MILLISECONDS must be 1000..90000")
@@ -99,8 +102,8 @@ func validateResolverOptions(c ClientConfig) error {
 			return fmt.Errorf("DNS_PADDING_BLOCK_SIZE requires an encrypted resolver transport")
 		}
 	}
-	if c.ResolverDiscoveryWant < 1 || c.ResolverDiscoveryWant > 64 || c.ResolverDiscoveryConcurrency < 1 || c.ResolverDiscoveryConcurrency > 64 || c.ResolverDiscoveryPaceMilliseconds < 1 || c.ResolverDiscoveryPaceMilliseconds > 60000 {
-		return fmt.Errorf("discovery WANT/CONCURRENCY must be 1..64 and PACE_MILLISECONDS 1..60000")
+	if c.ResolverDiscoveryWant < 1 || c.ResolverDiscoveryWant > 4096 || c.ResolverDiscoveryConcurrency < 1 || c.ResolverDiscoveryConcurrency > 64 || c.ResolverDiscoveryPaceMilliseconds < 1 || c.ResolverDiscoveryPaceMilliseconds > 60000 {
+		return fmt.Errorf("discovery WANT must be 1..4096, CONCURRENCY 1..64 and PACE_MILLISECONDS 1..60000")
 	}
 	if len(c.ResolverDiscoveryCandidates) > 256 {
 		return fmt.Errorf("RESOLVER_DISCOVERY_CANDIDATES is limited to 256 endpoints")

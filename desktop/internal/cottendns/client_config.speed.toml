@@ -38,7 +38,15 @@ COTTENMAX_SAFE_QNAME = 101
 COTTENMAX_MAX_QNAME = 253
 COTTENMAX_MAX_ANSWER = 1232
 COTTENMAX_MAX_PATH_WINDOW = 256
+# Total pending queries across all paths: 1..4096; default remains 256.
 COTTENMAX_MAX_INFLIGHT = 256
+# Optional client-requested download Reed-Solomon FEC. Requires an updated
+# CottenDNS server with Max FEC support. Off adds no parity; enabling consumes
+# extra download bandwidth. Uploads retain ARQ. Original data is sent immediately.
+COTTENMAX_FEC_DOWNLOAD_ENABLED = false
+# Data shards: 2..16; repair shards: 1..4. Defaults recover one missing shard.
+COTTENMAX_FEC_DATA_SHARDS = 4
+COTTENMAX_FEC_PARITY_SHARDS = 1
 # Experimental: recent authenticated near-cap answers avoid a false size
 # downgrade under random loss. May slow healthy paths; default remains off.
 COTTENMAX_QNAME_LOSS_GUARD = false
@@ -51,6 +59,7 @@ RESOLVER_DISCOVERY_CACHE_FILE = ""
 # Optional user-supplied network label: change it when moving networks.
 RESOLVER_DISCOVERY_NETWORK_ID = ""
 RESOLVER_DISCOVERY_CANDIDATES = []
+# Target authenticated healthy paths: 1..4096. This does not cap the input list.
 RESOLVER_DISCOVERY_WANT = 16
 RESOLVER_DISCOVERY_CONCURRENCY = 16
 RESOLVER_DISCOVERY_PACE_MILLISECONDS = 20

@@ -5024,6 +5024,17 @@ function cottenDNSNumberBounds(key: string): { min?: number; max?: number } {
     case "LISTEN_PORT":
     case "LOCAL_DNS_PORT":
       return { min: 1, max: 65535 };
+    case "RESOLVER_DISCOVERY_WANT":
+    case "COTTENMAX_MAX_INFLIGHT":
+      return { min: 1, max: 4096 };
+    case "RESOLVER_DISCOVERY_CONCURRENCY":
+      return { min: 1, max: 64 };
+    case "COTTENMAX_MAX_PATH_WINDOW":
+      return { min: 1, max: 1024 };
+    case "COTTENMAX_FEC_DATA_SHARDS":
+      return { min: 2, max: 16 };
+    case "COTTENMAX_FEC_PARITY_SHARDS":
+      return { min: 1, max: 4 };
     default:
       return {};
   }
@@ -5175,6 +5186,7 @@ function CottenDNSSettingsFields({
               <p>Max requires the updated CottenDNS server. That server accepts both modes on the same listener; an older server supports Normal only.</p>
               <p>Save settings, then reconnect to apply a mode change. If Max cannot connect, select Normal CottenDNS, save and reconnect. Switching is manual.</p>
               <p>Start with the default Max options. HTTP/3, DoQ, discovery and query shaping are optional in the categories below.</p>
+              <p>Download FEC is optional under Delivery and failover. It adds recovery traffic and requires a server with CottenMax FEC support. Leave it off for older Max servers.</p>
             </div>
           </div>
         </section>

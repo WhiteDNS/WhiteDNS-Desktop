@@ -11,7 +11,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="MIT 许可证" src="https://img.shields.io/badge/license-MIT-16a34a?style=flat-square"></a>
   <a href="https://github.com/TaJirax/cottenDNS/actions/workflows/build-go.yml"><img alt="构建状态" src="https://github.com/TaJirax/cottenDNS/actions/workflows/build-go.yml/badge.svg"></a>
-  <a href="https://github.com/TaJirax/cottenDNS/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/TaJirax/cottenDNS?style=flat-square"></a>
+  <a href="https://github.com/WhiteDNS/CottenDNS/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/WhiteDNS/CottenDNS?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TaJirax/cottenDNS/releases/latest">下载</a> ·
+  <a href="https://github.com/WhiteDNS/CottenDNS/releases/latest">下载</a> ·
   <a href="docs/ENGINEERING_CHANGES.md">工程记录</a> ·
   <a href="CONFIG_PRESETS.md">配置预设</a> ·
   <a href="https://t.me/whitedns">Telegram</a>
@@ -212,7 +212,7 @@ journalctl -u cottendns -n 100 --no-pager
 
 ### 第 4 步 — 配置客户端
 
-从 [Releases](https://github.com/TaJirax/cottenDNS/releases/latest) 下载与系统和 CPU 架构匹配的客户端。将可执行文件、`client_config.toml` 和 `client_resolvers.txt` 保持在同一目录。
+从 [Releases](https://github.com/WhiteDNS/CottenDNS/releases/latest) 下载与系统和 CPU 架构匹配的客户端。将可执行文件、`client_config.toml` 和 `client_resolvers.txt` 保持在同一目录。
 
 先使用最小安全配置：
 

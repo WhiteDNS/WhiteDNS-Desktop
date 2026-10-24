@@ -16,6 +16,13 @@
 # - Defines label policy and allowed compression negotiation.
 # ------------------------------------------------------------------------------
 
+# Normal CottenDNS and CottenMax share this configuration, listener and existing
+# encryption credential. Clients select their mode; no server switch is needed.
+# TUNNEL_MODE remains readable for compatibility with older configurations.
+TUNNEL_MODE = "legacy"
+# Old experimental COTTENMAX_KEY_FILE settings remain readable for migration.
+# New installations do not create a separate Max identity or public-key file.
+
 # Tunnel domains handled by this server.
 # Must match client DOMAINS.
 DOMAIN = ["v.domain.com"]
@@ -239,6 +246,10 @@ SOCKS5_FRAGMENT_STORE_CAPACITY = 1024
 # control stream (stream 0) is always allowed and never counted against this
 # cap. Range: 16..65535. Default: 4096.
 MAX_STREAMS_PER_SESSION = 4096
+
+# Max keeps its existing 256-stream default. Opt in to 512 only with updated
+# server and client builds. This shares the same config and credential.
+COTTENMAX_MAX_STREAMS = 256
 
 # Maximum number of concurrent live tunnel sessions. The session-ID space is
 # 16-bit (65535), but keeping that many sessions alive is far more memory/CPU

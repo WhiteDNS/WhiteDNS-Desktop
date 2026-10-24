@@ -10,7 +10,7 @@
 
 <p align="center">
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-00a36c?style=for-the-badge"></a>
-  <img alt="Go" src="https://img.shields.io/badge/Go-1.25-00add8?style=for-the-badge&logo=go&logoColor=white">
+  <img alt="Go" src="https://img.shields.io/badge/Go-1.26.5-00add8?style=for-the-badge&logo=go&logoColor=white">
   <img alt="Transport" src="https://img.shields.io/badge/transport-DNS%20over%20UDP%2F53-4f46e5?style=for-the-badge">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Termux-f59e0b?style=for-the-badge">
 </p>
@@ -20,6 +20,70 @@
   <a href="https://github.com/WhiteDNS/CottenDns/releases/latest">آخرین Release</a> ·
   <a href="https://t.me/whitedns">کانال تلگرام</a>
 </p>
+
+[یادداشت انتشار و راهنمای به‌روزرسانی ۲۱ اکتبر ۲۰۲۶](docs/RELEASE_AND_UPDATE_2026-10-21.md) · [دانلود کلاینت‌های بتا](#beta-client-downloads)
+
+<a id="cottenmax-beta"></a>
+
+## بتای CottenMax — سرور منتشرشده و کلاینت‌های آزمایشی
+
+**CottenMax برای آزمایش اختیاری به CottenDNS اضافه شده است.** کد بتا در شاخه `main` هر دو مخزن [WhiteDNS/CottenDNS](https://github.com/WhiteDNS/CottenDNS/tree/main) و [TaJirax/cottenDNS](https://github.com/TaJirax/cottenDNS/tree/main) قرار دارد. **[نسخه جدید سرور](https://github.com/WhiteDNS/CottenDNS/releases/tag/v2026.10.21.140901-0a7a241) حالت Normal و CottenMax را با هم پشتیبانی می‌کند.** نصب جدید و `--upgrade` اکنون این نسخه سازگار را می‌گیرند؛ تنظیمات و کلید فعلی را نگه دارید. backend تحت مدیریت Router را با `sudo cottenrouter update --project cottendns` به‌روز کنید. Max در کلاینت همچنان بتای اختیاری است.
+
+<a id="beta-client-downloads"></a>
+
+### کلاینت‌های بتای دسکتاپ و اندروید
+
+**بیلدهای بتای تأییدشده — ۲۱ اکتبر ۲۰۲۶.** این نسخه‌ها حالت معمولی و CottenMax را با سرور فعلی پشتیبانی می‌کنند.
+
+| کلاینت | دانلود | نصب | کد بتا |
+| --- | --- | --- | --- |
+| دسکتاپ ویندوز x64 | [دریافت ZIP بتا](https://github.com/WhiteDNS/WhiteDNS-Desktop/actions/runs/39601468697/artifacts/12346273079) | فایل ZIP را باز و EXE را اجرا کنید. | [شاخهٔ بتای دسکتاپ](https://github.com/WhiteDNS/WhiteDNS-Desktop/tree/beta/cottenmax-20261021) |
+| اندروید | [دریافت ZIP حاوی APKهای debug](https://github.com/WhiteDNS/WhiteDNS-Android/actions/runs/39604706552/artifacts/12348436491) | ZIP را باز و `app-universal-debug.apk` یا APK مناسب معماری دستگاه را نصب کنید. | [شاخهٔ بتای اندروید](https://github.com/WhiteDNS/WhiteDNS-Android/tree/beta/cottenmax-20261021) |
+
+این فایل‌ها **آرتیفکت موقت debug در GitHub Actions** هستند و انتشار پایدار برنامه نیستند. ممکن است برای دانلود ورود به GitHub لازم باشد. اگر لینک منقضی شد، [Actions دسکتاپ](https://github.com/WhiteDNS/WhiteDNS-Desktop/actions) یا [Actions اندروید](https://github.com/WhiteDNS/WhiteDNS-Android/actions) را بررسی کنید. **سرور و کلاینت باید هر دو سازگار با Max باشند.** [بسته‌های فعلی سرور و کلاینت ترمینال](https://github.com/WhiteDNS/CottenDNS/releases/tag/v2026.10.21.140901-0a7a241) شامل آخرین هستهٔ منتشرشده هستند؛ سرور قدیمی نمی‌تواند به کلاینت Max سرویس بدهد.
+
+ابتدا اتصال **Normal** را بررسی کنید؛ سپس **CottenMax beta** و روش انتقال DNS برابر **Auto** را انتخاب، ذخیره و دوباره متصل شوید. دامنه و کلید فعلی را نگه دارید. [یادداشت انتشار و به‌روزرسانی](docs/RELEASE_AND_UPDATE_2026-10-21.md) شامل اصلاح اولین پاسخ DNS، بازیابی اتصال، اسکن UDP/TCP، سقف نشست‌ها و دستورهای جداگانهٔ به‌روزرسانی سرور مستقل و Router است.
+
+پیش‌فرض نشست در CottenDNS و CottenMax مستقل ۲۰۴۸ است؛ گزینهٔ اختیاری expanded در Router آن را حداقل به ۴۰۹۶ می‌رساند. پیش‌فرض هستهٔ تعبیه‌شدهٔ فعلی، در صورت تعیین‌نشدن مقدار، ۶۴ است. مقدار صریح مدیر و تنظیمات بالاتر موجود حفظ می‌شوند. به‌روزرسانی به‌تنهایی سقف سفارشی قبلی را افزایش نمی‌دهد.
+
+در پروفایل CottenDNS برنامه دسکتاپ یا اندروید، **Normal / CottenMax beta** را انتخاب، ذخیره و سپس دوباره متصل شوید. در کلاینت ترمینال، در همان پروفایل `TUNNEL_MODE = "cottenmax"` بگذارید و کلاینت را دوباره اجرا کنید. برای بازگشت، Normal یا `TUNNEL_MODE = "legacy"` را انتخاب و دوباره متصل شوید؛ اتصال‌های جاری درجا تغییر حالت نمی‌دهند.
+
+**همان دامنه، پروفایل و کلید مشترک را نگه دارید.** Max یک ماژول داخل CottenDNS است؛ سرویس، فایل تنظیمات یا انتقال کلید جداگانه نمی‌خواهد. سرور به‌روز هر دو حالت را هم‌زمان روی listenerهای فعلی می‌پذیرد، حتی اگر `TUNNEL_MODE = "legacy"` سمت سرور باقی بماند. فایل `encrypt_key.txt` را حفظ کنید و پیشوند داخلی `cottenmax-v1.` را به دامنه تنظیمات اضافه نکنید. دامنه‌های بسیار بلند ممکن است فضای کافی برای handshake نداشته باشند؛ پیام آماده‌بودن Max در لاگ سرور را بررسی و از دامنه delegateشده کوتاه استفاده کنید.
+
+### نصب تازه سرور مستقل بتا روی لینوکس از کد
+
+مراحل نصب این بخش **فقط برای سرور مستقل** هستند. برای یک **نصب جدید** روی Linux amd64/arm64 با systemd، ابتدا Git و Go **1.26.5** را نصب و DNS delegation را مطابق راهنمای پایین آماده کنید؛ سپس فقط سرور را بسازید:
+
+```bash
+git clone --branch main --single-branch https://github.com/WhiteDNS/CottenDNS.git cottendns-beta
+cd cottendns-beta
+go build -trimpath -o "CottenDns_Server_Linux_$(go env GOARCH)_beta" ./cmd/server
+sudo bash server_linux_install.sh --local
+systemctl status cottendns --no-pager
+journalctl -u cottendns -n 60 --no-pager
+```
+
+نصب‌کننده از باینری محلی و قالب تنظیمات همان کد استفاده می‌کند، دامنه تونل را می‌پرسد و کلید مشترک را آماده می‌کند. این پوشه را نگه دارید؛ سرویس از همین مسیر اجرا می‌شود. قبل از تغییر حالت کلاینت‌ها، پیام **CottenMax available alongside normal CottenDNS** را در لاگ بررسی کنید.
+
+**سرور مستقل از قبل نصب‌شده:** ابتدا برای بازگشت، از باینری فعلی، `server_config.toml` و `encrypt_key.txt` بیرون از پوشه نصب نسخه پشتیبان بگیرید. باینری جدید را در checkout جداگانه بسازید؛ اگر نام فایل جدید با فایل در حال اجرا یکسان است، قبل از کپی سرویس `cottendns` را متوقف کنید. سپس فقط باینری، `server_linux_install.sh` فعلی و `server_config.toml.simple` را به پوشه نصب سرویس موجود کپی کنید و **از همان پوشه** دستور `sudo bash server_linux_install.sh --local` را اجرا کنید. تنظیمات فعال و کلید حفظ می‌شوند و پیش‌فرض‌های جدید در `server_config.toml.dist` قرار می‌گیرند. قالب را روی تنظیمات فعال ننویسید و نصب را از checkout تازه‌ای که کلید اصلی شما را ندارد انجام ندهید. `--local` با `--upgrade` ترکیب نمی‌شود؛ `--upgrade` آخرین Release سازگار منتشرشده را دریافت می‌کند.
+
+**سرور تحت مدیریت CottenRouter:** از `sudo cottenrouter update --project cottendns` استفاده کنید. Router آخرین انتشار سازگار را مستقل از نسخهٔ خودش دریافت و نسخه و قابلیت‌ها را بررسی می‌کند؛ سرویس، تنظیمات، کلید و پورت‌های خصوصی حفظ می‌شوند. برای رابط و بررسی‌های نصب جدید از [Router 1.2.21 یا جدیدتر](https://github.com/TaJirax/CottenRouter/releases/latest) استفاده کنید. **نصب‌کنندهٔ مستقل را برای backend تحت مدیریت Router اجرا نکنید**؛ مالک پورت عمومی UDP/TCP 53 باید Router بماند.
+
+### تفاوت‌های حالت Max
+
+| بخش | رفتار بتای Max |
+| --- | --- |
+| شروع و بازیابی اتصال | اندازه و پنجره تطبیقی، held poll، کنترل ازدحام چندمسیره و ارسال مجدد بر پایه Soar؛ با `RESOLVER_TRANSPORT = "auto"` مسیرهای DNS روی UDP و TCP مستقل آزمایش می‌شوند و ترافیک واقعی را حمل می‌کنند. |
+| رمزنگاری | ساختار ChaCha20-Poly1305 نسخه [Soar v0.2.3](https://github.com/getlantern/soar/tree/v0.2.3)، با تگ احراز اصالت ۸ بایتی و کلید تازه هر نشست؛ بدون لایه AES قدیمی اضافه. انتخاب cipher حالت عادی، رمز Max را تغییر نمی‌دهد. |
+| resolver رمزگذاری‌شده | انتخاب صریح `dot`، `doh`، `doh3` یا `doq` با resolver سازگار و TLS تأییدشده. حفاظت مربوط به مسیر **کلاینت تا resolver** است و listener جدید HTTP/3 یا DoQ روی سرور authoritative ایجاد نمی‌کند. Max از مسیر رمزگذاری‌شده بی‌صدا به DNS ساده برنمی‌گردد؛ fallback اختیاری HTTP/3 همچنان DoH روی TLS است. |
+| گزینه‌های اختیاری | padding روی مسیر resolver رمزگذاری‌شده، کش و کشف resolver، تغییر تعداد label و failover دامنه پشتیبان باید آگاهانه فعال شوند؛ ابتدا از پیش‌فرض‌ها استفاده کنید. |
+| محدودیت‌ها | تنظیمات compression، FEC، duplication و کنترل مسیر حالت عادی روی موتور Max اعمال نمی‌شوند. بودجه سخت `QUERY_RATE_LIMIT_*` و SOCKS UDP ASSOCIATE به حالت عادی نیاز دارند. |
+
+فرمان `client -config client_config.toml -resolvers client_resolvers.txt -scan-only` در حالت Max هم پشتیبانی می‌شود. Auto مسیرهای DNS روی UDP و TCP را جدا آزمایش می‌کند، انتقال واقعی داده را بررسی می‌کند و اندازه مشاهده‌شده نام درخواست و پاسخ DNS را جدا گزارش می‌دهد؛ هر resolver فقط یک‌بار در نتیجه نهایی شمرده می‌شود. سرور بتا را هم به‌روز کنید. همین مسیرها ترافیک واقعی تونل را به پروکسی فعلی دستگاه می‌رسانند؛ [جزئیات transport و اسکن](docs/COTTENMAX_OPTIONS.md#udptcp-connections-and-authenticated-mtu-scans) را ببینید.
+
+بتا هنوز به بازخورد دستگاه واقعی، اینترنت موبایل، اتصال طولانی و شبکه فیلترشده نیاز دارد؛ نتایج محلی تضمین سرعت یا دسترسی روی ISP شما نیستند. حالت عادی را برای بازگشت نگه دارید. در گزارش مشکل، حالت، build کلاینت، نسخه سرور، transport، دستگاه/شبکه و لاگ پاک‌سازی‌شده را بنویسید؛ کلید مشترک را منتشر نکنید.
+
+راهنمای [گزینه‌ها و محدودیت‌ها](docs/COTTENMAX_OPTIONS.md)، [ترمینال و نصب](docs/COTTENMAX_BETA_TERMINAL.md)، [مجوز Soar](SOAR_LICENSE.txt) و [مجوزهای وابستگی‌ها](THIRD_PARTY_NOTICES.md) را ببینید. بخش‌های قدیمی پایین درباره قابلیت‌های reliability و cipher، حالت عادی (`legacy`) را توضیح می‌دهند؛ روش دانلود Release نیز از بتای سورس جدا است.
 
 CottenDns یک سیستم تونل client/server است که ترافیک TCP را از طریق query و responseهای DNS جابه‌جا می‌کند. کلاینت روی دستگاه کاربر اجرا می‌شود و یک SOCKS5 proxy محلی یا raw TCP listener ارائه می‌دهد. برنامه‌ها مثل یک proxy معمولی به این listener محلی وصل می‌شوند. سپس CottenDns هر stream را به packetهای کوچک و سازگار با DNS تقسیم می‌کند، در صورت نیاز compression و encryption اعمال می‌کند، packetها را از طریق یک یا چند DNS resolver می‌فرستد و در سمت سرور CottenDns stream را بازسازی می‌کند. سرور در پایان اتصال واقعی را مستقیم، از طریق SOCKS5 upstream اختیاری، یا به یک مقصد TCP ثابت باز می‌کند.
 
@@ -48,6 +112,7 @@ CottenDns یک سیستم تونل client/server است که ترافیک TCP ر
 
 | بخش | لینک |
 | --- | --- |
+| بتای CottenMax | [کلاینت‌های debug، نصب سرور و تغییر حالت](#cottenmax-beta) |
 | 🚀 اولین راه‌اندازی | [شروع سریع](#quick-start)، [راه‌اندازی سرور](#server-setup)، [راه‌اندازی کلاینت](#client-setup) |
 | 🌐 نیازمندی DNS/domain | [نیازمندی‌های شبکه و دامنه](#network-and-domain-requirements) |
 | ⚙️ تنظیمات | [نمای کلی config](#configuration-overview)، [keyهای config فعلی](#current-config-keys) |
@@ -116,6 +181,8 @@ v.example.com   NS  ns.example.com
 ```
 
 ### 2. نصب سرور
+
+این فرمان Release منتشرشده را نصب می‌کند. برای بتای Max از [روش نصب از سورس](#cottenmax-beta) استفاده کنید.
 
 ```bash
 bash <(curl -Ls https://raw.githubusercontent.com/WhiteDNS/CottenDns/main/server_linux_install.sh)
@@ -620,7 +687,7 @@ release matrix گیت‌هاب شامل targetهای Windows، Linux، Linux-Leg
 
 | ابزار | کاربرد |
 | --- | --- |
-| Go `1.25.0` | build و test |
+| Go `1.26.5` (حداقل نسخه زبان در `go.mod`: 1.26) | build و test |
 | Git | metadata نسخه و توسعه عادی |
 | Python 3 | helper اختیاری برای build چند target |
 

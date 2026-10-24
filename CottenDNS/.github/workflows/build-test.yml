@@ -295,6 +295,10 @@ jobs:
           cp client_config.*.toml dist/ || true
           cp server_config.*.toml dist/ || true
           cp CONFIG_PRESETS.md dist/ || true
+          cp THIRD_PARTY_NOTICES.md SOAR_LICENSE.txt QUIC_GO_LICENSE.txt QPACK_LICENSE.txt dist/
+          if [[ "${{ matrix.go_os }}" == "linux" ]]; then
+            cp client_linux_install.sh server_linux_install.sh dist/
+          fi
           cp assets/cottendns.png dist/cottendns.png || true
           cp docs/ENGINEERING_CHANGES.md dist/ENGINEERING_CHANGES.md || true
 
@@ -524,6 +528,8 @@ jobs:
 
           Compress-Archive -Path $clientExeName,"client_config.toml","client_resolvers.txt","client_config.*.toml","CONFIG_PRESETS.md","ENGINEERING_CHANGES.md","cottendns.png" -DestinationPath "${clientZipBase}.zip" -Force
           Compress-Archive -Path $serverExeName,"server_config.toml","server_config.*.toml","CONFIG_PRESETS.md","ENGINEERING_CHANGES.md" -DestinationPath "${serverZipBase}.zip" -Force
+          Compress-Archive -Path "THIRD_PARTY_NOTICES.md","SOAR_LICENSE.txt","QUIC_GO_LICENSE.txt","QPACK_LICENSE.txt" -Update -DestinationPath "${clientZipBase}.zip"
+          Compress-Archive -Path "THIRD_PARTY_NOTICES.md","SOAR_LICENSE.txt","QUIC_GO_LICENSE.txt","QPACK_LICENSE.txt" -Update -DestinationPath "${serverZipBase}.zip"
 
           if (Test-Path "README.html") {
             Compress-Archive -Path "README.html" -Update -DestinationPath "${clientZipBase}.zip"
@@ -585,7 +591,8 @@ jobs:
           ENGINEERING_NOTES_HTML="ENGINEERING_CHANGES.html"
           SERVER_TOML="server_config.toml"
 
-          CLIENT_FILES=( "${CLIENT_EXE_NAME}" "${CLIENT_TOML}" "${CLIENT_RESOLVERS}" )
+          CLIENT_FILES=( "${CLIENT_EXE_NAME}" "${CLIENT_TOML}" "${CLIENT_RESOLVERS}" "THIRD_PARTY_NOTICES.md" "SOAR_LICENSE.txt" "QUIC_GO_LICENSE.txt" "QPACK_LICENSE.txt" )
+          [ -f client_linux_install.sh ] && CLIENT_FILES+=( client_linux_install.sh )
           CLIENT_PRESETS=( client_config.*.toml )
           [ -e "${CLIENT_PRESETS[0]}" ] && CLIENT_FILES+=( "${CLIENT_PRESETS[@]}" )
           [ -f "CONFIG_PRESETS.md" ] && CLIENT_FILES+=( "CONFIG_PRESETS.md" )
@@ -595,7 +602,8 @@ jobs:
           [ -f "${CLIENT_README_FA}" ] && CLIENT_FILES+=( "${CLIENT_README_FA}" )
           [ -f "${CLIENT_LOGO}" ] && CLIENT_FILES+=( "${CLIENT_LOGO}" )
 
-          SERVER_FILES=( "${SERVER_EXE_NAME}" "${SERVER_TOML}" )
+          SERVER_FILES=( "${SERVER_EXE_NAME}" "${SERVER_TOML}" "THIRD_PARTY_NOTICES.md" "SOAR_LICENSE.txt" "QUIC_GO_LICENSE.txt" "QPACK_LICENSE.txt" )
+          [ -f server_linux_install.sh ] && SERVER_FILES+=( server_linux_install.sh )
           SERVER_PRESETS=( server_config.*.toml )
           [ -e "${SERVER_PRESETS[0]}" ] && SERVER_FILES+=( "${SERVER_PRESETS[@]}" )
           [ -f "CONFIG_PRESETS.md" ] && SERVER_FILES+=( "CONFIG_PRESETS.md" )

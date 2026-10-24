@@ -70,6 +70,8 @@ def main():
         exit(1)
             
     print("Copying config files...")
+    for notice in ("THIRD_PARTY_NOTICES.md", "SOAR_LICENSE.txt", "QUIC_GO_LICENSE.txt", "QPACK_LICENSE.txt"):
+        shutil.copy(notice, dist_dir / notice)
     shutil.copy("client_config.toml.simple", dist_dir / "client_config.toml")
     shutil.copy("client_resolvers.simple", dist_dir / "client_resolvers.txt")
     shutil.copy("server_config.toml.simple", dist_dir / "server_config.toml")
@@ -81,6 +83,12 @@ def main():
         shutil.copy("CONFIG_PRESETS.md", dist_dir / "CONFIG_PRESETS.md")
     if Path("assets/cottendns.png").exists():
         shutil.copy("assets/cottendns.png", dist_dir / "cottendns.png")
+
+    for installer in ("client_linux_install.sh", "server_linux_install.sh"):
+        shutil.copy(installer, dist_dir / installer)
+
+    for guide in ("COTTENMAX_BETA_TERMINAL.md", "COTTENMAX_OPTIONS.md"):
+        shutil.copy(Path("docs") / guide, dist_dir / guide)
 
     print("Copying README files...")
     if Path("README.MD").exists():

@@ -1,6 +1,8 @@
 package client
 
 import (
+	"context"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -8,6 +10,144 @@ import (
 
 	"cottendns-go/internal/logger"
 )
+
+type maxStartupFixture struct {
+	auth  func(context.Context) error
+	probe func(context.Context, int) error
+}
+
+func (f maxStartupFixture) Authenticate(ctx context.Context) error { return f.auth(ctx) }
+func (f maxStartupFixture) Probe(ctx context.Context, n int) error { return f.probe(ctx, n) }
+
+// No application/proxy traffic is allowed to rescue startup here: Android's VPN
+// is deliberately not established until the authenticated probe succeeds.
+func TestCottenMaxStartupRetriesWithoutApplicationTraffic(t *testing.T) {
+	for _, failedStage := range []string{"authenticating", "verifying"} {
+		t.Run(failedStage, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "startup.log")
+			log := logger.NewWithFile("test", "WARN", path)
+			defer log.Close()
+			c := &Client{log: log}
+			c.runtimePhase.Store(clientPhaseConnecting)
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			authCalls, probeCalls := 0, 0
+			fixture := maxStartupFixture{
+				auth: func(ctx context.Context) error {
+					authCalls++
+					if failedStage == "authenticating" && authCalls == 1 {
+						return context.DeadlineExceeded
+					}
+					return nil
+				},
+				probe: func(ctx context.Context, n int) error {
+					probeCalls++
+					if n != 32 {
+						t.Errorf("unexpected probe size %d", n)
+					}
+					if failedStage == "verifying" && probeCalls == 1 {
+						return context.DeadlineExceeded
+					}
+					return nil
+				},
+			}
+			c.runCottenMaxStartup(ctx, fixture)
+			if ctx.Err() != nil || c.runtimePhase.Load() != clientPhaseConnected || authCalls != 2 {
+				t.Fatalf("did not recover: phase=%d auth=%d probe=%d err=%v", c.runtimePhase.Load(), authCalls, probeCalls, ctx.Err())
+			}
+			out := readFile(t, path)
+			for _, want := range []string{"phase=authenticating", "phase=verifying", "phase=retry", "stage=" + failedStage, "phase=connected percent=100"} {
+				if !strings.Contains(out, want) {
+					t.Errorf("missing %q in %s", want, out)
+				}
+			}
+		})
+	}
+}
+
+func TestCottenMaxStartupDoesNotReportReadyOnFailureAndCancelsRetry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "startup.log")
+	log := logger.NewWithFile("test", "WARN", path)
+	defer log.Close()
+	c := &Client{log: log}
+	c.runtimePhase.Store(clientPhaseConnecting)
+	ctx, cancel := context.WithCancel(context.Background())
+	failed := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.runCottenMaxStartup(ctx, maxStartupFixture{
+			auth:  func(context.Context) error { close(failed); return errors.New("resolver unavailable") },
+			probe: func(context.Context, int) error { return errors.New("unexpected probe") },
+		})
+	}()
+	<-failed
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancellation did not stop the startup retry")
+	}
+	if c.runtimePhase.Load() == clientPhaseConnected || strings.Contains(readFile(t, path), "phase=connected") {
+		t.Fatal("failed startup reported a usable tunnel")
+	}
+}
+
+func TestCottenMaxStartupCancelsActiveStages(t *testing.T) {
+	for _, stage := range []string{"authenticating", "verifying"} {
+		t.Run(stage, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "startup.log")
+			log := logger.NewWithFile("test", "WARN", path)
+			defer log.Close()
+			c := &Client{log: log}
+			c.runtimePhase.Store(clientPhaseConnecting)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			started, done := make(chan struct{}), make(chan struct{})
+			wait := func(ctx context.Context) error { close(started); <-ctx.Done(); return ctx.Err() }
+			go func() {
+				defer close(done)
+				c.runCottenMaxStartup(ctx, maxStartupFixture{
+					auth: func(ctx context.Context) error {
+						if stage == "authenticating" {
+							return wait(ctx)
+						}
+						return nil
+					},
+					probe: func(ctx context.Context, _ int) error { return wait(ctx) },
+				})
+			}()
+			<-started
+			cancel()
+			select {
+			case <-done:
+			case <-time.After(time.Second):
+				t.Fatal("active startup stage ignored cancellation")
+			}
+			if c.runtimePhase.Load() == clientPhaseConnected || strings.Contains(readFile(t, path), "phase=connected") {
+				t.Fatal("cancelled startup reported readiness")
+			}
+		})
+	}
+}
+
+func TestCottenMaxStartupPreservesConfirmedProxyReadiness(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "startup.log")
+	log := logger.NewWithFile("test", "WARN", path)
+	defer log.Close()
+	c := &Client{log: log}
+	c.runtimePhase.Store(clientPhaseConnecting)
+	c.runCottenMaxStartup(context.Background(), maxStartupFixture{
+		auth: func(context.Context) error { return nil },
+		probe: func(context.Context, int) error {
+			c.runtimePhase.Store(clientPhaseConnected)
+			return context.DeadlineExceeded
+		},
+	})
+	if c.runtimePhase.Load() != clientPhaseConnected || strings.Contains(readFile(t, path), "phase=retry") {
+		t.Fatal("diagnostic failure overwrote confirmed application readiness")
+	}
+}
 
 // The desktop app draws its connection progress bar from WD_PROGRESS lines, so
 // the MTU scan has to report as it goes. It must survive LOG_LEVEL=WARN, which

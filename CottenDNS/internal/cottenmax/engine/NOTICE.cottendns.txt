@@ -77,3 +77,18 @@ remain in force. The wire encoding and cryptography are unchanged.
 Production code imports this copy. The upstream module in go.mod is retained
 only for independent interoperability tests and the tagged performance
 comparison. Do not replace that comparator with this package.
+
+Resolver-pool scheduling correction, 2026-10-24: authenticated paths receive
+application query capacity before bounded rotating checks of unverified
+candidates, including lists of thousands of endpoints. Fully healthy pools
+retain their configured windows. Padded query-name size trials carry no
+application or retransmittable control frames. These changes add no wire
+fields, handshakes, cipher changes, or extra application round trips.
+
+Optional download-FEC extension, 2026-10-24: client-requested authenticated
+session control and parity frames use CottenDNS's Reed-Solomon codec over
+authenticated frame payloads. Original stream packets are sent immediately
+without an FEC header; parity fragments obey DNS answer budgets and bounded
+queues/history. Replay protection, stream offsets, ACKs and ARQ remain active.
+Disabled FEC retains the prior wire format. This extension requires updated
+CottenDNS client/server code when enabled and is not an upstream Soar feature.

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="LICENSE"><img alt="Лицензия MIT" src="https://img.shields.io/badge/license-MIT-16a34a?style=flat-square"></a>
   <a href="https://github.com/TaJirax/cottenDNS/actions/workflows/build-go.yml"><img alt="Сборка" src="https://github.com/TaJirax/cottenDNS/actions/workflows/build-go.yml/badge.svg"></a>
-  <a href="https://github.com/TaJirax/cottenDNS/releases/latest"><img alt="Последний выпуск" src="https://img.shields.io/github/v/release/TaJirax/cottenDNS?style=flat-square"></a>
+  <a href="https://github.com/WhiteDNS/CottenDNS/releases/latest"><img alt="Последний выпуск" src="https://img.shields.io/github/v/release/WhiteDNS/CottenDNS?style=flat-square"></a>
 </p>
 
 <p align="center">
@@ -23,7 +23,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/TaJirax/cottenDNS/releases/latest">Скачать</a> ·
+  <a href="https://github.com/WhiteDNS/CottenDNS/releases/latest">Скачать</a> ·
   <a href="docs/ENGINEERING_CHANGES.md">Инженерные заметки</a> ·
   <a href="CONFIG_PRESETS.md">Профили</a> ·
   <a href="https://t.me/whitedns">Telegram</a>
@@ -210,7 +210,7 @@ journalctl -u cottendns -n 100 --no-pager
 
 ### Шаг 4 — Настройте клиент
 
-Скачайте архив своей платформы из [Releases](https://github.com/TaJirax/cottenDNS/releases/latest). Оставьте бинарник, `client_config.toml` и `client_resolvers.txt` в одной папке.
+Скачайте архив своей платформы из [Releases](https://github.com/WhiteDNS/CottenDNS/releases/latest). Оставьте бинарник, `client_config.toml` и `client_resolvers.txt` в одной папке.
 
 Минимальная безопасная конфигурация:
 

@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.25-alpine AS build
+FROM golang:1.26-alpine AS build
+# Follow the module minimum directly; do not fetch another compiler mid-build.
+ENV GOTOOLCHAIN=local
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -19,6 +21,7 @@ COPY --from=build /out/cottendns-server /usr/local/bin/cottendns-server
 # running as root. Without this, binding :53 fails with EACCES and the container
 # crash-loops.
 RUN setcap 'cap_net_bind_service=+ep' /usr/local/bin/cottendns-server
+COPY LICENSE THIRD_PARTY_NOTICES.md SOAR_LICENSE.txt QUIC_GO_LICENSE.txt QPACK_LICENSE.txt /usr/share/licenses/cottendns/
 COPY server_config.toml.simple /opt/cottendns/server_config.toml.simple
 COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod 0755 /usr/local/bin/docker-entrypoint.sh && chown -R cottendns:cottendns /data

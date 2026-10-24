@@ -19,7 +19,9 @@ type Discovery = soar.Discovery
 const MaxStreamsLimit = soar.MaxStreamsLimit
 
 type ClientConfig struct {
-	Discovery Discovery
+	FECDownloadEnabled             bool
+	FECDataShards, FECParityShards int
+	Discovery                      Discovery
 	// DiscoveryForDomain optionally isolates persisted discovery hints per zone.
 	// It must return quickly; each candidate still authenticates to that zone.
 	DiscoveryForDomain             func(string) Discovery
@@ -107,6 +109,7 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		discovery = cfg.DiscoveryForDomain(domains[0])
 	}
 	engineCfg := soar.Config{
+		FECDownloadEnabled: cfg.FECDownloadEnabled, FECDataShards: cfg.FECDataShards, FECParityShards: cfg.FECParityShards,
 		Zone: Zone(domains[0]), ServerKey: ed25519.PublicKey(key), Resolvers: cfg.Resolvers,
 		TCP: cfg.TCP, Hold: cfg.Hold, MaxStreams: cfg.MaxStreams, Discovery: discovery,
 		// Grow from the engine's small initial congestion window on delivered

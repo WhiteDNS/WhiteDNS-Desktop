@@ -1,0 +1,25 @@
+name: Verify embedded server
+on:
+  pull_request:
+    paths: ['server/**', 'probe/**', 'internal/**', 'go.*', '.github/workflows/verify-embedded-server.yml']
+  push:
+    branches: [main, feature/panel-embedded-cotten]
+    paths: ['server/**', 'probe/**', 'internal/**', 'go.*', '.github/workflows/verify-embedded-server.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26.1'
+      - run: |
+          go mod verify
+          go test ./... -count=1 -timeout 180s
+          go test -race ./internal/udpserver ./internal/security ./internal/client -count=1 -timeout 180s
+          go vet ./...
+          go build -o "$RUNNER_TEMP/cotten-client" ./cmd/client
+          go build -o "$RUNNER_TEMP/cotten-server" ./cmd/server

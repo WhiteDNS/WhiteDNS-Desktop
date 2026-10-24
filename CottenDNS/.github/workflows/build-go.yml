@@ -308,6 +308,8 @@ jobs:
           cp client_config.*.toml dist/ || true
           cp server_config.*.toml dist/ || true
           cp CONFIG_PRESETS.md dist/ || true
+          cp THIRD_PARTY_NOTICES.md SOAR_LICENSE.txt QUIC_GO_LICENSE.txt QPACK_LICENSE.txt dist/
+          cp docs/COTTENMAX_BETA_TERMINAL.md docs/COTTENMAX_OPTIONS.md dist/
           cp assets/cottendns.png dist/cottendns.png || true
           cp docs/ENGINEERING_CHANGES.md dist/ENGINEERING_CHANGES.md || true
           if [[ "${{ matrix.go_os }}" == "linux" ]]; then
@@ -541,6 +543,8 @@ jobs:
 
           Compress-Archive -Path $clientExeName,"client_config.toml","client_resolvers.txt","client_config.*.toml","CONFIG_PRESETS.md","ENGINEERING_CHANGES.md","cottendns.png" -DestinationPath "${clientZipBase}.zip" -Force
           Compress-Archive -Path $serverExeName,"server_config.toml","server_config.*.toml","CONFIG_PRESETS.md","ENGINEERING_CHANGES.md" -DestinationPath "${serverZipBase}.zip" -Force
+          Compress-Archive -Path "THIRD_PARTY_NOTICES.md","SOAR_LICENSE.txt","QUIC_GO_LICENSE.txt","QPACK_LICENSE.txt","COTTENMAX_BETA_TERMINAL.md","COTTENMAX_OPTIONS.md" -Update -DestinationPath "${clientZipBase}.zip"
+          Compress-Archive -Path "THIRD_PARTY_NOTICES.md","SOAR_LICENSE.txt","QUIC_GO_LICENSE.txt","QPACK_LICENSE.txt","COTTENMAX_BETA_TERMINAL.md","COTTENMAX_OPTIONS.md" -Update -DestinationPath "${serverZipBase}.zip"
 
           if (Test-Path "README.html") {
             Compress-Archive -Path "README.html" -Update -DestinationPath "${clientZipBase}.zip"
@@ -603,6 +607,7 @@ jobs:
           SERVER_TOML="server_config.toml"
 
           CLIENT_FILES=( "${CLIENT_EXE_NAME}" "${CLIENT_TOML}" "${CLIENT_RESOLVERS}" )
+          CLIENT_FILES+=( "THIRD_PARTY_NOTICES.md" "SOAR_LICENSE.txt" "QUIC_GO_LICENSE.txt" "QPACK_LICENSE.txt" "COTTENMAX_BETA_TERMINAL.md" "COTTENMAX_OPTIONS.md" )
           CLIENT_PRESETS=( client_config.*.toml )
           [ -e "${CLIENT_PRESETS[0]}" ] && CLIENT_FILES+=( "${CLIENT_PRESETS[@]}" )
           [ -f "CONFIG_PRESETS.md" ] && CLIENT_FILES+=( "CONFIG_PRESETS.md" )
@@ -614,6 +619,7 @@ jobs:
           [ -f "client_linux_install.sh" ] && CLIENT_FILES+=( "client_linux_install.sh" )
 
           SERVER_FILES=( "${SERVER_EXE_NAME}" "${SERVER_TOML}" )
+          SERVER_FILES+=( "THIRD_PARTY_NOTICES.md" "SOAR_LICENSE.txt" "QUIC_GO_LICENSE.txt" "QPACK_LICENSE.txt" "COTTENMAX_BETA_TERMINAL.md" "COTTENMAX_OPTIONS.md" )
           SERVER_PRESETS=( server_config.*.toml )
           [ -e "${SERVER_PRESETS[0]}" ] && SERVER_FILES+=( "${SERVER_PRESETS[@]}" )
           [ -f "CONFIG_PRESETS.md" ] && SERVER_FILES+=( "CONFIG_PRESETS.md" )
@@ -658,12 +664,14 @@ jobs:
           printf 'repository=%s\ncommit=%s\nversion=%s\nandroid_api=26\n' \
             "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$BUILD_VERSION" > dist/android/ENGINE_VERSION.txt
           cp docs/ANDROID_ENGINE_INTEGRATION.md dist/android/README.md
+          cp docs/COTTENMAX_BETA_TERMINAL.md docs/COTTENMAX_OPTIONS.md dist/android/
+          cp THIRD_PARTY_NOTICES.md SOAR_LICENSE.txt QUIC_GO_LICENSE.txt QPACK_LICENSE.txt dist/android/
           cd dist/android
           for abi in arm64-v8a armeabi-v7a x86_64 x86; do
             test -s "jniLibs/$abi/libcottendns_client.so"
           done
           find jniLibs -type f -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt
-          zip -r "../CottenDNS-Android-${BUILD_VERSION}.zip" jniLibs ENGINE_VERSION.txt README.md SHA256SUMS.txt
+          zip -r "../CottenDNS-Android-${BUILD_VERSION}.zip" jniLibs ENGINE_VERSION.txt README.md SHA256SUMS.txt THIRD_PARTY_NOTICES.md SOAR_LICENSE.txt QUIC_GO_LICENSE.txt QPACK_LICENSE.txt COTTENMAX_BETA_TERMINAL.md COTTENMAX_OPTIONS.md
       - uses: actions/upload-artifact@v7
         with:
           name: build-artifacts-Android-all

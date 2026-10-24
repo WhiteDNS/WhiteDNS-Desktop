@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "7cca6c28baefa8297bd894842f3d188886d17e8f",
+  "commit": "7db7b73658c791cce62300d29647e4d369d6e1e4",
   "directory": "CottenDNS",
-  "update": "Retry Max authentication and verified startup after transient outages, preserving Normal/Max server and transport support.",
-  "base_commit": "7cca6c28baefa8297bd894842f3d188886d17e8f",
+  "update": "Use the released CottenMax large-resolver-pool startup fixes, expanded active resolver support, and optional client-requested Reed-Solomon download FEC; Normal mode stays available.",
+  "base_commit": "7db7b73658c791cce62300d29647e4d369d6e1e4",
   "source_snapshot": "CottenDNS/COTTEN_CORE_SNAPSHOT.json"
 }

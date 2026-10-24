@@ -296,6 +296,7 @@ func (c *Client) newCottenMaxEngine() (*cottenmax.Client, error) {
 		return nil, fmt.Errorf("experimental cottenmax does not yet support hard QUERY_RATE_LIMIT_* budgets; use legacy")
 	}
 	engine, err := cottenmax.NewClient(cottenmax.ClientConfig{
+		FECDownloadEnabled: c.cfg.CottenMaxFECDownloadEnabled, FECDataShards: c.cfg.CottenMaxFECDataShards, FECParityShards: c.cfg.CottenMaxFECParityShards,
 		Domain: c.cfg.Domains[0], PublicKey: c.cfg.CottenMaxServerPublicKey,
 		Secret: c.cfg.EncryptionKey, Resolvers: resolvers, TCP: tcp,
 		Domains:          append(append([]string(nil), c.cfg.Domains[1:]...), c.cfg.StandbyDomains...),

@@ -93,6 +93,9 @@ jobs:
           test -f "desktop/build/bin/licenses/CottenMax-Soar-LICENSE.txt"
           test -f "desktop/build/bin/licenses/CottenMax-CHANGES.txt"
 
+      - name: Verify embedded CottenDNS engine
+        run: python3 desktop/scripts/verify-cottendns-package.py windows amd64
+
       - name: Upload runnable app
         uses: actions/upload-artifact@v6
         with:
@@ -173,6 +176,9 @@ jobs:
             LINUX_ASSET_SUFFIX="linux-${{ matrix.label }}" \
             LINUX_PACKAGE_OUTPUT_DIR="build/releases/debug" \
             LINUX_PACKAGE_FORMATS="${{ matrix.formats }}"
+
+      - name: Verify embedded CottenDNS engine
+        run: python3 desktop/scripts/verify-cottendns-package.py linux "${{ matrix.arch }}"
 
       - name: Validate Arch Linux package
         if: matrix.arch == 'amd64'

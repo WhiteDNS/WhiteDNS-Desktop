@@ -5,6 +5,8 @@ server_config.toml
 client_config.toml
 client_resolvers.txt
 encrypt_key.txt
+cottenmax_key.txt
+cottenmax_key.txt.pub
 local_dns_cache.json
 local_dns_cache.bin
 *.key
@@ -46,3 +48,29 @@ cmd/*/resource_windows_*.syso
 
 # Local engineering audit (human-readable, intentionally not committed)
 reports/cottendns-network-engineering-audit.html
+
+# Local beta verification, README additions and scratch output
+# Existing tracked tests/READMEs stay in Git; local edits are excluded from the beta commit.
+**/*_test.go
+**/test/
+**/tests/
+**/testdata/
+**/src/androidTest/
+**/[Rr][Ee][Aa][Dd][Mm][Ee]*
+**/.cache/
+**/.bench/
+**/__pycache__/
+**/*.test
+**/*.test.exe
+**/*.prof
+**/*.trace
+**/coverage/
+**/*-sources.jar
+/docs/COTTENMAX_ENCRYPTION_AND_SWITCHING_2026-10-20.md
+/docs/COTTENMAX_EXPERIMENT.md
+/docs/COTTENMAX_OPTIONS_2026-10-19.json
+/docs/COTTENMAX_OPTIONS_2026-10-19.md
+/docs/COTTENMAX_PERFORMANCE_2026-10-19.json
+/docs/COTTENMAX_PERFORMANCE_2026-10-19.md
+/docs/DNS_COUNTERMEASURE_AUDIT_2026-10-19.md
+/docs/IRAN_DNS_RESILIENCE.md

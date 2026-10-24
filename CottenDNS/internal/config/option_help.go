@@ -13,6 +13,16 @@ func optionHelp(key string, server bool) string {
 		return ""
 	}
 	switch key {
+	case "COTTENMAX_FEC_DOWNLOAD_ENABLED":
+		return "Optional Max download parity recovery; default off; FEC-capable server required; extra bandwidth"
+	case "COTTENMAX_FEC_DATA_SHARDS":
+		return "Max download FEC block size, 2..16; original data is never held for a full block"
+	case "COTTENMAX_FEC_PARITY_SHARDS":
+		return "Max download FEC recovery shards per block, 1..4"
+	case "COTTENMAX_MAX_INFLIGHT":
+		return "Max global query window, 1..4096; default 256; independent from candidate-list size"
+	case "RESOLVER_DISCOVERY_WANT":
+		return "Desired distinct healthy Max discovery resolvers, 1..4096; checks remain bounded and paced"
 	case "TUNNEL_MODE":
 		return "legacy (normal, default) or cottenmax (CottenMax beta); updated server required; same domain/key; restart client to switch"
 	case "RESOLVER_TRANSPORT":

@@ -1,6 +1,7 @@
 package cottendns
 
 import (
+	"encoding/json"
 	"fmt"
 	"reflect"
 	"strings"
@@ -254,5 +255,97 @@ func TestCottenMaxScanRetainsTransportAndOptionalFeatures(t *testing.T) {
 	}
 	if options["LOCAL_DNS_ENABLED"] != nil {
 		t.Fatal("scan mutated the saved profile")
+	}
+}
+
+func TestCottenMaxFECAndResolverDefaultsStayOptIn(t *testing.T) {
+	want := map[string]any{
+		"COTTENMAX_FEC_DOWNLOAD_ENABLED": false,
+		"COTTENMAX_FEC_DATA_SHARDS":      4,
+		"COTTENMAX_FEC_PARITY_SHARDS":    1,
+		"COTTENMAX_MAX_INFLIGHT":         256,
+		"RESOLVER_DISCOVERY_WANT":        16,
+	}
+	for _, preset := range []string{"default", "speed", "survival", "tcp-survival"} {
+		values := EffectiveOptions(map[string]any{"CONFIG_PRESET": preset})
+		for key, expected := range want {
+			if values[key] != expected {
+				t.Errorf("%s: %s = %v, want %v", preset, key, values[key], expected)
+			}
+		}
+	}
+	for _, definition := range Schema() {
+		if strings.HasPrefix(definition.Key, "COTTENMAX_FEC_") && definition.Group != "Delivery and failover" {
+			t.Errorf("FEC control %s is in %q", definition.Key, definition.Group)
+		}
+	}
+}
+
+func TestCottenMaxFECAndResolverOptionsSurviveProfileAndTOMLRoundTrip(t *testing.T) {
+	options := map[string]any{
+		"TUNNEL_MODE":                    "cottenmax",
+		"COTTENMAX_FEC_DOWNLOAD_ENABLED": true,
+		"COTTENMAX_FEC_DATA_SHARDS":      8,
+		"COTTENMAX_FEC_PARITY_SHARDS":    2,
+		"COTTENMAX_MAX_INFLIGHT":         4096,
+		"RESOLVER_DISCOVERY_WANT":        4096,
+		"RESOLVER_DISCOVERY_CONCURRENCY": 64,
+	}
+	profile := model.DefaultCottenDNSSettingsProfile()
+	profile.CottenDNSOptions = &options
+	encoded, err := json.Marshal(profile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var restored model.SettingsProfile
+	if err := json.Unmarshal(encoded, &restored); err != nil {
+		t.Fatal(err)
+	}
+	settingsExport := RenderSettingsTOML(OptionValues(restored.CottenDNSOptions))
+	imported, err := ParseOptions(settingsExport)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(imported, options) {
+		t.Fatalf("CottenMax settings changed during JSON/TOML round trip: want %#v, got %#v", options, imported)
+	}
+	connection := model.ConnectionProfile{Domain: "max.example", EncryptionKey: "shared-test-key"}
+	for name, raw := range map[string]string{
+		"runtime": RenderClientTOML(connection, imported),
+		"scanner": RenderScannerClientTOML(connection, imported, 4),
+	} {
+		got, err := ParseOptions(raw)
+		if err != nil {
+			t.Fatalf("%s config: %v", name, err)
+		}
+		for key, want := range options {
+			if got[key] != want {
+				t.Errorf("%s lost %s: got %v, want %v", name, key, got[key], want)
+			}
+		}
+	}
+}
+
+func TestCottenMaxFECAndResolverOptionBounds(t *testing.T) {
+	for _, tc := range []struct {
+		key      string
+		min, max int
+	}{
+		{"COTTENMAX_FEC_DATA_SHARDS", 2, 16},
+		{"COTTENMAX_FEC_PARITY_SHARDS", 1, 4},
+		{"COTTENMAX_MAX_INFLIGHT", 1, 4096},
+		{"RESOLVER_DISCOVERY_WANT", 1, 4096},
+		{"RESOLVER_DISCOVERY_CONCURRENCY", 1, 64},
+		{"COTTENMAX_MAX_PATH_WINDOW", 1, 1024},
+	} {
+		t.Run(tc.key, func(t *testing.T) {
+			for _, value := range []int{tc.min - 1, tc.min, tc.max, tc.max + 1} {
+				_, retained := NormalizeOverrides(map[string]any{tc.key: value})[tc.key]
+				want := value >= tc.min && value <= tc.max
+				if retained != want {
+					t.Errorf("value %d retained = %v, want %v", value, retained, want)
+				}
+			}
+		})
 	}
 }

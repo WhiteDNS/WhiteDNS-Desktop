@@ -35,6 +35,11 @@ RESOLVER_DISCOVERY_COUNTRY = ""
 RESOLVER_DISCOVERY_SAMPLE_RANGES = 0
 # Max only: 0 disables held polls; 100..1500 uses 100ms steps. Default 500.
 COTTENMAX_HOLD_MILLISECONDS = 500
+# Optional Max download Reed-Solomon FEC. Requires an FEC-capable updated server.
+# Original data is sent immediately; parity costs extra DNS bandwidth. Default off.
+COTTENMAX_FEC_DOWNLOAD_ENABLED = false
+COTTENMAX_FEC_DATA_SHARDS = 4
+COTTENMAX_FEC_PARITY_SHARDS = 1
 
 # Optional CottenMax resilience controls. Defaults retain the current fast path.
 # Standby domains are lazy: no queries until the active domain fails. Each server
@@ -45,6 +50,7 @@ COTTENMAX_SAFE_QNAME = 101
 COTTENMAX_MAX_QNAME = 253
 COTTENMAX_MAX_ANSWER = 1232
 COTTENMAX_MAX_PATH_WINDOW = 256
+# Global query window 1..4096; keep the default unless the resolver pool supports more.
 COTTENMAX_MAX_INFLIGHT = 256
 # Experimental: recent authenticated near-cap answers avoid a false size
 # downgrade under random loss. May slow healthy paths; default remains off.
@@ -58,6 +64,7 @@ RESOLVER_DISCOVERY_CACHE_FILE = ""
 # Optional user-supplied network label: change it when moving networks.
 RESOLVER_DISCOVERY_NETWORK_ID = ""
 RESOLVER_DISCOVERY_CANDIDATES = []
+# Desired healthy discovery pool: 1..4096. Candidate checks remain paced/bounded.
 RESOLVER_DISCOVERY_WANT = 16
 RESOLVER_DISCOVERY_CONCURRENCY = 16
 RESOLVER_DISCOVERY_PACE_MILLISECONDS = 20

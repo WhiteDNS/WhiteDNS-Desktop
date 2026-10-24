@@ -182,6 +182,11 @@ print_usage() {
   cat <<'USAGE'
 CottenDns Server Linux Installer
 
+CottenMax beta is a mode inside CottenDNS. A compatible server serves Normal
+and Max on the same listeners, domain and shared key. Clients choose their mode.
+The default installs the current compatible release. Use --version for an exact
+release tag, or --local for a locally built server bundle.
+
 Usage:
   bash <(curl -Ls https://raw.githubusercontent.com/WhiteDNS/CottenDns/main/server_linux_install.sh) [OPTIONS]
 
@@ -297,6 +302,14 @@ if [[ "$ACTION" == "upgrade" ]]; then
   INSTALL_DIR="$(dirname "$EXISTING_EXECUTABLE")"
   [[ -f "$INSTALL_DIR/server_config.toml" ]] || log_error "Existing server config not found at $INSTALL_DIR/server_config.toml."
   [[ -f "$EXISTING_EXECUTABLE" ]] || log_error "Existing executable not found at $EXISTING_EXECUTABLE."
+fi
+if [[ "$ACTION" != "uninstall" ]]; then
+  if [[ -f /etc/systemd/system/cottendns.service.d/cottenrouter.conf && "${COTTENDNS_ROUTER_MANAGED:-0}" != 1 ]]; then
+    log_error "This is a CottenRouter-managed backend. Update CottenDNS from CottenRouter so public routing and rollback remain coordinated."
+  fi
+  if grep -qsE '^[[:space:]]*ExecStart[[:space:]]*=[[:space:]]*[^[:space:]]' /etc/systemd/system/cottendns.service.d/*.conf; then
+    log_error "An administrator ExecStart override selects the server binary. Update or remove that override before using this installer; no service was stopped."
+  fi
 fi
 log_info "Installation directory: $INSTALL_DIR"
 cd "$INSTALL_DIR" || log_error "Cannot access install directory: $INSTALL_DIR"
@@ -454,17 +467,24 @@ fi
 TMP_LOG="init_logs.tmp"
 DOWNLOAD_DIR=""
 cleanup() {
-  rm -f "$TMP_LOG" 2>/dev/null || true
-  if [[ -n "${DOWNLOAD_DIR:-}" && -d "${DOWNLOAD_DIR:-}" ]]; then
-    rm -rf "$DOWNLOAD_DIR" 2>/dev/null || true
-  fi
-  if [[ "$ACTION" == "upgrade" && "${UPGRADE_COMPLETED:-false}" != true ]]; then
+  if [[ "${INSTALL_MUTATED:-false}" == true && "${UPGRADE_COMPLETED:-false}" != true ]]; then
     if [[ -f "$INSTALL_DIR/server_config.toml.backup" ]]; then
-      [[ -f "$INSTALL_DIR/server_config.toml" ]] && mv -f "$INSTALL_DIR/server_config.toml" "$INSTALL_DIR/server_config.toml.failed-upgrade"
       mv -f "$INSTALL_DIR/server_config.toml.backup" "$INSTALL_DIR/server_config.toml"
+    fi
+    if [[ -n "${PREVIOUS_BINARY:-}" && -f "$DOWNLOAD_DIR/previous-binary" ]]; then
+      cp -a "$DOWNLOAD_DIR/previous-binary" "$PREVIOUS_BINARY"
+    fi
+    if [[ -n "${SVC_BACKUP:-}" && -f "$SVC_BACKUP" ]]; then
+      cp -a "$SVC_BACKUP" "$SVC"
+    elif [[ "${SVC_WAS_CREATED:-false}" == true ]]; then
+      rm -f "$SVC"
     fi
     systemctl daemon-reload >/dev/null 2>&1 || true
     systemctl restart cottendns >/dev/null 2>&1 || true
+  fi
+  rm -f "$TMP_LOG" 2>/dev/null || true
+  if [[ -n "${DOWNLOAD_DIR:-}" && -d "$DOWNLOAD_DIR" ]]; then
+    rm -rf -- "$DOWNLOAD_DIR"
   fi
 }
 trap cleanup EXIT
@@ -677,6 +697,70 @@ stop_existing_CottenDns_service() {
   done <<< "$(get_port53_pids)"
 }
 
+# Download into an isolated directory. Never select an old executable by mtime,
+# and never stop a working service because a release download was incomplete.
+log_header "Validating Server Candidate"
+DOWNLOAD_DIR="$(mktemp -d "$INSTALL_DIR/.cottendns-stage.XXXXXX")"
+mkdir -p "$DOWNLOAD_DIR/package"
+ARCH="$(uname -m)"
+if [[ "$LOCAL_MODE" -eq 1 ]]; then
+  LOCAL_BIN="$(find_local_server_binary "$ARCH")"
+  [[ -n "$LOCAL_BIN" ]] || log_error "No local server binary found. Run python build.py first."
+  cp "$LOCAL_BIN" "$DOWNLOAD_DIR/package/"
+  STAGED_BINARY="$DOWNLOAD_DIR/package/$(basename "$LOCAL_BIN")"
+  LOCAL_CONFIG="$(find_local_config)"
+else
+  select_release_artifact "$ARCH" "$TARGET_VERSION"
+  require_cmd curl
+  require_cmd unzip
+  curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$DOWNLOAD_DIR/server.zip" "$URL" ||
+    log_error "Release download failed; the existing service was not stopped."
+  unzip -q "$DOWNLOAD_DIR/server.zip" -d "$DOWNLOAD_DIR/package" || log_error "Invalid release archive."
+  mapfile -t candidates < <(find "$DOWNLOAD_DIR/package" -maxdepth 1 -type f -name "${PREFIX}_v*")
+  [[ ${#candidates[@]} -eq 1 ]] || log_error "Release must contain exactly one matching server executable."
+  STAGED_BINARY="${candidates[0]}"
+  LOCAL_CONFIG="$DOWNLOAD_DIR/package/server_config.toml"
+fi
+chmod +x "$STAGED_BINARY"
+"$STAGED_BINARY" --version || log_error "Candidate failed its version check."
+if [[ -n "$TARGET_VERSION" ]]; then
+  candidate_version="$("$STAGED_BINARY" --version)"
+  [[ "$candidate_version" == *": $TARGET_VERSION" ]] || log_error "Candidate version differs from requested release."
+fi
+CAPABILITIES="$("$STAGED_BINARY" --capabilities 2>/dev/null || true)"
+if [[ "$CAPABILITIES" != *"cottenmax"* || "$CAPABILITIES" != *"dns-tcp"* ]]; then
+  if [[ -z "$TARGET_VERSION" || "${COTTENDNS_REQUIRE_MAX:-0}" == 1 ]]; then
+    log_error "Latest release does not advertise both Normal and CottenMax with TCP/UDP DNS. No service was stopped. Use a current release or a locally built server with --local."
+  fi
+  log_warn "Explicit older release: CottenMax/TCP support is not verified."
+fi
+STAGED_CONFIG="$DOWNLOAD_DIR/server_config.toml"
+if [[ -f "$INSTALL_DIR/server_config.toml" ]]; then
+  cp -a "$INSTALL_DIR/server_config.toml" "$STAGED_CONFIG"
+  [[ ! -f "$LOCAL_CONFIG" ]] || cp "$LOCAL_CONFIG" "$INSTALL_DIR/server_config.toml.dist"
+else
+  [[ -f "$LOCAL_CONFIG" ]] || log_error "No server configuration template found."
+  cp "$LOCAL_CONFIG" "$STAGED_CONFIG"
+fi
+if grep -q '"v.domain.com"' "$STAGED_CONFIG"; then
+  read -r -p ">>> Enter your Domain (e.g. vpn.example.com): " USER_DOMAIN </dev/tty || true
+  [[ "${USER_DOMAIN:-}" =~ ^[A-Za-z0-9.-]+$ ]] || log_error "A valid delegated domain is required."
+  sed -i -E "s|^DOMAIN[[:space:]]*=.*$|DOMAIN = [\"${USER_DOMAIN}\"]|" "$STAGED_CONFIG"
+fi
+if [[ "$CAPABILITIES" == *"cottenmax"* ]]; then
+  "$STAGED_BINARY" --config "$STAGED_CONFIG" --check-config || log_error "Candidate configuration validation failed."
+fi
+SVC="/etc/systemd/system/cottendns.service"
+SVC_BACKUP=""
+SVC_WAS_CREATED=false
+if [[ -f "$SVC" ]]; then
+  SVC_BACKUP="$DOWNLOAD_DIR/previous-service"
+  cp -a "$SVC" "$SVC_BACKUP"
+else
+  SVC_WAS_CREATED=true
+fi
+INSTALL_MUTATED=true
+
 log_header "Stopping Existing CottenDns"
 cleanup_legacy_cottenpickdns
 stop_existing_CottenDns_service
@@ -825,90 +909,19 @@ root hard nofile 1048576
 EOF
 log_success "Kernel and file descriptor limits configured."
 
-if [[ "$LOCAL_MODE" -eq 1 ]]; then
-  log_header "Locating Local Server Binary"
-  ARCH="$(uname -m)"
-
-  LOCAL_BIN="$(find_local_server_binary "$ARCH")"
-  [[ -z "$LOCAL_BIN" ]] && log_error "No CottenDns server binary found. Run 'python build.py' first."
-  log_info "Found binary: $LOCAL_BIN"
-
-  LOCAL_BIN_DIR="$(dirname "$LOCAL_BIN")"
-  if [[ "$LOCAL_BIN_DIR" != "$INSTALL_DIR" ]]; then
-    cp "$LOCAL_BIN" "$INSTALL_DIR/"
-    log_info "Copied binary to install directory."
-  fi
-  EXECUTABLE="$(basename "$LOCAL_BIN")"
-  chmod +x "$INSTALL_DIR/$EXECUTABLE"
-  log_success "Binary ready: $EXECUTABLE"
-
-  if [[ -f "$INSTALL_DIR/server_config.toml" ]]; then
-    mv -f "$INSTALL_DIR/server_config.toml" "$INSTALL_DIR/server_config.toml.backup"
-    log_info "Existing config backed up."
-  fi
-
-  LOCAL_CONFIG="$(find_local_config)"
-  if [[ -n "$LOCAL_CONFIG" && "$LOCAL_CONFIG" != "$INSTALL_DIR/server_config.toml" ]]; then
-    cp "$LOCAL_CONFIG" "$INSTALL_DIR/server_config.toml"
-    log_info "Config copied from: $LOCAL_CONFIG"
-  elif [[ ! -f "$INSTALL_DIR/server_config.toml" ]]; then
-    log_error "No server_config.toml or server_config.toml.simple found. Cannot install."
-  fi
-else
-  if [[ -n "$TARGET_VERSION" ]]; then
-    log_header "Fetching Release ${TARGET_VERSION}"
-  else
-    log_header "Fetching Latest Release"
-  fi
-  ARCH="$(uname -m)"
-  select_release_artifact "$ARCH" "$TARGET_VERSION"
-
-  if [[ -f "server_config.toml" ]]; then
-    mv -f server_config.toml server_config.toml.backup
-    log_info "Existing config backed up."
-  fi
-
-  log_info "Downloading server binaries..."
-  require_cmd curl
-  require_cmd unzip
-  if ! DOWNLOAD_DIR="$(mktemp -d /tmp/CottenDns_download.XXXXXX 2>/dev/null)"; then
-    DOWNLOAD_DIR="$(mktemp -d "$INSTALL_DIR/CottenDns_download.XXXXXX" 2>/dev/null || true)"
-  fi
-  [[ -n "${DOWNLOAD_DIR:-}" && -d "${DOWNLOAD_DIR:-}" ]] || log_error "Failed to create temporary download directory. Check free space and /tmp permissions."
-  ZIP_PATH="${DOWNLOAD_DIR}/server.zip"
-
-  if ! curl -fL --retry 3 --retry-delay 2 --connect-timeout 15 -o "$ZIP_PATH" "$URL"; then
-    log_warn "curl download failed, trying wget..."
-    wget -qO "$ZIP_PATH" "$URL" || {
-      log_warn "Disk usage snapshot:"
-      df -h "$INSTALL_DIR" /tmp 2>/dev/null || true
-      log_error "Download failed."
-    }
-  fi
-
-  [[ -s "$ZIP_PATH" ]] || log_error "Downloaded archive is missing or empty: $ZIP_PATH"
-  unzip -q -o "$ZIP_PATH" -d "$INSTALL_DIR" || log_error "Failed to extract archive."
-  log_success "Files extracted."
-
-  EXECUTABLE="$(ls -t ${PREFIX}_v* 2>/dev/null | head -n1 || true)"
-  [[ -z "$EXECUTABLE" ]] && log_error "Binary not found in package."
-  chmod +x "$EXECUTABLE"
+# The candidate was downloaded and validated before the running service stopped.
+EXECUTABLE="$(basename "$STAGED_BINARY")"
+if [[ -f "$INSTALL_DIR/$EXECUTABLE" ]]; then
+  cp -a "$INSTALL_DIR/$EXECUTABLE" "$DOWNLOAD_DIR/previous-binary"
+  PREVIOUS_BINARY="$INSTALL_DIR/$EXECUTABLE"
 fi
-
-[[ -x "$EXECUTABLE" ]] || log_error "Downloaded server binary is not executable: $EXECUTABLE"
-./"$EXECUTABLE" --version >/dev/null 2>&1 || log_error "Downloaded server binary failed its version check. Existing service was not changed."
-
-log_header "Configuration"
-[[ -f "server_config.toml" ]] || log_error "server_config.toml not found."
-restore_existing_config "$INSTALL_DIR"
-
-if [[ -f "server_config.toml" ]] && grep -q '"v.domain.com"' server_config.toml; then
-  echo -e "${YELLOW}${BOLD}Attention:${NC} Set your NS domain."
-  read -r -p ">>> Enter your Domain (e.g. vpn.example.com): " USER_DOMAIN </dev/tty || true
-  if [[ -n "${USER_DOMAIN:-}" ]]; then
-    sed -i -E "s|^DOMAIN[[:space:]]*=.*$|DOMAIN = [\"${USER_DOMAIN}\"]|" server_config.toml
-  fi
+cp "$STAGED_BINARY" "$INSTALL_DIR/${EXECUTABLE}.new"
+chmod 755 "$INSTALL_DIR/${EXECUTABLE}.new"
+mv -f "$INSTALL_DIR/${EXECUTABLE}.new" "$INSTALL_DIR/$EXECUTABLE"
+if [[ -f "$INSTALL_DIR/server_config.toml" ]]; then
+  cp -a "$INSTALL_DIR/server_config.toml" "$INSTALL_DIR/server_config.toml.backup"
 fi
+cp "$STAGED_CONFIG" "$INSTALL_DIR/server_config.toml"
 
 log_header "Security Initialization"
 log_info "Starting server once to generate encryption key..."
@@ -950,15 +963,6 @@ done
 log_success "Outbound TCP DNS is available for upstream fallback."
 
 log_header "Installing System Service"
-SVC="/etc/systemd/system/cottendns.service"
-SVC_BACKUP=""
-SVC_WAS_CREATED=false
-if [[ "$ACTION" == "upgrade" && -f "$SVC" ]]; then
-  SVC_BACKUP="${SVC}.upgrade-backup"
-  cp -a "$SVC" "$SVC_BACKUP"
-elif [[ "$ACTION" == "upgrade" ]]; then
-  SVC_WAS_CREATED=true
-fi
 cat > "$SVC" <<EOF
 [Unit]
 Description=CottenDns Server
@@ -986,7 +990,7 @@ EOF
 
 systemctl daemon-reload
 
-rm -rf /etc/systemd/system/cottendns.service.d
+# Preserve administrator resource, security and network drop-ins.
 systemctl daemon-reload
 
 systemctl enable cottendns >/dev/null 2>&1
@@ -1003,22 +1007,26 @@ done
 
 if [[ "$HEALTHY" != true ]]; then
   journalctl -u cottendns -n 50 --no-pager || true
-  if [[ -n "$SVC_BACKUP" && -f "$SVC_BACKUP" ]]; then
-    log_warn "New service failed its health check; restoring the previous service unit."
-    mv -f "$SVC_BACKUP" "$SVC"
-    systemctl daemon-reload
-    systemctl restart cottendns || true
-  elif [[ "$SVC_WAS_CREATED" == true ]]; then
-    log_warn "Removing the failed override unit and returning to the previous packaged unit."
-    rm -f "$SVC"
-    systemctl daemon-reload
-    systemctl restart cottendns || true
-  fi
-  log_error "Service failed to become healthy. The previous unit was restored when available."
+  log_error "Service failed to become healthy; restoring the previous unit, configuration and overwritten executable when available."
 fi
-rm -f "$SVC_BACKUP" 2>/dev/null || true
+rm -f "$SVC_BACKUP" "$INSTALL_DIR/server_config.toml.backup" 2>/dev/null || true
 
 log_success "CottenDns service is running and healthy."
+
+log_header "Client Modes & CottenMax Beta"
+BINARY_HELP="$(./"$EXECUTABLE" --help 2>&1 || true)"
+if grep -q 'CottenMax' <<< "$BINARY_HELP"; then
+  log_info "This server accepts Normal CottenDNS and CottenMax beta together."
+  log_info "Keep the same delegated domain and shared encryption key in your client profile."
+  log_info 'Choose Normal / CottenMax (beta) in Desktop or Android, or set client TUNNEL_MODE = "cottenmax".'
+  log_info "Reconnect the client after switching. No server mode change or extra Max key is needed."
+  log_info 'Fallback: choose Normal, or set client TUNNEL_MODE = "legacy", then reconnect.'
+else
+  log_warn "This binary does not advertise CottenMax support. Keep clients in Normal mode."
+  log_info "To test Max, install a compatible beta server and matching client builds first."
+fi
+log_info "Optional Max tuning lives in the existing config. Keep defaults for a first connection."
+
 UPGRADE_COMPLETED=true
 
 log_info "Cleaning up old server binaries..."

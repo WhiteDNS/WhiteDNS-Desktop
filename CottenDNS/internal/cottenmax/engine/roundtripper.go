@@ -3,6 +3,7 @@ package soar
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"sync"
@@ -17,6 +18,13 @@ func (c *Client) DialConfirmed(ctx context.Context, network, addr string) (net.C
 		return nil, err
 	}
 	if err := conn.(*Conn).waitOpened(ctx); err != nil {
+		conn.Close()
+		if c.cfg.FECDownloadEnabled {
+			return nil, fmt.Errorf("soar: stream open failed with download FEC requested (compatible server required): %w", err)
+		}
+		return nil, err
+	}
+	if err := conn.(*Conn).waitDownloadFEC(ctx); err != nil {
 		conn.Close()
 		return nil, err
 	}
@@ -37,6 +45,10 @@ func (c *Client) NewRoundTripper(ctx context.Context, addr string) (http.RoundTr
 			return nil, err
 		}
 		if err := conn.(*Conn).waitOpened(ctx); err != nil {
+			conn.Close()
+			return nil, err
+		}
+		if err := conn.(*Conn).waitDownloadFEC(ctx); err != nil {
 			conn.Close()
 			return nil, err
 		}

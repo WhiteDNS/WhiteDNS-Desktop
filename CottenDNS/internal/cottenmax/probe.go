@@ -33,7 +33,7 @@ func (c *Client) Probe(ctx context.Context, size int) error {
 	}
 	conn, err := c.Dial(ctx, ProbeTarget)
 	if err != nil {
-		return err
+		return fmt.Errorf("cottenmax probe opening stream: %w", err)
 	}
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { conn.Close() })
@@ -44,21 +44,21 @@ func (c *Client) Probe(ctx context.Context, size int) error {
 	request := make([]byte, 36)
 	binary.BigEndian.PutUint32(request, uint32(size))
 	if _, err = rand.Read(request[4:]); err != nil {
-		return err
+		return fmt.Errorf("cottenmax probe creating challenge: %w", err)
 	}
 	for rest := request; len(rest) > 0; {
 		n, e := conn.Write(rest)
 		if e != nil {
-			return e
+			return fmt.Errorf("cottenmax probe writing challenge: %w", e)
 		}
 		if n == 0 {
-			return io.ErrShortWrite
+			return fmt.Errorf("cottenmax probe writing challenge: %w", io.ErrShortWrite)
 		}
 		rest = rest[n:]
 	}
 	reply := make([]byte, size)
 	if _, err = io.ReadFull(conn, reply); err != nil {
-		return err
+		return fmt.Errorf("cottenmax probe reading reply: %w", err)
 	}
 	want := bytes.Repeat(request[4:], (size+31)/32)[:size]
 	if !bytes.Equal(reply, want) {

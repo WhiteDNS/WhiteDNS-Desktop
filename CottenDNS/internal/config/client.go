@@ -49,6 +49,9 @@ type ClientConfig struct {
 	ResolverDiscoverySampleRanges      int      `toml:"RESOLVER_DISCOVERY_SAMPLE_RANGES"`
 	CottenMaxServerPublicKey           string   `toml:"COTTENMAX_SERVER_PUBLIC_KEY"`
 	CottenMaxHoldMilliseconds          int      `toml:"COTTENMAX_HOLD_MILLISECONDS"`
+	CottenMaxFECDownloadEnabled        bool     `toml:"COTTENMAX_FEC_DOWNLOAD_ENABLED"`
+	CottenMaxFECDataShards             int      `toml:"COTTENMAX_FEC_DATA_SHARDS"`
+	CottenMaxFECParityShards           int      `toml:"COTTENMAX_FEC_PARITY_SHARDS"`
 	ConfigDir                          string   `toml:"-"`
 	ConfigPath                         string   `toml:"-"`
 	ResolversFilePath                  string   `toml:"-"`
@@ -445,6 +448,7 @@ func defaultClientConfig() ClientConfig {
 		CottenMaxFailoverAfterMilliseconds: 3000,
 		CottenMaxSafeQName:                 101, CottenMaxMaxQName: 253, CottenMaxMaxAnswer: 1232,
 		CottenMaxMaxPathWindow: 256, CottenMaxMaxInflight: 256, CottenMaxSessionIdleMilliseconds: 90000,
+		CottenMaxFECDataShards: 4, CottenMaxFECParityShards: 1,
 		ResolverDoQPort: 853, ResolverDiscoveryWant: 16, ResolverDiscoveryConcurrency: 16,
 		ResolverDiscoveryPaceMilliseconds:    20,
 		DNSRandomizeQueryID:                  true,

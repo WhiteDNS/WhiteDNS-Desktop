@@ -2,6 +2,10 @@ package main
 
 import (
 	"errors"
+	"net"
+	"net/http"
+	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 
 	"whitedns-desktop/internal/model"
@@ -102,7 +106,7 @@ func TestActiveProxyConfigUsesHTTPWhenRuntimeRequestsHTTP(t *testing.T) {
 	}
 }
 
-func TestProxyCountryCacheStoresSuccessAndErrors(t *testing.T) {
+func TestProxyCountryCacheAllowsRetryAfterFailure(t *testing.T) {
 	app := &App{}
 	proxyAddress := "127.0.0.1:10886"
 	expected := model.ProxyCountryLookupResult{
@@ -113,22 +117,63 @@ func TestProxyCountryCacheStoresSuccessAndErrors(t *testing.T) {
 	}
 
 	app.storeProxyCountry(proxyAddress, expected, nil)
-	got, err, ok := app.cachedProxyCountry(proxyAddress)
-	if !ok || err != nil {
-		t.Fatalf("expected cached success, ok=%t err=%v", ok, err)
+	got, ok := app.cachedProxyCountry(proxyAddress)
+	if !ok {
+		t.Fatal("expected cached success")
 	}
 	if got != expected {
 		t.Fatalf("unexpected cached result: %#v", got)
 	}
 
 	app.storeProxyCountry(proxyAddress, model.ProxyCountryLookupResult{Proxy: proxyAddress}, errors.New("lookup failed"))
-	got, err, ok = app.cachedProxyCountry(proxyAddress)
-	if !ok || err == nil || err.Error() != "lookup failed" {
-		t.Fatalf("expected cached error, ok=%t result=%#v err=%v", ok, got, err)
+	if got, ok = app.cachedProxyCountry(proxyAddress); ok {
+		t.Fatalf("failed lookup must allow a fresh attempt, got %#v", got)
+	}
+	app.storeProxyCountry(proxyAddress, model.ProxyCountryLookupResult{}, nil)
+	if _, ok := app.cachedProxyCountry(proxyAddress); ok {
+		t.Fatal("unsuccessful result must not be cached")
+	}
+	app.storeProxyCountry(proxyAddress, expected, nil)
+	if got, ok = app.cachedProxyCountry(proxyAddress); !ok || got != expected {
+		t.Fatal("successful retry must replace the failure")
 	}
 
 	app.clearProxyCountryCache()
-	if _, _, ok := app.cachedProxyCountry(proxyAddress); ok {
+	if _, ok := app.cachedProxyCountry(proxyAddress); ok {
 		t.Fatal("expected cache to be cleared")
+	}
+}
+
+func TestCountryClientDoesNotFallBackToDirectWhenProxyFails(t *testing.T) {
+	var directRequests atomic.Int32
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		directRequests.Add(1)
+		_, _ = w.Write([]byte("ip=203.0.113.10\nloc=IR\n"))
+	}))
+	defer origin.Close()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := listener.Addr().String()
+	_ = listener.Close()
+	for _, protocol := range []string{"socks", "http"} {
+		t.Run(protocol, func(t *testing.T) {
+			client, err := httpClientThroughProxy(runtimeProxyConfig{Address: address, Protocol: protocol})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer closeHTTPClientIdleConnections(client)
+			resp, err := client.Get(origin.URL)
+			if resp != nil {
+				_ = resp.Body.Close()
+			}
+			if err == nil {
+				t.Fatal("expected failed proxy request")
+			}
+			if directRequests.Load() != 0 {
+				t.Fatal("country request bypassed the proxy")
+			}
+		})
 	}
 }

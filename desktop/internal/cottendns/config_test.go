@@ -10,6 +10,32 @@ import (
 	"whitedns-desktop/internal/model"
 )
 
+func TestMaxRuntimeFitsPanelDomainsWithoutChangingSavedOptions(t *testing.T) {
+	connection := model.ConnectionProfile{Domain: "cot.abcdefghijklmnopqrstuvwxyz.soar.example.org", EncryptionKey: "panel-test-key", EncryptionMethod: 5}
+	standby := "cot.abcdefghijklmnopqrstuvwxyz.backup.example.org"
+	options := map[string]any{"TUNNEL_MODE": "cottenmax", "QNAME_LABEL_LENGTH": 32, "QNAME_LABEL_COUNT_JITTER": true, "STANDBY_DOMAINS": []string{standby}, "COTTENMAX_MAX_QNAME": 101}
+	for _, raw := range []string{RenderClientTOML(connection, options), RenderScannerClientTOML(connection, options, 4)} {
+		got, err := ParseOptions(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := len("cottenmax-v1."+standby) + 1 + 55 + 1 + 3
+		if got["COTTENMAX_SAFE_QNAME"] != want || got["COTTENMAX_MAX_QNAME"] != want {
+			t.Fatalf("Max HELLO does not fit panel/standby domain: %#v", got)
+		}
+	}
+	if _, ok := options["COTTENMAX_SAFE_QNAME"]; ok {
+		t.Fatal("render mutated stored settings")
+	}
+	if strings.Contains(RenderSettingsTOML(options), "COTTENMAX_SAFE_QNAME") {
+		t.Fatal("domain sizing leaked into settings export")
+	}
+	options["TUNNEL_MODE"] = "legacy"
+	if strings.Contains(RenderClientTOML(connection, options), "COTTENMAX_SAFE_QNAME") {
+		t.Fatal("normal mode changed")
+	}
+}
+
 func TestSchemaCoversEveryShippedClientOption(t *testing.T) {
 	parsed, err := parseTemplate(defaultTemplate)
 	if err != nil {

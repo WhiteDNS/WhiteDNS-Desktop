@@ -328,6 +328,32 @@ func RenderSettingsTOML(overrides map[string]any) string {
 func renderTOML(connection model.ConnectionProfile, overrides map[string]any, includeConnection bool) string {
 	loadSchema()
 	normalized := NormalizeOverrides(overrides)
+	if includeConnection {
+		effective := EffectiveOptions(normalized)
+		if effective["TUNNEL_MODE"] == "cottenmax" {
+			domains := model.ConnectionDomains(connection)
+			if standbys, ok := effective["STANDBY_DOMAINS"].([]string); ok {
+				domains = append(domains, standbys...)
+			}
+			labelLength, _ := effective["QNAME_LABEL_LENGTH"].(int)
+			if labelLength < 16 || labelLength > 63 {
+				labelLength = 63
+			}
+			jitter := 0
+			if effective["QNAME_LABEL_COUNT_JITTER"] == true {
+				jitter = 3
+			}
+			safe, _ := effective["COTTENMAX_SAFE_QNAME"].(int)
+			for _, domain := range domains {
+				safe = max(safe, len("cottenmax-v1."+strings.Trim(domain, ". "))+1+55+54/labelLength+jitter)
+			}
+			// Keep invalid overlong names rejectable by the engine. Valid panel
+			// names get enough initial capacity without changing stored settings.
+			normalized["COTTENMAX_SAFE_QNAME"] = min(safe, 253)
+			maximum, _ := effective["COTTENMAX_MAX_QNAME"].(int)
+			normalized["COTTENMAX_MAX_QNAME"] = min(max(maximum, safe), 253)
+		}
+	}
 	var b strings.Builder
 	line := func(format string, args ...any) {
 		_, _ = fmt.Fprintf(&b, format, args...)

@@ -1,0 +1,12 @@
+{
+  "utc": "2026-10-25T11:49:12.925776+00:00",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "machine": "AMD64",
+  "processor": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD",
+  "logical_cpus": 16,
+  "runs": 3,
+  "sequential": true,
+  "godebug": "",
+  "binary": "D:\\GitHub\\cottenDNS\\.cache\\cottenmax-parity-multidomain-crypto\\.cache\\maxexperiment.exe",
+  "cpu": "AMD Ryzen 7 6800H with Radeon Graphics"
+}

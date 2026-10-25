@@ -1,6 +1,6 @@
 # CottenMax options
 
-Early beta implementation, updated 2026-10-21. These options require the
+Early beta implementation, updated 2026-10-25. These options require the
 updated client; CottenMax also requires the updated CottenDNS server. Publishing
 the beta source does not update the public latest release automatically. Use
 matching Max-capable server and client builds. Historical local measurements
@@ -338,8 +338,18 @@ automatic remote profile/list updates are not implemented here.
 
 ## Performance controls and limits
 
+Choose `COTTENMAX_TRAFFIC_PROFILE = "low"` on clients that need lower DNS query
+load. The default `"full"` preserves existing Max behavior and adds no query-rate
+ceiling. Low paces all Max queries to an aggregate 100 queries/second with burst
+4 per client, including discovery, retries and duplicate traffic, and lowers
+concurrency. It applies across domains and resolver transports. It does not
+guarantee acceptance by a VPS host, and several clients add their traffic
+together. See [traffic profiles](COTTENMAX_TRAFFIC_PROFILES.md) for the limits,
+tradeoffs and the provider information needed to choose an appropriate setting.
+
 | Setting | Default | Accepted range / behavior |
 | --- | --- | --- |
+| `COTTENMAX_TRAFFIC_PROFILE` | `"full"` | `full` retains current behavior; `low` adds query pacing and lower concurrency. Reconnect to apply. |
 | `COTTENMAX_QNAME_LOSS_GUARD` | false | Experimental authenticated near-cap loss guard; see below. |
 | `COTTENMAX_SAFE_QNAME` | 101 | 64..253; must fit the domain and handshake. |
 | `COTTENMAX_MAX_QNAME` | 253 | At least the safe size, at most 253. |
@@ -367,8 +377,10 @@ features do not replace its reliability machinery. Transparent fixed-forward
 and local DNS streams pipeline OPEN/data; SOCKS/HTTP still await confirmed
 destination success. Local DNS completes the first cold request directly.
 
-Hard `QUERY_RATE_LIMIT_*` budgets and SOCKS UDP ASSOCIATE remain unsupported in
-Max. Normal-mode compression/FEC/duplication/carrier-selection settings do not
+Generic `QUERY_RATE_LIMIT_*` budgets and SOCKS UDP ASSOCIATE remain unsupported
+in Max. The dedicated low profile supplies an aggregate query scheduler; it does
+not implement Normal's independently configured global/resolver/domain budgets.
+Normal-mode compression/FEC/duplication/carrier-selection settings do not
 govern the Max engine. Validate the beta on the actual device and connection,
 including reconnects and network changes. Loopback tests do not establish
 reachability or performance on a particular ISP.

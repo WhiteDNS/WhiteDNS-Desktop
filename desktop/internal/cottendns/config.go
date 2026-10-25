@@ -754,6 +754,9 @@ func validChoice(value any, choices []OptionChoice) bool {
 
 func validOptionRange(key string, value any) bool {
 	switch key {
+	case "COTTENMAX_LOW_REDUCTION_PERCENT":
+		n, ok := value.(int)
+		return ok && n >= 10 && n <= 90
 	case "LISTEN_PORT", "LOCAL_DNS_PORT", "RESOLVER_DOT_PORT", "RESOLVER_DOH_PORT", "RESOLVER_DOQ_PORT":
 		port, ok := value.(int)
 		return ok && port >= 1 && port <= 65535
@@ -846,6 +849,10 @@ func optionDescription(key, fallback string) string {
 	switch key {
 	case "TUNNEL_MODE":
 		return "Normal is the compatible default. CottenMax (beta) uses the same domain, key and resolver profile, and requires an updated CottenDNS server. Save and reconnect after switching; select Normal manually if Max cannot connect."
+	case "COTTENMAX_TRAFFIC_PROFILE":
+		return "Full preserves the current Max speed settings. Low reduces DNS query and new connection rates, uses smaller windows, and slows discovery to reduce load. Both work with the same Max server. Save and reconnect to apply."
+	case "COTTENMAX_LOW_REDUCTION_PERCENT":
+		return "Approximate speed reduction target relative to Full, 10..90 percent; default 35. Used only in Low mode. Actual speed depends on the network and resolver. Full keeps this setting for later and ignores it. Save and reconnect to apply."
 	case "RESOLVER_TRANSPORT":
 		return "Transport to your DNS resolver. HTTP/3 uses UDP/443 and DoQ uses UDP/853 by default; the chosen resolver must support it. Max never falls back to plaintext from an encrypted resolver transport."
 	case "RESOLVER_DISCOVERY_WANT":
@@ -867,6 +874,8 @@ func optionChoices(key string) []OptionChoice {
 	switch key {
 	case "TUNNEL_MODE":
 		return []OptionChoice{{Value: "legacy", Label: "Normal CottenDNS"}, {Value: "cottenmax", Label: "CottenMax (beta)"}}
+	case "COTTENMAX_TRAFFIC_PROFILE":
+		return []OptionChoice{{Value: "full", Label: "Full — current Max speed"}, {Value: "low", Label: "Low — reduced traffic"}}
 	case "PROTOCOL_TYPE":
 		return []OptionChoice{{Value: "SOCKS5", Label: "SOCKS5"}, {Value: "SOCKS4", Label: "SOCKS4"}}
 	case "RESOLVER_TRANSPORT":
@@ -894,6 +903,8 @@ func optionChoices(key string) []OptionChoice {
 
 func optionGroup(key string) string {
 	switch {
+	case key == "COTTENMAX_TRAFFIC_PROFILE" || key == "COTTENMAX_LOW_REDUCTION_PERCENT":
+		return "Performance and limits"
 	case strings.HasPrefix(key, "COTTENMAX_FEC_"):
 		return "Delivery and failover"
 	case key == "COTTENMAX_FAILOVER_AFTER_MILLISECONDS":
@@ -941,6 +952,10 @@ func optionLabel(key string) string {
 	switch key {
 	case "TUNNEL_MODE":
 		return "CottenDNS mode"
+	case "COTTENMAX_TRAFFIC_PROFILE":
+		return "CottenMax traffic profile"
+	case "COTTENMAX_LOW_REDUCTION_PERCENT":
+		return "Speed reduction target (%)"
 	case "RESOLVER_TRANSPORT":
 		return "DNS resolver transport"
 	case "RESOLVER_DOQ_PORT":

@@ -10,12 +10,24 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
  const browser=await chromium.launch({headless:true,...(process.env.DESKTOP_CHROME?{executablePath:process.env.DESKTOP_CHROME}:{})});
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];page.on('pageerror',e=>{errors.push(e.message);console.error('BROWSER ERROR:',e.stack)});
-  await page.addInitScript(state=>{
+  const installBridge=state=>{
    let current=structuredClone(state);window.testCalls=[];
+   const locationCase=new URLSearchParams(location.search).get('location-test');let countryCalls=0;
+   if(locationCase){
+    current.selectedConnectionProfileId='cotten-ui';current.selectedSettingsProfileId='cotten-ui-settings';
+    const connection=current.connectionProfiles.find(p=>p.id==='cotten-ui');connection.name='Iran profile';connection.domain='cot.user.iran.example.org';connection.domains=[connection.domain];
+    current.runtime={...current.runtime,status:'connected',activeConnectionId:'cotten-ui',listenIp:'127.0.0.1',localProxyIp:'127.0.0.1',listenPort:10886,proxyProtocol:'socks'};
+   }
    let scan={status:'idle',mode:'manual',paused:false,phase:'',message:'',inputFileName:'',scanParallel:200,total:0,completed:0,valid:0,rejected:0,invalid:0,duplicates:0,validResolvers:[],testingPaths:[],workingPaths:[]};
    const clone=()=>structuredClone(current);
    const methods={
     GetAppState:async()=>clone(),
+    LookupProxyCountry:async()=>{
+     window.testCalls.push(['country',++countryCalls]);
+     if(countryCalls===1&&locationCase==='retry')throw new Error('Country lookup timed out');
+     if(countryCalls===1&&locationCase==='invalid')return {ok:false,ip:'',countryCode:'IR',proxy:'127.0.0.1:10886',message:'Country lookup unavailable'};
+     return {ok:true,ip:'203.0.113.10',countryCode:locationCase==='iran'?'IR':'DE',proxy:'127.0.0.1:10886',message:'Proxy egress IP 203.0.113.10'};
+    },
     ValidateResolverText:async raw=>({isValid:true,normalizedResolvers:raw.split(/\r?\n/).filter(Boolean),normalizedText:raw,invalidEntries:[]}),
     GetSystemLANIP:async()=>"127.0.0.1",
     GetValidatorState:async()=>({status:'idle',results:[],ports:[],ranges:[],retained:0}),
@@ -36,7 +48,8 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
    };
    window.go={main:{App:new Proxy(methods,{get:(object,key)=>object[key]||async function(){return [];}})}};
    window.runtime={EventsOn:()=>()=>{},InitializeNotifications:async()=>{},CleanupNotifications:async()=>{}};
-  },fixture);
+  };
+  await page.addInitScript(installBridge,fixture);
   await page.goto(origin);await page.getByRole('button',{name:'Connections',exact:true}).click();
   await page.getByRole('heading',{name:'Connection Profiles',exact:true}).waitFor();
   await page.getByRole('button',{name:'Refresh subscriptions',exact:true}).click();
@@ -96,6 +109,27 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
   assert.ok(await page.evaluate(()=>window.testCalls.some(c=>c[0]==='cancel-scan')));
   await scannerProfile.click();await page.getByRole('option',{name:'Cotten Test',exact:true}).click();
   assert.equal(await workers.getAttribute('max'),'1000');
-  assert.deepEqual(errors,[]);console.log('PASS: desktop subscription import/HTTP consent/refresh, Soar tuning, question-only help, presets, save and responsive views; CottenMax mode switching and profile boundaries; Soar scanner selection, bounded workers, supported controls and cancellation.');
+  for(const scenario of ['retry','invalid','iran']){
+   const locationPage=await browser.newPage({viewport:{width:1440,height:1000}});
+   locationPage.on('pageerror',e=>errors.push(e.message));
+   await locationPage.addInitScript(installBridge,fixture);
+   await locationPage.goto(origin+'/?location-test='+scenario);
+   if(scenario==='iran'){
+    await locationPage.getByText('Iran',{exact:true}).waitFor();
+   }else{
+    await locationPage.getByText('Unknown',{exact:true}).waitFor({timeout:5000});
+    assert.equal(await locationPage.getByText('Iran',{exact:true}).count(),0,'failed lookup must not infer Iran from the domain or profile');
+    const retry=locationPage.getByRole('button',{name:'Retry location lookup',exact:true});
+    await locationPage.screenshot({path:path.join(out,'location-'+scenario+'-unknown.png'),fullPage:true});
+    await retry.click();
+    await locationPage.getByText('Germany',{exact:true}).waitFor();
+    assert.equal(await retry.count(),0,'verified location must not offer a failed-lookup retry');
+    assert.equal(await locationPage.locator('[title="Proxy egress IP 203.0.113.10"]').count(),1);
+    assert.equal(await locationPage.evaluate(()=>window.testCalls.filter(c=>c[0]==='country').length),2);
+    await locationPage.screenshot({path:path.join(out,'location-'+scenario+'.png'),fullPage:true});
+   }
+   await locationPage.close();
+  }
+  assert.deepEqual(errors,[]);console.log('PASS: desktop subscription import/HTTP consent/refresh, Soar tuning, question-only help, presets, save and responsive views; CottenMax mode switching and profile boundaries; Soar scanner selection, bounded workers, supported controls and cancellation; verified proxy location, honest failed lookups and retry recovery.');
  }finally{await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(e=>{console.error(e);process.exitCode=1;server.close();});

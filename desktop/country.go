@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -19,8 +18,7 @@ import (
 const proxyCountryLookupURL = "https://www.cloudflare.com/cdn-cgi/trace"
 
 type proxyCountryCacheEntry struct {
-	result     model.ProxyCountryLookupResult
-	errMessage string
+	result model.ProxyCountryLookupResult
 }
 
 func (a *App) LookupProxyCountry() (model.ProxyCountryLookupResult, error) {
@@ -28,8 +26,8 @@ func (a *App) LookupProxyCountry() (model.ProxyCountryLookupResult, error) {
 	if err != nil {
 		return model.ProxyCountryLookupResult{}, err
 	}
-	if result, err, ok := a.cachedProxyCountry(proxyConfig.cacheKey()); ok {
-		return result, err
+	if result, ok := a.cachedProxyCountry(proxyConfig.cacheKey()); ok {
+		return result, nil
 	}
 
 	result, err := a.lookupProxyCountry(proxyConfig)
@@ -85,30 +83,28 @@ func (a *App) lookupProxyCountry(proxyConfig runtimeProxyConfig) (model.ProxyCou
 	}, nil
 }
 
-func (a *App) cachedProxyCountry(proxyAddress string) (model.ProxyCountryLookupResult, error, bool) {
+func (a *App) cachedProxyCountry(proxyAddress string) (model.ProxyCountryLookupResult, bool) {
 	a.proxyCountryMu.Lock()
 	defer a.proxyCountryMu.Unlock()
 	entry, ok := a.proxyCountryCache[proxyAddress]
 	if !ok {
-		return model.ProxyCountryLookupResult{}, nil, false
+		return model.ProxyCountryLookupResult{}, false
 	}
-	if entry.errMessage != "" {
-		return entry.result, errors.New(entry.errMessage), true
-	}
-	return entry.result, nil, true
+	return entry.result, true
 }
 
 func (a *App) storeProxyCountry(proxyAddress string, result model.ProxyCountryLookupResult, err error) {
 	a.proxyCountryMu.Lock()
 	defer a.proxyCountryMu.Unlock()
+	// A slow tunnel startup must not make a failed lookup permanent for this connection.
+	if err != nil || !result.OK {
+		delete(a.proxyCountryCache, proxyAddress)
+		return
+	}
 	if a.proxyCountryCache == nil {
 		a.proxyCountryCache = map[string]proxyCountryCacheEntry{}
 	}
-	entry := proxyCountryCacheEntry{result: result}
-	if err != nil {
-		entry.errMessage = err.Error()
-	}
-	a.proxyCountryCache[proxyAddress] = entry
+	a.proxyCountryCache[proxyAddress] = proxyCountryCacheEntry{result: result}
 }
 
 func (a *App) clearProxyCountryCache() {

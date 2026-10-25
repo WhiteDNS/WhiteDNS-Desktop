@@ -786,6 +786,8 @@ function dnsEngineProxyEndpoint(settings?: SettingsProfile, engine?: ImportType)
 type ProxyCountryInfo = {
   icon: string;
   name: string;
+  detail: string;
+  canRetry: boolean;
 };
 
 type RegionDisplayNames = {
@@ -798,9 +800,6 @@ type RegionDisplayNamesConstructor = new (
 ) => RegionDisplayNames;
 
 function proxyCountryInfo(
-  connection?: ConnectionProfile,
-  settings?: SettingsProfile,
-  runtime?: RuntimeStatus,
   lookup?: ProxyCountryLookupResult | null,
   lookupRunning = false
 ): ProxyCountryInfo {
@@ -809,41 +808,20 @@ function proxyCountryInfo(
     return {
       icon: countryFlagEmoji(lookupCode),
       name: countryNameFromCode(lookupCode),
+      detail: lookup.message || `Proxy egress IP: ${lookup.ip}`,
+      canRetry: false,
     };
   }
   if (lookupRunning) {
-    return { icon: "🌐", name: "Looking up" };
+    return { icon: "🌐", name: "Looking up", detail: "Checking the country through the active proxy", canRetry: false };
   }
 
-  const source = [
-    runtime?.autoProfileName,
-    settings?.name,
-    connection?.name,
-    connectionDomains(connection).join(" "),
-  ]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-
-  if (source.includes("iran") || source.includes(".ir")) {
-    return { icon: "🇮🇷", name: "Iran" };
-  }
-  if (source.includes("turkey") || source.includes(".tr")) {
-    return { icon: "🇹🇷", name: "Turkey" };
-  }
-  if (source.includes("germany") || source.includes(".de")) {
-    return { icon: "🇩🇪", name: "Germany" };
-  }
-  if (source.includes("netherlands") || source.includes(".nl")) {
-    return { icon: "🇳🇱", name: "Netherlands" };
-  }
-  if (source.includes("france") || source.includes(".fr")) {
-    return { icon: "🇫🇷", name: "France" };
-  }
-  if (source.includes("usa") || source.includes("united states") || source.includes(".us")) {
-    return { icon: "🇺🇸", name: "United States" };
-  }
-  return { icon: "🌐", name: "Auto" };
+  return {
+    icon: "🌐",
+    name: "Unknown",
+    detail: lookup?.message || "The proxy's country could not be verified. Retry when the connection is ready.",
+    canRetry: true,
+  };
 }
 
 function normalizeCountryCode(code?: string): string {
@@ -1753,7 +1731,7 @@ function DashboardPage({
   const [cloudflarePingRunning, setCloudflarePingRunning] = useState(false);
   const [proxyCountryLookup, setProxyCountryLookup] = useState<ProxyCountryLookupResult | null>(null);
   const [proxyCountryLookupRunning, setProxyCountryLookupRunning] = useState(false);
-  const proxyCountryLookupKeyRef = useRef("");
+  const [proxyCountryRetry, setProxyCountryRetry] = useState(0);
   const missingConnection = connectionDomains(selectedConnection).length === 0 || !selectedConnection?.encryptionKey.trim();
   const configuredResolverCount = resolverProfileCount(selectedResolver, validation);
   const missingResolvers = configuredResolverCount <= 0 || (!isFileBackedResolver(selectedResolver) && !validation.isValid);
@@ -1777,6 +1755,7 @@ function DashboardPage({
           runtime.listenIp,
           runtime.localProxyIp,
           runtime.listenPort,
+          runtime.proxyProtocol,
         ].join("|")
       : "";
   const hasShareProxyMetrics = Boolean(localProxyEndpoint);
@@ -1784,9 +1763,6 @@ function DashboardPage({
     ? publicProxyEndpoint
     : localProxyEndpoint || endpoint;
   const proxyCountry = proxyCountryInfo(
-    selectedConnection,
-    selectedSettings,
-    runtime,
     proxyCountryLookup,
     proxyCountryLookupRunning
   );
@@ -1893,17 +1869,11 @@ function DashboardPage({
 
   useEffect(() => {
     if (!isConnected || runtime.listenPort <= 0 || !proxyCountryLookupKey) {
-      proxyCountryLookupKeyRef.current = "";
       setProxyCountryLookup(null);
       setProxyCountryLookupRunning(false);
       return;
     }
-    if (proxyCountryLookupKeyRef.current === proxyCountryLookupKey) {
-      return;
-    }
-
     let cancelled = false;
-    proxyCountryLookupKeyRef.current = proxyCountryLookupKey;
     setProxyCountryLookup(null);
     setProxyCountryLookupRunning(true);
     backend
@@ -1937,6 +1907,7 @@ function DashboardPage({
     isConnected,
     runtime.listenPort,
     proxyCountryLookupKey,
+    proxyCountryRetry,
   ]);
 
   useEffect(() => {
@@ -2145,6 +2116,7 @@ function DashboardPage({
             ) : (
               <ConnectionInfoBar
                 proxyCountry={proxyCountry}
+                onRetryCountry={() => setProxyCountryRetry((attempt) => attempt + 1)}
                 proxyEndpoint={statusEndpoint || endpoint}
                 download={formatSpeed(runtime.stats.downloadSpeedBytesPerSecond)}
                 upload={formatSpeed(runtime.stats.uploadSpeedBytesPerSecond)}
@@ -2495,6 +2467,7 @@ function DashboardPage({
 
 function ConnectionInfoBar({
   proxyCountry,
+  onRetryCountry,
   proxyEndpoint,
   download,
   upload,
@@ -2505,6 +2478,7 @@ function ConnectionInfoBar({
   onPing,
 }: {
   proxyCountry: ProxyCountryInfo;
+  onRetryCountry: () => void;
   proxyEndpoint: string;
   download: string;
   upload: string;
@@ -2520,7 +2494,7 @@ function ConnectionInfoBar({
     <div className="space-y-3">
       <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-5">
         {/* Country */}
-        <div className="rounded-lg border bg-card p-3 transition-all duration-300 hover:border-muted-foreground/30">
+        <div title={proxyCountry.detail} className="rounded-lg border bg-card p-3 transition-all duration-300 hover:border-muted-foreground/30">
           <div className="flex items-center gap-2.5">
             <div className="rounded-full bg-muted/50 p-1.5 shrink-0">
               {proxyCountry.icon && <span className="text-xl leading-none">{proxyCountry.icon}</span>}
@@ -2533,6 +2507,11 @@ function ConnectionInfoBar({
                 {proxyCountry.name || "Detecting..."}
               </p>
             </div>
+            {proxyCountry.canRetry && (
+              <Button variant="ghost" size="icon" aria-label="Retry location lookup" onClick={onRetryCountry}>
+                <RotateCcw className="size-3.5" />
+              </Button>
+            )}
           </div>
         </div>
 

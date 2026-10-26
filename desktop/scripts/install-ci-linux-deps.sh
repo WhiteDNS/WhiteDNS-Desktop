@@ -5,12 +5,23 @@ set -euo pipefail
 
 arch="${1:?Expected the Linux architecture}"
 apt_root="${2:-/etc/apt}"
+profile="${3:-package}"
 if [[ "$arch" != amd64 && "$arch" != arm64 ]]; then
   echo "Unsupported Linux CI architecture: $arch" >&2
   exit 1
 fi
 
-packages=(build-essential curl file libarchive-tools pkg-config rpm zstd libgtk-3-dev libwebkit2gtk-4.1-dev)
+case "$profile" in
+  package)
+    packages=(build-essential curl file libarchive-tools pkg-config rpm zstd libgtk-3-dev libwebkit2gtk-4.1-dev)
+    install_options=(--no-install-recommends -y)
+    ;;
+  acceptance)
+    packages=(libgtk-3-dev libwebkit2gtk-4.1-dev)
+    install_options=(-y)
+    ;;
+  *) echo "Unsupported Linux CI dependency profile: $profile" >&2; exit 1 ;;
+esac
 
 phase() {
   printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >&2
@@ -21,13 +32,13 @@ apt_update() {
 }
 
 apt_install() {
-  sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install --no-install-recommends -y "${packages[@]}"
+  sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install "${install_options[@]}" "${packages[@]}"
 }
 
 if [[ "$arch" == amd64 ]]; then
   phase 'Trying the default Ubuntu mirror (three minutes per apt phase).'
   if sudo timeout --kill-after=15s 180s env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 update && \
-     sudo timeout --kill-after=15s 180s env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install --no-install-recommends -y "${packages[@]}"; then
+     sudo timeout --kill-after=15s 180s env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install "${install_options[@]}" "${packages[@]}"; then
     exit 0
   fi
 
@@ -44,7 +55,7 @@ if [[ "$arch" == amd64 ]]; then
   phase 'Updating package indexes from the fallback mirror.'
   sudo timeout --kill-after=15s 180s env DEBIAN_FRONTEND=noninteractive apt-get "${fallback_opts[@]}" update
   phase 'Installing build dependencies from the fallback mirror.'
-  sudo timeout --kill-after=15s 600s env DEBIAN_FRONTEND=noninteractive apt-get "${fallback_opts[@]}" install --no-install-recommends -y "${packages[@]}"
+  sudo timeout --kill-after=15s 600s env DEBIAN_FRONTEND=noninteractive apt-get "${fallback_opts[@]}" install "${install_options[@]}" "${packages[@]}"
   exit 0
 fi
 

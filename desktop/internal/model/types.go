@@ -371,6 +371,12 @@ type AppState struct {
 type ConnectionImportResult struct {
 	State    AppState `json:"state"`
 	Imported int      `json:"imported"`
+	Skipped  int      `json:"skipped"`
+}
+
+type ConnectionDeduplicationResult struct {
+	State   AppState `json:"state"`
+	Removed int      `json:"removed"`
 }
 
 type ConnectionTestResolver struct {

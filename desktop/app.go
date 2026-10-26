@@ -237,27 +237,56 @@ func (a *App) ImportConnectionProfiles(rawText string, importType string) (model
 	}
 
 	existingIDs := make(map[string]struct{}, len(a.state.ConnectionProfiles)+len(imported))
+	index := newConnectionDuplicateIndex(a.state)
+	seen := map[string]bool{}
 	for _, profile := range a.state.ConnectionProfiles {
 		existingIDs[profile.ID] = struct{}{}
+		if key := index.key(profile, false); key != "" {
+			seen[key] = true
+		}
 	}
 
+	previous := a.state
+	nextState := a.state
+	nextState.ConnectionProfiles = slices.Clone(a.state.ConnectionProfiles)
+	nextState.ResolverProfiles = slices.Clone(a.state.ResolverProfiles)
+	added, skipped := 0, 0
+	var lastImported model.ConnectionProfile
 	baseID := time.Now().UnixNano()
 	for idx := range imported {
-		imported[idx].ID = uniqueImportedConnectionID(existingIDs, baseID, idx)
 		if imported[idx].ResolverProfileID == "" {
 			imported[idx].ResolverProfileID = a.state.SelectedResolverProfileID
 		}
-		attachImportedResolvers(&a.state, &imported[idx])
-		a.state.ConnectionProfiles = append(a.state.ConnectionProfiles, imported[idx])
+		key := index.key(imported[idx], true)
+		if key != "" && seen[key] {
+			skipped++
+			continue
+		}
+		if key != "" {
+			seen[key] = true
+		}
+		imported[idx].ID = uniqueImportedConnectionID(existingIDs, baseID, idx)
+		attachImportedResolvers(&nextState, &imported[idx])
+		nextState.ConnectionProfiles = append(nextState.ConnectionProfiles, imported[idx])
+		lastImported = imported[idx]
+		added++
 	}
+	if added == 0 {
+		return model.ConnectionImportResult{State: a.state, Skipped: skipped}, nil
+	}
+	a.state = nextState
 	if !a.connectionSelectionLockedLocked() {
-		a.state.SelectedConnectionProfileID = imported[len(imported)-1].ID
-		a.selectSettingsForEngineLocked(imported[len(imported)-1].ImportType)
-		a.state.SelectedResolverProfileID = imported[len(imported)-1].ResolverProfileID
+		a.state.SelectedConnectionProfileID = lastImported.ID
+		a.selectSettingsForEngineLocked(lastImported.ImportType)
+		a.state.SelectedResolverProfileID = lastImported.ResolverProfileID
 	}
 
 	next, err := a.saveLocked()
-	return model.ConnectionImportResult{State: next, Imported: len(imported)}, err
+	if err != nil {
+		a.state = previous
+		return model.ConnectionImportResult{State: previous}, err
+	}
+	return model.ConnectionImportResult{State: next, Imported: added, Skipped: skipped}, nil
 }
 
 func (a *App) CreateResolverProfileFromValidatorResults(request model.ValidatorResolverProfileRequest) (model.ResolverImportResult, error) {

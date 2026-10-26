@@ -118,10 +118,13 @@ func TestStoreSaveLoadRoundTripsCottenDNSOverrides(t *testing.T) {
 	store := NewStore(path)
 	state := model.DefaultAppState()
 	overrides := map[string]any{
-		"CONFIG_PRESET":      "survival",
-		"RESOLVER_TRANSPORT": "doh",
-		"FAST_CONNECT":       true,
-		"QUERY_TYPES":        []string{"TXT", "HTTPS"},
+		"CONFIG_PRESET":                   "survival",
+		"RESOLVER_TRANSPORT":              "doh",
+		"FAST_CONNECT":                    true,
+		"QUERY_TYPES":                     []string{"TXT", "HTTPS"},
+		"TUNNEL_MODE":                     "cottenmax",
+		"COTTENMAX_TRAFFIC_PROFILE":       "low",
+		"COTTENMAX_LOW_REDUCTION_PERCENT": 70,
 	}
 	settings := model.DefaultSettingsProfile()
 	settings.ID = "settings-cottendns"
@@ -150,6 +153,12 @@ func TestStoreSaveLoadRoundTripsCottenDNSOverrides(t *testing.T) {
 	}
 	if (*got.CottenDNSOptions)["CONFIG_PRESET"] != "survival" || (*got.CottenDNSOptions)["RESOLVER_TRANSPORT"] != "doh" {
 		t.Fatalf("CottenDNS overrides changed during persistence: %#v", *got.CottenDNSOptions)
+	}
+	if (*got.CottenDNSOptions)["COTTENMAX_TRAFFIC_PROFILE"] != "low" {
+		t.Fatalf("CottenMax traffic profile was lost across app restart: %#v", *got.CottenDNSOptions)
+	}
+	if (*got.CottenDNSOptions)["COTTENMAX_LOW_REDUCTION_PERCENT"] != 70 {
+		t.Fatalf("CottenMax reduction target was lost across app restart: %#v", *got.CottenDNSOptions)
 	}
 }
 

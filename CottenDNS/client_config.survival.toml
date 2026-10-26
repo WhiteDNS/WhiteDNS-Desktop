@@ -11,6 +11,11 @@ ENCRYPTION_KEY = ""
 
 # CottenMax is a mode inside this same profile; keep the domain and key above.
 TUNNEL_MODE = "legacy"
+# Max traffic profile: full keeps current speed; low targets a configurable reduction.
+# Applies only to CottenMax. Reconnect to apply; see docs/COTTENMAX_TRAFFIC_PROFILES.md.
+COTTENMAX_TRAFFIC_PROFILE = "full"
+# Low bulk-speed reduction target: 10..90%, default 35%. Approximate; Full ignores it.
+COTTENMAX_LOW_REDUCTION_PERCENT = 35
 STANDBY_DOMAINS = []
 RESOLVER_DISCOVERY_ENABLED = false
 RESOLVER_DISCOVERY_COUNTRY = ""

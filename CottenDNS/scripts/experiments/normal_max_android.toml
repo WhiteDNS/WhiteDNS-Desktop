@@ -1,0 +1,17 @@
+# Normal settings from the Android CottenDNS defaults. The CLI fills other
+# unspecified settings from its default preset. Cipher 1 is Android's default
+# XOR; it does not provide the packet authentication supplied by Max.
+CONFIG_PRESET = "default"
+DATA_ENCRYPTION_METHOD = 1
+MIN_UPLOAD_MTU = 40
+MAX_UPLOAD_MTU = 140
+MIN_DOWNLOAD_MTU = 300
+MAX_DOWNLOAD_MTU = 3000
+UPLOAD_PACKET_DUPLICATION_COUNT = 3
+DOWNLOAD_PACKET_DUPLICATION_COUNT = 7
+UPLOAD_COMPRESSION_TYPE = 2
+DOWNLOAD_COMPRESSION_TYPE = 2
+BASE_ENCODE_DATA = false
+MTU_TEST_RETRIES_RESOLVERS = 3
+MTU_TEST_TIMEOUT_RESOLVERS = 2.5
+MTU_TEST_PARALLELISM_RESOLVERS = 100

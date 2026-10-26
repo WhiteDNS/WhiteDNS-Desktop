@@ -1,0 +1,18 @@
+Cipher packet microbenchmarks
+
+CPU: AMD Ryzen 7 6800H; 8 cores / 16 logical processors
+
+Go: go1.26.5 windows/amd64
+
+Command: go test -tags maxexperiment ./internal/cottenmax/engine -run ^$ -bench ^BenchmarkExperimentPacketCrypto$ -benchmem -benchtime 150ms -count 5 -cpu 1
+
+One benchmark worker, default Go CPU crypto acceleration, power/temperature uncontrolled; local desktop performance only. Plaintext MB/s is not tunnel goodput.
+
+GODEBUG=
+
+
+Second run: same five repeats with GODEBUG=cpu.aes=off,cpu.pclmulqdq=off.
+WARNING: this was NOT software AES on the installed Go 1.26.5 Windows runtime.
+Go runtime/proc.go getGodebugEarly excludes Windows, then cpuinit(godebug) executes before goenvs; subsequent parseRuntimeDebugVars does not reinitialize CPU feature flags.
+Confirmed separately: go test crypto/aes -run ^$ -bench ^BenchmarkEncrypt$ -benchtime 100ms -count 1 -cpu 1 with those settings still measured AES128 at 7.491 ns/block, AES192 7.828, AES256 8.939.
+The file crypto-packet-windows-godebug-ineffective.txt is retained as a repeatability observation, not a no-AES-hardware result.

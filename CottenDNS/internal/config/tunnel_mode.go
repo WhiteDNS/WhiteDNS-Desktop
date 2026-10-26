@@ -10,7 +10,21 @@ import (
 const (
 	TunnelLegacy    = "legacy"
 	TunnelCottenMax = "cottenmax"
+
+	CottenMaxTrafficFull = "full"
+	CottenMaxTrafficLow  = "low"
 )
+
+func normalizeCottenMaxTrafficProfile(profile string) (string, error) {
+	profile = strings.ToLower(strings.TrimSpace(profile))
+	if profile == "" {
+		profile = CottenMaxTrafficFull
+	}
+	if profile != CottenMaxTrafficFull && profile != CottenMaxTrafficLow {
+		return "", fmt.Errorf("invalid COTTENMAX_TRAFFIC_PROFILE %q (want full or low)", profile)
+	}
+	return profile, nil
+}
 
 func normalizeTunnelMode(mode string) (string, error) {
 	mode = strings.ToLower(strings.TrimSpace(mode))

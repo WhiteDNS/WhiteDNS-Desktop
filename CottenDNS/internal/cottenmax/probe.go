@@ -18,6 +18,9 @@ const maxProbeBytes = 64 << 10
 
 // Authenticate checks the server identity using the live engine's DNS paths.
 func (c *Client) Authenticate(ctx context.Context) error {
+	if c.parallel != nil {
+		return c.parallel.authenticate(ctx)
+	}
 	if c.failover != nil {
 		return c.failover.authenticate(ctx)
 	}

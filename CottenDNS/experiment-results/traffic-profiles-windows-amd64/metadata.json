@@ -1,0 +1,33 @@
+{
+  "utc": "2026-10-25T16:18:47.414000+00:00",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "machine": "AMD64",
+  "processor": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD",
+  "logical_cpus": 16,
+  "runs": 3,
+  "sequential": true,
+  "godebug": "",
+  "current_source_commit": "7934e3c2714627aa2b6ca9bf7058a5fb770ae9e2",
+  "prior_binary_identity_note": "Retained binary from prior experiments; no source-commit identity claim. File SHA256 and Go build metadata retained.",
+  "limitations": [
+    "Shaped loopback UDP DNS, not a VPS or physical ISP.",
+    "Power, temperature, background OS work not controlled.",
+    "DNS-byte counters exclude IP/UDP headers.",
+    "Payload QPS excludes warmup and stream-open work, retained separately in raw result."
+  ],
+  "binaries": {
+    "current": {
+      "path": "D:\\GitHub\\cottenDNS\\.cache\\cottenmax-parity-multidomain-crypto\\.cache\\maxexperiment-traffic.exe",
+      "sha256": "6c87fd992559395e6e86d2feaee613257853c47639b0127302a2867cfa2bc4cb",
+      "go_version_m": "D:\\GitHub\\cottenDNS\\.cache\\cottenmax-parity-multidomain-crypto\\.cache\\maxexperiment-traffic.exe: go1.26.5\n\tpath\tcottendns-go/cmd/maxexperiment\n\tmod\tcottendns-go\tv0.0.0-20261024182838-7db7b73658c7\t\n\tdep\tgithub.com/BurntSushi/toml\tv1.4.0\th1:kuoIxZQy2WRRk1pttg9asf+WVv6tWQuBNVmK8+nqPr0=\n\tdep\tgithub.com/klauspost/compress\tv1.18.5\th1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE=\n\tdep\tgithub.com/klauspost/cpuid/v2\tv2.3.0\th1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=\n\tdep\tgithub.com/klauspost/reedsolomon\tv1.14.1\th1:swE9kzyWXD/wVG+l5Pe8bWnQ0giIY7D1GjCBKk3kG2U=\n\tdep\tgithub.com/pierrec/lz4/v4\tv4.1.26\th1:GrpZw1gZttORinvzBdXPUXATeqlJjqUG/D87TKMnhjY=\n\tdep\tgolang.org/x/crypto\tv0.54.0\th1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=\n\tdep\tgolang.org/x/sys\tv0.47.0\th1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\t-tags=maxexperiment\n\tbuild\t-trimpath=true\n\tbuild\tCGO_ENABLED=0\n\tbuild\tGOARCH=amd64\n\tbuild\tGOOS=windows\n\tbuild\tGOAMD64=v1\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=7db7b73658c791cce62300d29647e4d369d6e1e4\n\tbuild\tvcs.time=2026-10-24T18:28:38Z\n\tbuild\tvcs.modified=false"
+    },
+    "prior": {
+      "path": "D:\\GitHub\\cottenDNS\\.cache\\cottenmax-parity-multidomain-crypto\\.cache\\maxexperiment.exe",
+      "sha256": "bdd147b17b5ec34b27f0a8c61a1704d6ffe9145271d44a5da06eb046b8f0c3e6",
+      "go_version_m": "D:\\GitHub\\cottenDNS\\.cache\\cottenmax-parity-multidomain-crypto\\.cache\\maxexperiment.exe: go1.26.5\n\tpath\tcottendns-go/cmd/maxexperiment\n\tmod\tcottendns-go\tv0.0.0-20261024182838-7db7b73658c7\t\n\tdep\tgithub.com/BurntSushi/toml\tv1.4.0\th1:kuoIxZQy2WRRk1pttg9asf+WVv6tWQuBNVmK8+nqPr0=\n\tdep\tgithub.com/klauspost/compress\tv1.18.5\th1:/h1gH5Ce+VWNLSWqPzOVn6XBO+vJbCNGvjoaGBFW2IE=\n\tdep\tgithub.com/klauspost/cpuid/v2\tv2.3.0\th1:S4CRMLnYUhGeDFDqkGriYKdfoFlDnMtqTiI/sFzhA9Y=\n\tdep\tgithub.com/klauspost/reedsolomon\tv1.14.1\th1:swE9kzyWXD/wVG+l5Pe8bWnQ0giIY7D1GjCBKk3kG2U=\n\tdep\tgithub.com/pierrec/lz4/v4\tv4.1.26\th1:GrpZw1gZttORinvzBdXPUXATeqlJjqUG/D87TKMnhjY=\n\tdep\tgolang.org/x/crypto\tv0.54.0\th1:YLIA59K4fiNzHzjnZt2tUJQjQtUWfWbeHBqKtk3eScw=\n\tdep\tgolang.org/x/sys\tv0.47.0\th1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=\n\tbuild\t-buildmode=exe\n\tbuild\t-compiler=gc\n\tbuild\t-tags=maxexperiment\n\tbuild\t-trimpath=true\n\tbuild\tCGO_ENABLED=0\n\tbuild\tGOARCH=amd64\n\tbuild\tGOOS=windows\n\tbuild\tGOAMD64=v1\n\tbuild\tvcs=git\n\tbuild\tvcs.revision=7db7b73658c791cce62300d29647e4d369d6e1e4\n\tbuild\tvcs.time=2026-10-24T18:28:38Z\n\tbuild\tvcs.modified=false"
+    }
+  },
+  "cpu": "AMD Ryzen 7 6800H with Radeon Graphics",
+  "build_command": "go build -tags maxexperiment -trimpath -o .cache/maxexperiment-traffic.exe ./cmd/maxexperiment",
+  "embedded_vcs_note": "Go reports the enclosing repository revision for this nested Git worktree. The embedded vcs.revision is not the source identity; use current_source_commit, the recorded build command, and binary SHA256."
+}

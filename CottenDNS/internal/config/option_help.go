@@ -13,6 +13,10 @@ func optionHelp(key string, server bool) string {
 		return ""
 	}
 	switch key {
+	case "COTTENMAX_TRAFFIC_PROFILE":
+		return "full (default, current Max behavior) or low (adjustable reduction target); reconnect to apply"
+	case "COTTENMAX_LOW_REDUCTION_PERCENT":
+		return "Low-mode bulk speed reduction target relative to Full, 10..90 percent, default 35; approximate and network-dependent; Full ignores it"
 	case "COTTENMAX_FEC_DOWNLOAD_ENABLED":
 		return "Optional Max download parity recovery; default off; FEC-capable server required; extra bandwidth"
 	case "COTTENMAX_FEC_DATA_SHARDS":

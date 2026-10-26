@@ -1,0 +1,372 @@
+[
+  {
+    "category": "default-regression",
+    "profile": "loopback-download-one-flow",
+    "variant": "current-full",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 68.13941818856753,
+    "min_mbps": 67.09602182142338,
+    "max_mbps": 73.87880764125227,
+    "median_seconds": 0.9848758,
+    "min_seconds": 0.9083642,
+    "max_seconds": 1.0001914,
+    "median_qps": 21522.510757193955,
+    "min_qps": 21193.943479218076,
+    "max_qps": 23339.75733521863,
+    "median_warmup_ms": 4.147,
+    "min_warmup_ms": 3.151,
+    "max_warmup_ms": 5.572,
+    "median_open_ms": 0.564,
+    "min_open_ms": 0.537,
+    "max_open_ms": 1.059,
+    "median_queries": 21198,
+    "median_up_dns_bytes": 1645568,
+    "median_down_dns_bytes": 10740438,
+    "max_sampled_inflight": 128,
+    "verified_bytes": 8388608,
+    "domains_with_payload_queries": [
+      [
+        21201
+      ],
+      [
+        21197
+      ],
+      [
+        21198
+      ]
+    ],
+    "percent_mbps_vs_baseline": 0.14663777909862397,
+    "percent_qps_vs_baseline": 0.14663777909864617,
+    "median_cold_auth_probe_ms": 3.624,
+    "min_cold_auth_probe_ms": 2.61,
+    "max_cold_auth_probe_ms": 4.459
+  },
+  {
+    "category": "default-regression",
+    "profile": "loopback-download-one-flow",
+    "variant": "prior-binary",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 68.03964636223539,
+    "min_mbps": 66.2674201787957,
+    "max_mbps": 73.90673123198692,
+    "median_seconds": 0.98632,
+    "min_seconds": 0.908021,
+    "max_seconds": 1.0126977,
+    "median_qps": 21490.99683672642,
+    "min_qps": 20935.171473184942,
+    "max_qps": 23195.498782517145,
+    "median_warmup_ms": 4.292,
+    "min_warmup_ms": 3.335,
+    "max_warmup_ms": 4.484,
+    "median_open_ms": 0.566,
+    "min_open_ms": 0.54,
+    "max_open_ms": 1.046,
+    "median_queries": 21197,
+    "median_up_dns_bytes": 1645484,
+    "median_down_dns_bytes": 10740256,
+    "max_sampled_inflight": 128,
+    "verified_bytes": 8388608,
+    "domains_with_payload_queries": [
+      [
+        21197
+      ],
+      [
+        21201
+      ],
+      [
+        21062
+      ]
+    ],
+    "percent_mbps_vs_baseline": 0.0,
+    "percent_qps_vs_baseline": 0.0,
+    "median_cold_auth_probe_ms": 3.307,
+    "min_cold_auth_probe_ms": 2.601,
+    "max_cold_auth_probe_ms": 3.786
+  },
+  {
+    "category": "profiles",
+    "profile": "120ms-loss3-download-four-flows",
+    "variant": "full",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 1.4409163371304716,
+    "min_mbps": 1.369015593112882,
+    "max_mbps": 1.5267953178175968,
+    "median_seconds": 0.7277147,
+    "min_seconds": 0.6867823,
+    "max_seconds": 0.7659343,
+    "median_qps": 498.82185972057454,
+    "min_qps": 493.5149137465185,
+    "max_qps": 541.656358936449,
+    "median_warmup_ms": 2018.298,
+    "min_warmup_ms": 1924.745,
+    "max_warmup_ms": 2258.661,
+    "median_open_ms": 242.137,
+    "min_open_ms": 241.776,
+    "max_open_ms": 242.439,
+    "median_queries": 372,
+    "median_up_dns_bytes": 29178,
+    "median_down_dns_bytes": 174283,
+    "max_sampled_inflight": 128,
+    "verified_bytes": 131072,
+    "domains_with_payload_queries": [
+      [
+        180,
+        192
+      ],
+      [
+        198,
+        180
+      ],
+      [
+        185,
+        178
+      ]
+    ],
+    "percent_mbps_vs_baseline": 0.0,
+    "percent_qps_vs_baseline": 0.0,
+    "median_cold_auth_probe_ms": 608.355,
+    "min_cold_auth_probe_ms": 608.228,
+    "max_cold_auth_probe_ms": 728.602
+  },
+  {
+    "category": "profiles",
+    "profile": "120ms-loss3-download-four-flows",
+    "variant": "low",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 0.2102499623692878,
+    "min_mbps": 0.2085379780891295,
+    "max_mbps": 0.21058587149742353,
+    "median_seconds": 4.9872827,
+    "min_seconds": 4.9793274,
+    "max_seconds": 5.0282256,
+    "median_qps": 73.18614603499417,
+    "min_qps": 72.78909681379452,
+    "max_qps": 73.70473369555897,
+    "median_warmup_ms": 1654.412,
+    "min_warmup_ms": 1575.957,
+    "max_warmup_ms": 3856.759,
+    "median_open_ms": 590.504,
+    "min_open_ms": 272.454,
+    "max_open_ms": 669.382,
+    "median_queries": 366,
+    "median_up_dns_bytes": 28660,
+    "median_down_dns_bytes": 178524,
+    "max_sampled_inflight": 16,
+    "verified_bytes": 131072,
+    "domains_with_payload_queries": [
+      [
+        183,
+        184
+      ],
+      [
+        183,
+        183
+      ],
+      [
+        181,
+        184
+      ]
+    ],
+    "percent_mbps_vs_baseline": -85.40859334081864,
+    "percent_qps_vs_baseline": -85.32819991569917,
+    "median_cold_auth_probe_ms": 608.498,
+    "min_cold_auth_probe_ms": 608.295,
+    "max_cold_auth_probe_ms": 609.036
+  },
+  {
+    "category": "profiles",
+    "profile": "80ms-download-four-flows",
+    "variant": "full",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 3.1723042964741417,
+    "min_mbps": 2.5665529812201173,
+    "max_mbps": 3.1804126259750967,
+    "median_seconds": 0.3305408,
+    "min_seconds": 0.3296981,
+    "max_seconds": 0.4085542,
+    "median_qps": 1034.6680349294247,
+    "min_qps": 881.1560375587866,
+    "max_qps": 1049.444931590446,
+    "median_warmup_ms": 1299.426,
+    "min_warmup_ms": 1137.276,
+    "max_warmup_ms": 1385.405,
+    "median_open_ms": 162.678,
+    "min_open_ms": 162.6,
+    "max_open_ms": 163.249,
+    "median_queries": 346,
+    "median_up_dns_bytes": 27063,
+    "median_down_dns_bytes": 169062,
+    "max_sampled_inflight": 128,
+    "verified_bytes": 131072,
+    "domains_with_payload_queries": [
+      [
+        171,
+        171
+      ],
+      [
+        175,
+        185
+      ],
+      [
+        171,
+        175
+      ]
+    ],
+    "percent_mbps_vs_baseline": 0.0,
+    "percent_qps_vs_baseline": 0.0,
+    "median_cold_auth_probe_ms": 489.826,
+    "min_cold_auth_probe_ms": 489.194,
+    "max_cold_auth_probe_ms": 492.775
+  },
+  {
+    "category": "profiles",
+    "profile": "80ms-download-four-flows",
+    "variant": "low",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 0.3098136929972673,
+    "min_mbps": 0.3071655908545635,
+    "max_mbps": 0.3108361393018874,
+    "median_seconds": 3.3845373,
+    "min_seconds": 3.3734044,
+    "max_seconds": 3.4137157,
+    "median_qps": 97.79771078309582,
+    "min_qps": 96.96179444585852,
+    "max_qps": 97.82402607881818,
+    "median_warmup_ms": 1065.167,
+    "min_warmup_ms": 973.243,
+    "max_warmup_ms": 1140.81,
+    "median_open_ms": 1098.358,
+    "min_open_ms": 1024.217,
+    "max_open_ms": 1190.872,
+    "median_queries": 331,
+    "median_up_dns_bytes": 25719,
+    "median_down_dns_bytes": 167710,
+    "max_sampled_inflight": 11,
+    "verified_bytes": 131072,
+    "domains_with_payload_queries": [
+      [
+        166,
+        165
+      ],
+      [
+        164,
+        166
+      ],
+      [
+        165,
+        166
+      ]
+    ],
+    "percent_mbps_vs_baseline": -90.23379650742807,
+    "percent_qps_vs_baseline": -90.5479141636219,
+    "median_cold_auth_probe_ms": 408.731,
+    "min_cold_auth_probe_ms": 407.372,
+    "max_cold_auth_probe_ms": 409.481
+  },
+  {
+    "category": "profiles",
+    "profile": "80ms-upload-four-flows",
+    "variant": "full",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 0.32220239813058105,
+    "min_mbps": 0.32163779283328214,
+    "max_mbps": 0.3223673854871714,
+    "median_seconds": 0.8136004,
+    "min_seconds": 0.813184,
+    "max_seconds": 0.8150286,
+    "median_qps": 1313.3558948528255,
+    "min_qps": 1312.8373654617765,
+    "max_qps": 1313.9128250182769,
+    "median_warmup_ms": 1218.965,
+    "min_warmup_ms": 1058.065,
+    "max_warmup_ms": 1383.585,
+    "median_open_ms": 162.078,
+    "min_open_ms": 80.765,
+    "max_open_ms": 163.176,
+    "median_queries": 1069,
+    "median_up_dns_bytes": 137359,
+    "median_down_dns_bytes": 168248,
+    "max_sampled_inflight": 128,
+    "verified_bytes": 32768,
+    "domains_with_payload_queries": [
+      [
+        535,
+        536
+      ],
+      [
+        534,
+        534
+      ],
+      [
+        535,
+        534
+      ]
+    ],
+    "percent_mbps_vs_baseline": 0.0,
+    "percent_qps_vs_baseline": 0.0,
+    "median_cold_auth_probe_ms": 409.604,
+    "min_cold_auth_probe_ms": 409.515,
+    "max_cold_auth_probe_ms": 489.766
+  },
+  {
+    "category": "profiles",
+    "profile": "80ms-upload-four-flows",
+    "variant": "low",
+    "successes": 3,
+    "failures": 0,
+    "repeats": 3,
+    "median_mbps": 0.024426681983039118,
+    "min_mbps": 0.02437788247276152,
+    "max_mbps": 0.024448636812974548,
+    "median_seconds": 10.731871,
+    "min_seconds": 10.7222338,
+    "max_seconds": 10.753354,
+    "median_qps": 99.33030316894417,
+    "min_qps": 99.13186155686867,
+    "max_qps": 99.41958176662777,
+    "median_warmup_ms": 1057.497,
+    "min_warmup_ms": 1057.096,
+    "max_warmup_ms": 1066.897,
+    "median_open_ms": 1106.481,
+    "min_open_ms": 1097.246,
+    "max_open_ms": 1108.688,
+    "median_queries": 1066,
+    "median_up_dns_bytes": 137122,
+    "median_down_dns_bytes": 168041,
+    "max_sampled_inflight": 14,
+    "verified_bytes": 32768,
+    "domains_with_payload_queries": [
+      [
+        532,
+        534
+      ],
+      [
+        534,
+        532
+      ],
+      [
+        532,
+        534
+      ]
+    ],
+    "percent_mbps_vs_baseline": -92.41883917538703,
+    "percent_qps_vs_baseline": -92.43690887152297,
+    "median_cold_auth_probe_ms": 409.218,
+    "min_cold_auth_probe_ms": 407.691,
+    "max_cold_auth_probe_ms": 409.85
+  }
+]

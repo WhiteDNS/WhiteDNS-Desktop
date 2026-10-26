@@ -1,0 +1,54 @@
+name: CottenMax isolated experiments
+
+on:
+  push:
+    branches: [experiment/cottenmax-parity-multidomain-crypto]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lab:
+    if: github.repository == 'WhiteDNS/CottenDNS'
+    name: ${{ matrix.label }} real-DNS measurements
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            label: linux-amd64
+          - os: ubuntu-24.04-arm
+            label: linux-arm64
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-go@v6
+        with:
+          go-version: '1.26.5'
+          cache: true
+      - name: Validate both ordinary and experimental paths
+        run: |
+          go test ./internal/cottenmax/... -count=1 -timeout 180s
+          go test -tags maxexperiment ./internal/cottenmax/... -count=1 -timeout 180s
+          go vet -tags maxexperiment ./internal/cottenmax/... ./cmd/maxexperiment
+      - name: Run sequential real-DNS transfer matrix
+        run: |
+          mkdir -p .bench
+          go build -tags maxexperiment -trimpath -o .bench/maxexperiment ./cmd/maxexperiment
+          python3 scripts/experiments/max_matrix.py --binary .bench/maxexperiment --output experiment-results/${{ matrix.label }} --runs 3
+      - name: Measure packet crypto with native acceleration
+        if: always()
+        run: go test -tags maxexperiment ./internal/cottenmax/engine -run '^$' -bench '^BenchmarkExperimentPacketCrypto$' -benchmem -benchtime 100ms -count 3 -cpu 1 > experiment-results/${{ matrix.label }}/packet-native.txt
+      - name: Compare x86 without AES acceleration
+        if: matrix.label == 'linux-amd64'
+        env:
+          GODEBUG: cpu.aes=off,cpu.pclmulqdq=off
+        run: go test -tags maxexperiment ./internal/cottenmax/engine -run '^$' -bench '^BenchmarkExperimentPacketCrypto$' -benchmem -benchtime 100ms -count 3 -cpu 1 > experiment-results/${{ matrix.label }}/packet-noaes.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: max-experiments-${{ matrix.label }}-${{ github.sha }}
+          path: experiment-results/${{ matrix.label }}
+          if-no-files-found: error

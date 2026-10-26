@@ -100,10 +100,7 @@ jobs:
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
-        run: |
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 update
-          sudo env DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install --no-install-recommends -y \
-            build-essential curl file libarchive-tools pkg-config rpm zstd libgtk-3-dev libwebkit2gtk-4.1-dev
+        run: bash desktop/scripts/install-ci-linux-deps.sh "${{ matrix.arch }}"
 
       - name: Install frontend dependencies
         run: npm ci --prefix desktop/frontend

@@ -607,6 +607,222 @@ func writeLargeResolverFile(t *testing.T, path string, count int) {
 	}
 }
 
+func TestConnectionImportsSkipDuplicatesAndPreserveDifferentResolvers(t *testing.T) {
+	app := testConnectionLockedApp(t, model.RuntimeDisconnected)
+	link := testStormDNSImportLink(t, "First", "same.example.org", "test-key")
+	result, err := app.ImportConnectionProfiles(link+"\n"+link, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || result.Skipped != 1 {
+		t.Fatalf("batch result: imported=%d skipped=%d", result.Imported, result.Skipped)
+	}
+	selected := result.State.SelectedConnectionProfileID
+	count := len(result.State.ConnectionProfiles)
+	renamed := testStormDNSImportLink(t, "Renamed", "SAME.EXAMPLE.ORG.", "test-key")
+	result, err = app.ImportConnectionProfiles(renamed, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 0 || result.Skipped != 1 || result.State.SelectedConnectionProfileID != selected || len(result.State.ConnectionProfiles) != count {
+		t.Fatal("reimport duplicated the endpoint or changed selection")
+	}
+	app.state.ResolverProfiles = append(app.state.ResolverProfiles, model.ResolverProfile{ID: "different-dns", Name: "Different", ResolverText: "192.0.2.53"})
+	app.state.SelectedResolverProfileID = "different-dns"
+	result, err = app.ImportConnectionProfiles(link, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || result.Skipped != 0 {
+		t.Fatal("different resolver was treated as a duplicate")
+	}
+	loaded, err := app.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ConnectionProfiles) != count+1 {
+		t.Fatal("import was not persisted")
+	}
+}
+
+func TestSoarReimportSkipsManagedResolversAndPreservesTuning(t *testing.T) {
+	app := testConnectionLockedApp(t, model.RuntimeDisconnected)
+	settings := model.DefaultSoarSettings()
+	p := model.ConnectionProfile{Name: "Synthetic Soar", ImportType: model.ImportTypeSoar, Domain: "account.example.org", EncryptionKey: base64.StdEncoding.EncodeToString(make([]byte, 32)), SoarSettings: &settings, BootstrapResolvers: []string{"192.0.2.53", "198.51.100.53:5353"}}
+	link, err := profiles.ExportConnectionProfile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := app.ImportConnectionProfiles(link, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resolverCount := len(first.State.ResolverProfiles)
+	second, err := app.ImportConnectionProfiles(link, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Imported != 0 || second.Skipped != 1 || len(second.State.ResolverProfiles) != resolverCount {
+		t.Fatal("Soar reimport duplicated a profile or managed resolvers")
+	}
+	settings.MaxQName = 101
+	p.SoarSettings = &settings
+	link, err = profiles.ExportConnectionProfile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	third, err := app.ImportConnectionProfiles(link, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if third.Imported != 1 {
+		t.Fatal("different Soar tuning was removed")
+	}
+	// Editing a generated resolver must also make the original link distinct.
+	for i := range app.state.ResolverProfiles {
+		if app.state.ResolverProfiles[i].ID == first.State.SelectedConnectionProfileID+"-dns" {
+			app.state.ResolverProfiles[i].ResolverText = "203.0.113.53"
+		}
+	}
+	p.SoarSettings = nil
+	link, err = profiles.ExportConnectionProfile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fourth, err := app.ImportConnectionProfiles(link, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fourth.Imported != 1 {
+		t.Fatal("edited effective resolvers were ignored")
+	}
+}
+
+func TestRemoveDuplicatesPreservesActiveSelectedOwnershipAndDifferentConnections(t *testing.T) {
+	app := testConnectionLockedApp(t, model.RuntimeConnected)
+	base := model.ConnectionProfile{ID: "first", Name: "First", Domain: "same.example.org", EncryptionKey: "test-key", EncryptionMethod: 1, ResolverProfileID: model.DefaultResolverProfileID}
+	copyProfile := func(id string) model.ConnectionProfile { p := base; p.ID, p.Name = id, id; return p }
+	active, selected := copyProfile("active"), copyProfile("selected")
+	otherKey := copyProfile("other-key")
+	otherKey.EncryptionKey = "other-test-key"
+	otherEngine := copyProfile("other-engine")
+	otherEngine.ImportType = model.ImportTypeCottenDNS
+	otherResolver := copyProfile("other-resolver")
+	otherResolver.ResolverProfileID = "different-dns"
+	app.state.ResolverProfiles = append(app.state.ResolverProfiles, model.ResolverProfile{ID: "different-dns", Name: "Different", ResolverText: "192.0.2.53"})
+	subA, subB := copyProfile("source-a"), copyProfile("source-b")
+	subA.Subscription = &model.SubscriptionSource{URL: "https://one.example.org/sub/test", RemoteID: "account", Total: 1234}
+	subB.Subscription = &model.SubscriptionSource{URL: "https://two.example.org/sub/test", RemoteID: "account", Total: 5678}
+	app.state.ConnectionProfiles = append(app.state.ConnectionProfiles[:1], base, active, selected, otherKey, otherEngine, otherResolver, subA, subB)
+	app.state.SelectedConnectionProfileID = selected.ID
+	app.state.Runtime.ActiveConnectionID = active.ID
+	result, err := app.RemoveDuplicateConnectionProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Removed != 1 {
+		t.Fatalf("expected only unprotected duplicate removed, got %d", result.Removed)
+	}
+	if result.State.SelectedConnectionProfileID != selected.ID || result.State.Runtime.ActiveConnectionID != active.ID || result.State.Runtime.Status != model.RuntimeConnected {
+		t.Fatal("active/selected connection changed")
+	}
+	for _, p := range result.State.ConnectionProfiles {
+		if p.ID == base.ID {
+			t.Fatal("unprotected duplicate was retained")
+		}
+		if p.ID == subA.ID && p.Subscription.Total != 1234 {
+			t.Fatal("subscription metadata changed")
+		}
+	}
+	loaded, err := app.store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.ConnectionProfiles) != len(result.State.ConnectionProfiles) {
+		t.Fatal("removal was not persisted")
+	}
+	again, err := app.RemoveDuplicateConnectionProfiles()
+	if err != nil || again.Removed != 0 {
+		t.Fatal("repeated cleanup removed protected profiles", err)
+	}
+}
+
+func TestConnectionDuplicateOperationsRollBackOnSaveFailure(t *testing.T) {
+	for _, operation := range []string{"import", "remove"} {
+		t.Run(operation, func(t *testing.T) {
+			app := testConnectionLockedApp(t, model.RuntimeDisconnected)
+			if operation == "remove" {
+				p := app.state.ConnectionProfiles[1]
+				p.ID = "duplicate"
+				app.state.ConnectionProfiles = append(app.state.ConnectionProfiles, p)
+			}
+			before, err := json.Marshal(app.state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			// A directory cannot be atomically replaced by the state file.
+			app.store = profiles.NewStore(t.TempDir())
+			if operation == "import" {
+				_, err = app.ImportConnectionProfiles(testStormDNSImportLink(t, "New", "new.example.org", "test-key"), "")
+			} else {
+				_, err = app.RemoveDuplicateConnectionProfiles()
+			}
+			if err == nil {
+				t.Fatal("expected persistence failure")
+			}
+			after, err := json.Marshal(app.state)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if string(before) != string(after) {
+				t.Fatal("failed save changed in-memory state")
+			}
+		})
+	}
+}
+
+func TestRemoveSoarDuplicatesComparesManagedResolverFiles(t *testing.T) {
+	app := testConnectionLockedApp(t, model.RuntimeDisconnected)
+	settings := model.DefaultSoarSettings()
+	p := model.ConnectionProfile{ID: "soar-original", Name: "Original", ImportType: model.ImportTypeSoar, Domain: "account.example.org", EncryptionKey: base64.StdEncoding.EncodeToString(make([]byte, 32)), SoarSettings: &settings, BootstrapResolvers: []string{"192.0.2.53", "198.51.100.53:5353"}}
+	attachImportedResolvers(&app.state, &p)
+	app.state.ConnectionProfiles = append(app.state.ConnectionProfiles, p)
+	duplicate := p
+	duplicate.ID, duplicate.Name, duplicate.ResolverProfileID = "soar-copy", "Copy", "soar-copy-dns"
+	file := filepath.Join(t.TempDir(), "resolvers.txt")
+	if err := os.WriteFile(file, []byte("192.0.2.53\n198.51.100.53:5353\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	app.state.ResolverProfiles = append(app.state.ResolverProfiles, model.ResolverProfile{ID: duplicate.ResolverProfileID, Name: "Copied DNS", ResolverSource: "file", ResolverFile: file})
+	app.state.ConnectionProfiles = append(app.state.ConnectionProfiles, duplicate)
+	unreadable := duplicate
+	unreadable.ID, unreadable.ResolverProfileID = "soar-unreadable", "soar-unreadable-dns"
+	app.state.ConnectionProfiles = append(app.state.ConnectionProfiles, unreadable)
+	app.state.SelectedConnectionProfileID = p.ID
+	app.state.SelectedResolverProfileID = p.ResolverProfileID
+	result, err := app.RemoveDuplicateConnectionProfiles()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Removed != 1 {
+		t.Fatalf("expected only readable duplicate removed, got %d", result.Removed)
+	}
+	for _, profile := range result.State.ConnectionProfiles {
+		if profile.ID == duplicate.ID {
+			t.Fatal("duplicate with equivalent resolver file was retained")
+		}
+	}
+	if !hasTestConnectionNamed(result.State, unreadable.Name) {
+		t.Fatal("profile with unknown effective resolver was deleted")
+	}
+	if hasTestResolverProfile(result.State, duplicate.ResolverProfileID) {
+		t.Fatal("unused managed resolver was retained")
+	}
+	if !hasTestResolverProfile(result.State, p.ResolverProfileID) {
+		t.Fatal("selected managed resolver was removed")
+	}
+}
+
 func testStormDNSImportLink(t *testing.T, name, domain, key string) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{

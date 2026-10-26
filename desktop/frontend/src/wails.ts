@@ -3,6 +3,7 @@ import type {
   CloudflarePingResult,
   CottenDNSOptionDefinition,
   ConnectionImportResult,
+  ConnectionDeduplicationResult,
   ConnectionProfile,
   ConnectionTestResolver,
   ConnectionTestResult,
@@ -45,6 +46,7 @@ type AppApi = {
   ImportConnectionProfiles(rawText: string, importType: string): Promise<ConnectionImportResult>;
   DeleteConnectionProfile(id: string): Promise<AppState>;
   DeleteConnectionProfiles(ids: string[]): Promise<AppState>;
+  RemoveDuplicateConnectionProfiles(): Promise<ConnectionDeduplicationResult>;
   TestConnectionProfile(profile: ConnectionProfile, trustedResolvers: ConnectionTestResolver[]): Promise<ConnectionTestResult>;
   SelectConnectionProfile(id: string): Promise<AppState>;
   ReorderConnectionProfiles(ids: string[]): Promise<AppState>;
@@ -146,6 +148,7 @@ export const backend = {
   importConnectionProfiles: (rawText: string, importType: string) => app().ImportConnectionProfiles(rawText, importType),
   deleteConnectionProfile: (id: string) => app().DeleteConnectionProfile(id),
   deleteConnectionProfiles: (ids: string[]) => app().DeleteConnectionProfiles(ids),
+  removeDuplicateConnectionProfiles: () => app().RemoveDuplicateConnectionProfiles(),
   testConnectionProfile: (profile: ConnectionProfile, trustedResolvers: ConnectionTestResolver[]) => app().TestConnectionProfile(profile, trustedResolvers),
   selectConnectionProfile: (id: string) => app().SelectConnectionProfile(id),
   reorderConnectionProfiles: (ids: string[]) => app().ReorderConnectionProfiles(ids),

@@ -3033,13 +3033,14 @@ function ConnectionsPage({
   const [subscriptionBusy, setSubscriptionBusy] = useState(false);
   const [allowHTTP, setAllowHTTP] = useState(false);
   const [importText, setImportText] = useState("");
-  const [importType, setImportType] = useState<ImportType>("masterdns");
+  const [importType, setImportType] = useState<ImportType | "auto">("auto");
   const [exportText, setExportText] = useState("");
   const [exportTitle, setExportTitle] = useState("Export Connections");
   const [testRunning, setTestRunning] = useState(false);
   const [deleteDisabledRunning, setDeleteDisabledRunning] = useState(false);
   const [selectedForDeletion, setSelectedForDeletion] = useState<string[]>([]);
   const [deleteSelectedRunning, setDeleteSelectedRunning] = useState(false);
+  const [removeDuplicatesRunning, setRemoveDuplicatesRunning] = useState(false);
   const [testResults, setTestResults] = useState<Record<string, ConnectionTestResult>>({});
   const [testScanningIds, setTestScanningIds] = useState<Record<string, boolean>>({});
   const [testCheckedAt, setTestCheckedAt] = useState<Record<string, number>>({});
@@ -3176,12 +3177,12 @@ function ConnectionsPage({
         } finally {setSubscriptionBusy(false);}
         return;
       }
-      const result = await backend.importConnectionProfiles(importText, importType);
+      const result = await backend.importConnectionProfiles(importText, importType === "auto" ? "" : importType);
       onState(result.state);
       setImportText("");
-      setImportType("masterdns");
+      setImportType("auto");
       setImportOpen(false);
-      onSuccess(`Imported ${result.imported} connection profile${result.imported === 1 ? "" : "s"}.`);
+      onSuccess(`Imported ${result.imported} connection profile${result.imported === 1 ? "" : "s"}.${result.skipped ? ` Skipped ${result.skipped} duplicate${result.skipped === 1 ? "" : "s"}.` : ""}`);
     } catch (err) {
       onError(messageFromError(err));
     }
@@ -3311,6 +3312,24 @@ function ConnectionsPage({
     }
   }
 
+  async function removeDuplicateConnections() {
+    onError("");
+    setRemoveDuplicatesRunning(true);
+    try {
+      const result = await backend.removeDuplicateConnectionProfiles();
+      onState(result.state);
+      const remaining = new Set(result.state.connectionProfiles.map((profile) => profile.id));
+      setTestResults((current) => Object.fromEntries(Object.entries(current).filter(([id]) => remaining.has(id))));
+      setTestScanningIds((current) => Object.fromEntries(Object.entries(current).filter(([id]) => remaining.has(id))));
+      setTestCheckedAt((current) => Object.fromEntries(Object.entries(current).filter(([id]) => remaining.has(id))));
+      onSuccess(result.removed ? `Removed ${result.removed} duplicate connection profile${result.removed === 1 ? "" : "s"}.` : "No duplicate connection profiles found.");
+    } catch (err) {
+      onError(messageFromError(err));
+    } finally {
+      setRemoveDuplicatesRunning(false);
+    }
+  }
+
   async function deleteDisabledConnections() {
     if (!deletableDisabledProfiles.length) {
       return;
@@ -3393,6 +3412,17 @@ function ConnectionsPage({
               )}
             </div>
             <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={state.connectionProfiles.length < 2 || removeDuplicatesRunning || testRunning || runtimeBusy || subscriptionBusy}
+                onClick={removeDuplicateConnections}
+                aria-label="Remove duplicate connections"
+              >
+                <Copy className="size-3.5" />
+                <span className="hidden sm:inline">{removeDuplicatesRunning ? "Removing…" : "Remove duplicates"}</span>
+              </Button>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -3683,7 +3713,7 @@ function ConnectionsPage({
       </Dialog>
 
       <Dialog open={importOpen} onOpenChange={setImportOpen}>
-        <DialogContent className="max-h-[calc(100svh-2rem)] overflow-hidden sm:max-w-lg">
+        <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>Import Connections</DialogTitle>
             <DialogDescription>Paste an HTTPS subscription URL, or Soar, MasterDNS, StormDNS or CottenDNS profile links.</DialogDescription>
@@ -3697,13 +3727,16 @@ function ConnectionsPage({
           />
           {isHTTPSubscription && <label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={allowHTTP} onChange={(e) => setAllowHTTP(e.target.checked)} disabled={subscriptionBusy} />Allow unencrypted HTTP for this source. Its URL and keys can be exposed; HTTPS is recommended.</label>}
           {isSubscription && isProfileLocked && <p className="text-sm text-destructive">Disconnect before importing subscriptions.</p>}
-          {!isSubscription && <SelectField
-            label="Import type"
-            value={importType}
-            onChange={setImportType}
-            options={importTypeOptions}
-            description="Used when pasted links do not carry an explicit type marker."
-          />}
+          {!isSubscription && <details className="space-y-3 text-sm">
+            <summary className="cursor-pointer text-muted-foreground">Legacy link options</summary>
+            <SelectField
+              label="Legacy link type"
+              value={importType}
+              onChange={setImportType}
+              options={[["auto", "Automatic"], ...importTypeOptions]}
+              description="Only used for older links without an engine marker. Automatic uses MasterDNS for those links."
+            />
+          </details>}
           <DialogFooter>
             <Button variant="outline" onClick={() => setImportOpen(false)}>
               Cancel

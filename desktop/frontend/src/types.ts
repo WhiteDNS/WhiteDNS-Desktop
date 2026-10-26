@@ -368,6 +368,12 @@ export interface AppState {
 export interface ConnectionImportResult {
   state: AppState;
   imported: number;
+  skipped: number;
+}
+
+export interface ConnectionDeduplicationResult {
+  state: AppState;
+  removed: number;
 }
 
 export interface V2RayImportResult {

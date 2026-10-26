@@ -28,12 +28,13 @@ func main() {
 	}
 
 	err = wails.Run(&options.App{
-		Title:             "WhiteDNS Desktop",
-		Width:             1280,
-		Height:            820,
-		MinWidth:          860,
-		MinHeight:         620,
-		HideWindowOnClose: false,
+		Title:                    "WhiteDNS Desktop",
+		Width:                    1280,
+		Height:                   820,
+		MinWidth:                 860,
+		MinHeight:                620,
+		HideWindowOnClose:        false,
+		EnableDefaultContextMenu: true,
 		AssetServer: &assetserver.Options{
 			Assets: assets,
 		},

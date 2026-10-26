@@ -190,6 +190,55 @@ func TestExportConnectionProfilesRejectsEmptyExport(t *testing.T) {
 	}
 }
 
+func TestImportEngineMarkersTakePrecedenceOverLegacyChoice(t *testing.T) {
+	for _, engine := range []string{model.ImportTypeMasterDNS, model.ImportTypeStormDNS, model.ImportTypeCottenDNS} {
+		t.Run(engine, func(t *testing.T) {
+			profile := modelConnectionProfile("Marked", "marked.example.org", "test-key", 1)
+			profile.ImportType = engine
+			link, err := ExportConnectionProfile(profile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, choice := range []string{"", model.ImportTypeMasterDNS, model.ImportTypeSoar} {
+				values, err := ParseConnectionProfileImports(link, "resolver", choice)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if values[0].ImportType != engine {
+					t.Fatalf("engine %s overridden by %q", engine, choice)
+				}
+			}
+		})
+	}
+	// The historical stormdns scheme without a payload marker keeps its
+	// MasterDNS default and still accepts an explicit legacy choice.
+	link := encodedStormDNSProfile(t, "Legacy", "legacy.example.org", "key", 1)
+	for _, choice := range []string{"", model.ImportTypeStormDNS, model.ImportTypeCottenDNS} {
+		values, err := ParseConnectionProfileImports(link, "resolver", choice)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := choice
+		if want == "" {
+			want = model.ImportTypeMasterDNS
+		}
+		if values[0].ImportType != want {
+			t.Fatalf("legacy choice %q resolved to %s", choice, values[0].ImportType)
+		}
+	}
+}
+
+func TestLegacySchemeUsesSoarPayloadMarker(t *testing.T) {
+	link := strings.Replace(soarLink(t, "synthetic-account", 8), "soar://", "stormdns://", 1)
+	values, err := ParseConnectionProfileImports(link, "resolver", model.ImportTypeMasterDNS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if values[0].ImportType != model.ImportTypeSoar || values[0].SoarSettings == nil {
+		t.Fatal("Soar payload marker was overridden")
+	}
+}
+
 func encodedStormDNSProfile(t *testing.T, name, domain, key string, method int) string {
 	t.Helper()
 	raw, err := json.Marshal(map[string]any{

@@ -46,7 +46,7 @@ func ParseConnectionProfileImports(rawText, resolverProfileID string, importType
 
 	profiles := make([]model.ConnectionProfile, 0, len(matches))
 	for idx, match := range matches {
-		profile, err := parseStormDNSProfile(match[2], resolverProfileID, importTypeFromScheme(match[1], importType))
+		profile, err := parseStormDNSProfile(match[2], resolverProfileID, match[1], importType)
 		if err != nil {
 			return nil, fmt.Errorf("profile %d: %w", idx+1, err)
 		}
@@ -124,7 +124,7 @@ func IsExportableConnectionProfile(profile model.ConnectionProfile) bool {
 	return len(model.ConnectionDomains(profile)) > 0 && strings.TrimSpace(profile.EncryptionKey) != ""
 }
 
-func parseStormDNSProfile(encoded, resolverProfileID string, importType string) (model.ConnectionProfile, error) {
+func parseStormDNSProfile(encoded, resolverProfileID, scheme, legacyType string) (model.ConnectionProfile, error) {
 	raw, err := decodeStormDNSProfile(encoded)
 	if err != nil {
 		return model.ConnectionProfile{}, err
@@ -140,11 +140,9 @@ func parseStormDNSProfile(encoded, resolverProfileID string, importType string) 
 	if payload.Version != 1 {
 		return model.ConnectionProfile{}, fmt.Errorf("unsupported profile version")
 	}
-	if strings.TrimSpace(importType) == "" {
-		importType = payload.ImportType
-	}
-	if strings.TrimSpace(importType) == "" {
-		importType = model.ImportTypeMasterDNS
+	importType, err := connectionImportType(scheme, payload.ImportType, legacyType)
+	if err != nil {
+		return model.ConnectionProfile{}, err
 	}
 
 	domains := model.NormalizeConnectionDomains(payload.Profile.Server.Domain, payload.Profile.Server.Domains)
@@ -214,22 +212,25 @@ func parseStormDNSProfile(encoded, resolverProfileID string, importType string) 
 	return profile, nil
 }
 
-func importTypeFromScheme(scheme string, requested string) string {
-	if strings.EqualFold(scheme, "soar") {
-		return model.ImportTypeSoar
+func connectionImportType(scheme, declared, legacyType string) (string, error) {
+	// Old clients used stormdns:// for several engines. A payload marker takes
+	// precedence there; the advanced choice is only a fallback for unmarked links.
+	if !strings.EqualFold(scheme, model.ImportTypeStormDNS) {
+		return model.NormalizeImportType(scheme), nil
 	}
-	// An explicit CottenDNS link must not inherit the import dialog's
-	// MasterDNS default and subsequently run through the wrong engine.
-	if strings.EqualFold(scheme, "cottendns") {
-		return model.ImportTypeCottenDNS
+	value := strings.ToLower(strings.TrimSpace(declared))
+	if value == "" {
+		value = strings.ToLower(strings.TrimSpace(legacyType))
 	}
-	if strings.TrimSpace(requested) != "" {
-		return model.NormalizeImportType(requested)
+	if value == "" {
+		return model.ImportTypeMasterDNS, nil
 	}
-	if model.NormalizeImportType(scheme) == model.ImportTypeStormDNS {
-		return ""
+	switch value {
+	case model.ImportTypeSoar, model.ImportTypeCottenDNS, model.ImportTypeMasterDNS, model.ImportTypeStormDNS:
+		return value, nil
+	default:
+		return "", fmt.Errorf("unsupported profile import type")
 	}
-	return model.NormalizeImportType(scheme)
 }
 
 func decodeStormDNSProfile(encoded string) ([]byte, error) {

@@ -114,6 +114,7 @@ const server=http.createServer((req,res)=>{const relative=decodeURIComponent(new
    locationPage.on('pageerror',e=>errors.push(e.message));
    await locationPage.addInitScript(installBridge,fixture);
    await locationPage.goto(origin+'/?location-test='+scenario);
+   await locationPage.getByRole('button',{name:'Connection details',exact:true}).click();
    if(scenario==='iran'){
     await locationPage.getByText('Iran',{exact:true}).waitFor();
    }else{

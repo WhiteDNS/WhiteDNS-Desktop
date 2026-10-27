@@ -20,6 +20,25 @@ type fakeParallelRuntimeManager struct {
 	stop  func() error
 }
 
+func TestParallelCandidatesNeverChangeSystemProxyOrTunRoutes(t *testing.T) {
+	for _, mode := range []string{"proxy", "vpn", "tun"} {
+		state := quickSetupApp(t).state
+		state.TunnelMode = mode
+		settings := model.DefaultSettingsProfile()
+		settings.SingBoxSetSystemProxy = true
+		cfg, err := buildParallelLaunchConfig(state, parallelTestPreset{Settings: settings}, []string{"1.1.1.1", "8.8.8.8"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cfg.SetSystemProxy || cfg.TunEnabled || strings.Contains(cfg.CoreConfig, `"protocol": "tun"`) {
+			t.Fatalf("%s candidate changed machine networking", mode)
+		}
+		if state.TunnelMode != mode {
+			t.Fatal("parallel test changed the user's saved mode")
+		}
+	}
+}
+
 func (m fakeParallelRuntimeManager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 	if m.start != nil {
 		return m.start(ctx, cfg)

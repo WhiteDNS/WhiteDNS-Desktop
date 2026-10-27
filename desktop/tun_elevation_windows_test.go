@@ -22,7 +22,7 @@ func TestNativeTunElevationHandoffParent(t *testing.T) {
 	if dir == "" {
 		t.Skip("native UAC test not requested")
 	}
-	if !tunElevationRequired() {
+	if !tunElevationRequired() && os.Getenv("WHITEDNS_TEST_ALREADY_ELEVATED_HANDOFF") != "1" {
 		t.Skip("test parent must start without administrator rights")
 	}
 	if filepath.Base(dir) != "WhiteDNS Desktop" {
@@ -40,6 +40,7 @@ func TestNativeTunElevationHandoffParent(t *testing.T) {
 	a := &App{state: state, configDir: dir, store: profiles.NewStore(filepath.Join(dir, "state.json"))}
 	quit := false
 	a.tunElevation = &tunElevationHooks{
+		needed: func() bool { return true }, // Exercise handoff on elevated CI runners too.
 		launch: func(ctx context.Context, file string) error {
 			return launchTunElevatedArgs(ctx, file, []string{"-test.run=^TestNativeTunElevationHandoffChild$", "--"})
 		},
@@ -51,7 +52,7 @@ func TestNativeTunElevationHandoffParent(t *testing.T) {
 	if !quit {
 		t.Fatal("native handoff did not release the original window")
 	}
-	t.Log("Native Windows administrator request accepted; elevated child acknowledged resume")
+	t.Log("Native Windows elevated child acknowledged the connection resume request")
 }
 
 func TestNativeTunElevationHandoffChild(t *testing.T) {

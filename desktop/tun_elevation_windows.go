@@ -46,7 +46,11 @@ func launchTunElevatedArgs(ctx context.Context, requestFile string, prefix []str
 	}
 	// This is the application window the user is asking to open, not a
 	// background shell. Windows owns the consent/credential dialog.
-	if err := windows.ShellExecute(0, verb, file, parameters, directory, windows.SW_SHOWNORMAL); err != nil {
+	show := int32(windows.SW_SHOWNORMAL)
+	if len(prefix) > 0 {
+		show = windows.SW_HIDE
+	} // Native test helper has no UI.
+	if err := windows.ShellExecute(0, verb, file, parameters, directory, show); err != nil {
 		if errors.Is(err, windows.ERROR_CANCELLED) {
 			return errTunElevationCancelled
 		}

@@ -49,6 +49,18 @@ func TestSoarProfileImportExportAndPinnedSettings(t *testing.T) {
 	}
 }
 
+func TestSubscriptionRefreshRetainsPinnedResolverFromRemovedAccount(t *testing.T) {
+	state := model.DefaultAppState()
+	state.GlobalResolverProfileID = "old-account-dns"
+	state.ResolverProfiles = append(state.ResolverProfiles, model.ResolverProfile{ID: "old-account-dns", ResolverText: "1.1.1.1"})
+	state.ConnectionProfiles = append(state.ConnectionProfiles, model.ConnectionProfile{ID: "old-account", ResolverProfileID: "old-account-dns", Subscription: &model.SubscriptionSource{URL: "https://example.org/sub"}})
+	doc := SubscriptionDocument{Source: model.SubscriptionSource{URL: "https://example.org/sub"}, Profiles: []model.ConnectionProfile{{RemoteID: "new-account", Name: "Replacement", BootstrapResolvers: []string{"8.8.8.8"}}}}
+	next := NormalizeState(ApplySubscription(state, doc, true))
+	if next.GlobalResolverProfileID != "old-account-dns" || next.SelectedResolverProfileID != "old-account-dns" {
+		t.Fatal("subscription refresh discarded the global resolver")
+	}
+}
+
 func TestSubscriptionRefreshPreservesPreferencesAndPersists(t *testing.T) {
 	address := "https://panel.example.org/sub/private"
 	headers := http.Header{"Subscription-Userinfo": []string{"upload=12; download=34; total=10737418240; expire=2000000000"}, "Profile-Update-Interval": []string{"12"}}

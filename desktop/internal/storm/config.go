@@ -24,6 +24,7 @@ type LaunchConfig struct {
 	CoreConfig         string                  `json:"singBoxConfig"`
 	CoreProtocol       string                  `json:"coreProtocol"`
 	SetSystemProxy     bool                    `json:"setSystemProxy"`
+	TunEnabled         bool                    `json:"tunEnabled"`
 	PublicListenIP     string                  `json:"publicListenIp"`
 	PublicListenPort   int                     `json:"publicListenPort"`
 	ClientTOML         string                  `json:"clientToml"`
@@ -101,6 +102,13 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 	}
 
 	settings = profiles.NormalizeSettingsProfile(settings)
+	switch state.TunnelMode {
+	case "proxy", "tun":
+		settings.SingBoxSetSystemProxy = false
+	case "vpn":
+		settings.SingBoxSetSystemProxy = true
+		settings.SingBoxInboundType = "mixed"
+	}
 	runtimeSettings := settings
 	if engine == model.ImportTypeCottenDNS {
 		runtimeSettings = cottendns.ApplyRuntimeSettings(settings)
@@ -108,11 +116,26 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 	masterDNSSettings := xray.MasterDNSSettings(runtimeSettings)
 	publicIP, publicPort := xray.PublicListen(settings)
 	coreConfig, err := xray.RenderConfig(runtimeSettings)
+	if err == nil && state.TunnelMode == "tun" {
+		coreConfig, err = xray.RenderDNSConfigWithTun(runtimeSettings)
+	}
 	if err != nil {
 		return LaunchConfig{}, err
 	}
 	clientConfig := renderLaunchClientTOML(connection, settings, masterDNSSettings, engine)
 	if engine == model.ImportTypeSoar {
+		if state.TunnelMode == "tun" {
+			// Capture routes must never catch the tunnel's own resolver sockets.
+			// Only selected resolvers have bypass routes; auto-discovery can add
+			// arbitrary upstream IPs after those routes have been installed.
+			// Use a copy so Proxy/VPN retain the saved discovery preference.
+			options := model.DefaultSoarSettings()
+			if connection.SoarSettings != nil {
+				options = *connection.SoarSettings
+			}
+			options.Discovery = false
+			connection.SoarSettings = &options
+		}
 		var err error
 		clientConfig, err = renderSoarConfig(connection, masterDNSSettings)
 		if err != nil {
@@ -130,6 +153,7 @@ func buildLaunchConfig(state model.AppState, settings model.SettingsProfile) (La
 		CoreConfig:         coreConfig,
 		CoreProtocol:       xray.PublicProtocol(settings.SingBoxInboundType),
 		SetSystemProxy:     settings.SingBoxSetSystemProxy,
+		TunEnabled:         state.TunnelMode == "tun",
 		PublicListenIP:     publicIP,
 		PublicListenPort:   publicPort,
 		ClientTOML:         clientConfig,
@@ -157,7 +181,9 @@ func SelectedConnection(state model.AppState) (model.ConnectionProfile, bool) {
 func SelectedResolver(state model.AppState) (model.ResolverProfile, bool) {
 	connection, ok := SelectedConnection(state)
 	resolverID := state.SelectedResolverProfileID
-	if ok && connection.ResolverProfileID != "" {
+	if state.GlobalResolverProfileID != "" {
+		resolverID = state.GlobalResolverProfileID
+	} else if ok && connection.ResolverProfileID != "" {
 		resolverID = connection.ResolverProfileID
 	}
 	for _, profile := range state.ResolverProfiles {

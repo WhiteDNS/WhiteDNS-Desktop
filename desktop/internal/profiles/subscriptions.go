@@ -218,6 +218,7 @@ func ApplySubscription(state model.AppState, doc SubscriptionDocument, selectImp
 		next = append(next, p)
 	}
 	retained := map[string]bool{}
+	retained[state.GlobalResolverProfileID] = true
 	for _, p := range next {
 		retained[p.ResolverProfileID] = true
 	}

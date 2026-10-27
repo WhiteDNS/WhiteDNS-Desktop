@@ -134,6 +134,7 @@ func NormalizeConnectionProfileDomains(profile ConnectionProfile) ConnectionProf
 }
 
 type ResolverProfile struct {
+	SourceFileName       string   `json:"sourceFileName,omitempty"`
 	ID                   string   `json:"id"`
 	Name                 string   `json:"name"`
 	ResolverText         string   `json:"resolverText"`
@@ -352,6 +353,8 @@ type FirewallStatus struct {
 }
 
 type AppState struct {
+	TunnelMode                  string                 `json:"tunnelMode,omitempty"`
+	GlobalResolverProfileID     string                 `json:"globalResolverProfileId,omitempty"`
 	SelectedConnectionProfileID string                 `json:"selectedConnectionProfileId"`
 	SelectedResolverProfileID   string                 `json:"selectedResolverProfileId"`
 	SelectedSettingsProfileID   string                 `json:"selectedSettingsProfileId"`

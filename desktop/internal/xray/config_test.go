@@ -48,6 +48,51 @@ func TestMasterDNSSettingsUsesInternalPort(t *testing.T) {
 	}
 }
 
+func TestRenderDNSTunRoutesTrafficIntoDNSEngine(t *testing.T) {
+	text, err := RenderDNSConfigWithTun(model.DefaultSettingsProfile())
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := decodeConfig(t, text)
+	inbounds := config["inbounds"].([]any)
+	if len(inbounds) != 2 {
+		t.Fatal("local proxy and TUN inbound are required")
+	}
+	tun := inbounds[1].(map[string]any)
+	if tun["protocol"] != "tun" || tun["settings"].(map[string]any)["name"] != model.DefaultV2RayTunInterfaceName() {
+		t.Fatal("incorrect TUN inbound")
+	}
+	rules := config["routing"].(map[string]any)["rules"].([]any)
+	if rules[len(rules)-1].(map[string]any)["outboundTag"] != OutboundTag {
+		t.Fatal("TUN traffic bypasses the DNS tunnel")
+	}
+}
+
+func TestSoarTunUsesCachedTunnelDNSAndDoesNotForwardUnsupportedUDP(t *testing.T) {
+	settings := model.DefaultSoarSettingsProfile()
+	raw, err := RenderDNSConfigWithTun(settings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := decodeConfig(t, raw)
+	rules := root["routing"].(map[string]any)["rules"].([]any)
+	if len(rules) != 4 {
+		t.Fatalf("unexpected rules: %v", rules)
+	}
+	if rules[0].(map[string]any)["outboundTag"] != OutboundTag || rules[1].(map[string]any)["outboundTag"] != TunDNSTag || rules[2].(map[string]any)["outboundTag"] != BlockTag || rules[2].(map[string]any)["network"] != "udp" {
+		t.Fatal("DNS must precede the unsupported UDP rule; DNS lookups must use the selected engine")
+	}
+	dns := root["dns"].(map[string]any)
+	if dns["tag"] != TunDNSQueryTag || dns["disableCache"] == true {
+		t.Fatal("tunnel DNS cache disabled or unrouted")
+	}
+	for _, v := range dns["servers"].([]any) {
+		if address := v.(map[string]any)["address"].(string); !strings.HasPrefix(address, "https://") || strings.Contains(address, "+local") {
+			t.Fatal("DNS must use HTTPS through the tunnel")
+		}
+	}
+}
+
 func TestRenderV2RayConfigCreatesDirectVLESSOutbound(t *testing.T) {
 	profile := model.DefaultV2RayProfile()
 	profile.Name = "VLESS"

@@ -37,6 +37,7 @@ export interface CottenDNSOptionDefinition {
 }
 
 export interface ResolverProfile {
+  sourceFileName?: string;
   id: string;
   name: string;
   resolverText: string;
@@ -349,6 +350,8 @@ export interface FirewallStatus {
 }
 
 export interface AppState {
+  tunnelMode?: "proxy" | "vpn" | "tun";
+  globalResolverProfileId?: string;
   selectedConnectionProfileId: string;
   selectedResolverProfileId: string;
   selectedSettingsProfileId: string;

@@ -114,6 +114,10 @@ func (a *App) clearProxyCountryCache() {
 }
 
 func httpClientThroughProxy(proxyConfig runtimeProxyConfig) (*http.Client, error) {
+	return httpClientThroughProxyTimeouts(proxyConfig, 8*time.Second, 5*time.Second)
+}
+
+func httpClientThroughProxyTimeouts(proxyConfig runtimeProxyConfig, totalTimeout, stepTimeout time.Duration) (*http.Client, error) {
 	if proxyConfig.Protocol == "http" {
 		proxyURL := &url.URL{Scheme: "http", Host: proxyConfig.Address}
 		if proxyConfig.Auth != nil {
@@ -122,28 +126,32 @@ func httpClientThroughProxy(proxyConfig runtimeProxyConfig) (*http.Client, error
 		return &http.Client{
 			Transport: &http.Transport{
 				Proxy:                 http.ProxyURL(proxyURL),
-				TLSHandshakeTimeout:   5 * time.Second,
-				ResponseHeaderTimeout: 5 * time.Second,
+				TLSHandshakeTimeout:   stepTimeout,
+				ResponseHeaderTimeout: stepTimeout,
 				IdleConnTimeout:       15 * time.Second,
 			},
-			Timeout: 8 * time.Second,
+			Timeout: totalTimeout,
 		}, nil
 	}
-	return httpClientThroughSOCKS5(proxyConfig.Address, proxyConfig.Auth)
+	return httpClientThroughSOCKS5Timeouts(proxyConfig.Address, proxyConfig.Auth, totalTimeout, stepTimeout)
 }
 
 func httpClientThroughSOCKS5(proxyAddress string, auth *proxy.Auth) (*http.Client, error) {
-	dialer, err := proxy.SOCKS5("tcp", proxyAddress, auth, socks5ForwardDialer{timeout: 5 * time.Second})
+	return httpClientThroughSOCKS5Timeouts(proxyAddress, auth, 8*time.Second, 5*time.Second)
+}
+
+func httpClientThroughSOCKS5Timeouts(proxyAddress string, auth *proxy.Auth, totalTimeout, stepTimeout time.Duration) (*http.Client, error) {
+	dialer, err := proxy.SOCKS5("tcp", proxyAddress, auth, socks5ForwardDialer{timeout: stepTimeout})
 	if err != nil {
 		return nil, err
 	}
 	transport := &http.Transport{
 		DialContext:           socks5DialContext(dialer),
-		TLSHandshakeTimeout:   5 * time.Second,
-		ResponseHeaderTimeout: 5 * time.Second,
+		TLSHandshakeTimeout:   stepTimeout,
+		ResponseHeaderTimeout: stepTimeout,
 		IdleConnTimeout:       15 * time.Second,
 	}
-	return &http.Client{Transport: transport, Timeout: 8 * time.Second}, nil
+	return &http.Client{Transport: transport, Timeout: totalTimeout}, nil
 }
 
 type socks5ForwardDialer struct {

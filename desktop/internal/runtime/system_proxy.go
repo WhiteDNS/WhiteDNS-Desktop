@@ -80,6 +80,18 @@ var kdeSystemProxyKeys = []string{
 }
 
 func (m *Manager) prepareSystemProxyGuard(ctx context.Context, enabled bool, proxyProtocol string, listenIP string, listenPort int) (systemProxyGuard, error) {
+	guard, err := m.captureSystemProxyGuard(ctx, enabled, proxyProtocol, listenIP, listenPort)
+	if err != nil || guard == nil {
+		return guard, err
+	}
+	if err := guard.Apply(ctx); err != nil {
+		restoreSystemProxyGuardWithLog(guard, m.log)
+		return nil, err
+	}
+	return guard, nil
+}
+
+func (m *Manager) captureSystemProxyGuard(ctx context.Context, enabled bool, proxyProtocol string, listenIP string, listenPort int) (systemProxyGuard, error) {
 	if !enabled {
 		return nil, nil
 	}
@@ -107,10 +119,6 @@ func (m *Manager) prepareSystemProxyGuard(ctx context.Context, enabled bool, pro
 		}
 	default:
 		return nil, nil
-	}
-	if err := guard.Apply(ctx); err != nil {
-		restoreSystemProxyGuardWithLog(guard, m.log)
-		return nil, err
 	}
 	return guard, nil
 }
@@ -148,21 +156,24 @@ func (m *Manager) restoreSystemProxyGuard(active *activeProcess) {
 		return
 	}
 	active.systemProxyRestoreOnce.Do(func() {
-		restoreSystemProxyGuardWithLog(active.systemProxyGuard, m.log)
+		if err := restoreSystemProxyGuardWithLog(active.systemProxyGuard, m.log); err == nil {
+			_ = os.Remove(active.systemProxySnapshotFile)
+		}
 	})
 }
 
-func restoreSystemProxyGuardWithLog(guard systemProxyGuard, log func(string)) {
+func restoreSystemProxyGuardWithLog(guard systemProxyGuard, log func(string)) error {
 	if guard == nil {
-		return
+		return nil
 	}
-	restoreCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	restoreCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := guard.Restore(restoreCtx); err != nil {
 		logRuntimeCleanup(log, fmt.Sprintf("Runtime cleanup warning: failed to restore system proxy settings: %v", err))
-		return
+		return err
 	}
 	logRuntimeCleanup(log, "System proxy settings restored")
+	return nil
 }
 
 func writeSystemProxySnapshotFile(path string, guard systemProxyGuard) error {
@@ -544,7 +555,7 @@ func restoreMacOSSystemProxySnapshot(ctx context.Context, snapshot systemProxySn
 func newWindowsSystemProxyGuard(ctx context.Context, runner SystemProxyCommandRunner, listenIP string, listenPort int, protocol string) (systemProxyGuard, error) {
 	runner = defaultSystemProxyRunner(runner)
 	values := map[string]string{}
-	for _, name := range []string{"ProxyEnable", "ProxyServer", "ProxyOverride"} {
+	for _, name := range []string{"ProxyEnable", "ProxyServer", "ProxyOverride", "AutoConfigURL"} {
 		output, _ := runner(ctx, "reg", "query", windowsInternetSettingsKey, "/v", name)
 		values[name] = output
 	}
@@ -571,7 +582,17 @@ func (g *windowsSystemProxyGuard) Apply(ctx context.Context) error {
 	if _, err := g.runner(ctx, "reg", "add", windowsInternetSettingsKey, "/v", "ProxyServer", "/t", "REG_SZ", "/d", server, "/f"); err != nil {
 		return err
 	}
-	return nil
+	// Old exclusions/PAC files can silently send selected websites directly.
+	// Keep them in the snapshot and use loopback exclusions for this session.
+	if _, err := g.runner(ctx, "reg", "add", windowsInternetSettingsKey, "/v", "ProxyOverride", "/t", "REG_SZ", "/d", "localhost;127.*;[::1];<local>", "/f"); err != nil {
+		return err
+	}
+	if _, _, exists := parseWindowsRegValue(g.snapshot.Values["AutoConfigURL"], "AutoConfigURL"); exists {
+		if _, err := g.runner(ctx, "reg", "delete", windowsInternetSettingsKey, "/v", "AutoConfigURL", "/f"); err != nil {
+			return err
+		}
+	}
+	return refreshWindowsSystemProxy(ctx, g.runner)
 }
 
 func (g *windowsSystemProxyGuard) Verify(ctx context.Context) error {
@@ -602,7 +623,10 @@ func (g *windowsSystemProxyGuard) Snapshot() systemProxySnapshot {
 
 func restoreWindowsSystemProxySnapshot(ctx context.Context, snapshot systemProxySnapshot, runner SystemProxyCommandRunner) error {
 	runner = defaultSystemProxyRunner(runner)
-	for _, name := range []string{"ProxyEnable", "ProxyServer", "ProxyOverride"} {
+	for _, name := range []string{"ProxyEnable", "ProxyServer", "ProxyOverride", "AutoConfigURL"} {
+		if _, captured := snapshot.Values[name]; !captured {
+			continue // Older journals did not capture PAC settings.
+		}
 		value, valueType, ok := parseWindowsRegValue(snapshot.Values[name], name)
 		if !ok {
 			_, _ = runner(ctx, "reg", "delete", windowsInternetSettingsKey, "/v", name, "/f")
@@ -611,6 +635,16 @@ func restoreWindowsSystemProxySnapshot(ctx context.Context, snapshot systemProxy
 		if _, err := runner(ctx, "reg", "add", windowsInternetSettingsKey, "/v", name, "/t", valueType, "/d", value, "/f"); err != nil {
 			return err
 		}
+	}
+	return refreshWindowsSystemProxy(ctx, runner)
+}
+
+func refreshWindowsSystemProxy(ctx context.Context, runner SystemProxyCommandRunner) error {
+	// Registry writes alone leave running browsers using cached settings.
+	const script = `$ErrorActionPreference='Stop'; Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class WhiteDNSInternetSettings { [DllImport("wininet.dll", SetLastError=true)] public static extern bool InternetSetOption(IntPtr h, int option, IntPtr buffer, int length); }'; if (-not [WhiteDNSInternetSettings]::InternetSetOption([IntPtr]::Zero,39,[IntPtr]::Zero,0)) { throw 'Could not notify proxy settings change' }; if (-not [WhiteDNSInternetSettings]::InternetSetOption([IntPtr]::Zero,37,[IntPtr]::Zero,0)) { throw 'Could not refresh proxy settings' }`
+	output, err := runner(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	if err != nil {
+		return fmt.Errorf("Windows proxy refresh failed: %w: %s", err, strings.TrimSpace(output))
 	}
 	return nil
 }

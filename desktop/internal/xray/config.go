@@ -18,6 +18,8 @@ const (
 	V2RayOutboundTag = "v2ray-out"
 	DirectTag        = "direct"
 	BlockTag         = "block"
+	TunDNSTag        = "whitedns-tun-dns"
+	TunDNSQueryTag   = "whitedns-dns-query"
 )
 
 func Enabled(settings model.SettingsProfile) bool {
@@ -48,6 +50,14 @@ func PublicProtocol(inboundType string) string {
 }
 
 func RenderConfig(settings model.SettingsProfile) (string, error) {
+	return renderDNSConfig(settings, false)
+}
+
+func RenderDNSConfigWithTun(settings model.SettingsProfile) (string, error) {
+	return renderDNSConfig(settings, true)
+}
+
+func renderDNSConfig(settings model.SettingsProfile, tunEnabled bool) (string, error) {
 	settings = profiles.NormalizeSettingsProfile(settings)
 	if settings.ListenPort == settings.StormDNSListenPort && settings.ListenIP == settings.StormDNSListenIP {
 		return "", fmt.Errorf("Xray proxy and MasterDNS/StormDNS upstream cannot use the same listen address")
@@ -81,6 +91,39 @@ func RenderConfig(settings model.SettingsProfile) (string, error) {
 			"domainStrategy": "AsIs",
 			"rules":          []any{},
 		},
+	}
+	if tunEnabled {
+		tunSettings := model.DefaultV2RaySettingsProfile()
+		config["inbounds"] = []any{inbound, renderTunInbound(tunSettings)}
+		// DNS queries arrive as UDP, but Soar accepts SOCKS CONNECT only. Cache
+		// answers and resolve over HTTPS inside the selected DNS tunnel. Literal
+		// server IPs avoid needing system DNS to bootstrap the tunnel's DNS.
+		config["dns"] = map[string]any{
+			"tag": TunDNSQueryTag,
+			"servers": []any{
+				map[string]any{"address": "https://1.1.1.1/dns-query", "timeoutMs": 15000},
+				map[string]any{"address": "https://8.8.8.8/dns-query", "timeoutMs": 15000},
+			},
+		}
+		config["outbounds"] = append(config["outbounds"].([]any),
+			map[string]any{
+				"protocol": "dns", "tag": TunDNSTag,
+				"settings":      map[string]any{"network": "tcp", "address": "1.1.1.1", "port": 53, "nonIPQuery": "skip"},
+				"proxySettings": map[string]any{"tag": OutboundTag},
+			},
+			map[string]any{"protocol": "blackhole", "tag": BlockTag},
+		)
+		rules := []any{
+			map[string]any{"type": "field", "inboundTag": []string{TunDNSQueryTag}, "outboundTag": OutboundTag},
+			map[string]any{"type": "field", "inboundTag": []string{TunInboundTag}, "port": "53", "outboundTag": TunDNSTag},
+		}
+		if settings.ImportType == model.ImportTypeSoar {
+			// Do not open a doomed UDP ASSOCIATE for every browser QUIC attempt.
+			// Browsers use HTTPS over TCP; DNS is handled by the preceding rule.
+			rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{TunInboundTag}, "network": "udp", "outboundTag": BlockTag})
+		}
+		rules = append(rules, map[string]any{"type": "field", "inboundTag": []string{TunInboundTag}, "outboundTag": OutboundTag})
+		config["routing"].(map[string]any)["rules"] = rules
 	}
 
 	raw, err := json.MarshalIndent(config, "", "  ")

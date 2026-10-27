@@ -103,6 +103,7 @@ type activeProcess struct {
 	systemProxyGuard        systemProxyGuard
 	systemProxySnapshotFile string
 	systemProxyRestoreOnce  sync.Once
+	tunSnapshotFile         string
 	resolverStateCancel     context.CancelFunc
 	resolverStateDone       chan struct{}
 	resolverStateStopOnce   sync.Once
@@ -122,6 +123,7 @@ type activeProcess struct {
 	targetUnavailableSent   bool
 	sessionInitRetries      int
 	progressSeen            bool
+	desktopReady            bool
 	lastProgress            model.ConnectionProgress
 	progressChangedAt       time.Time
 	tunnelReady             chan struct{}
@@ -200,6 +202,12 @@ func (m *Manager) Start(ctx context.Context, cfg storm.LaunchConfig) error {
 
 // start owns lifecycleMu, including failure cleanup of partially started helpers.
 func (m *Manager) start(ctx context.Context, cfg storm.LaunchConfig) error {
+	if cfg.TunEnabled && !TunModeSupported() {
+		return errors.New("automatic TUN mode is currently supported on Windows; use VPN or Proxy mode on this platform")
+	}
+	if err := m.checkTunAccess(ctx, cfg); err != nil {
+		return err
+	}
 	masterSettings := cfg.MasterDNSSettings
 	if masterSettings.ListenPort == 0 {
 		masterSettings = cfg.Settings
@@ -241,7 +249,7 @@ func (m *Manager) start(ctx context.Context, cfg storm.LaunchConfig) error {
 		masterSettings.MTURecheckIntervalMinutes,
 	)
 	if err := cleanupStaleLaunchFiles(m.options.RuntimeDir, m.options.XrayStopTimeout, m.log, m.options.SystemProxyPlatform, m.options.SystemProxyRunner); err != nil {
-		m.log(fmt.Sprintf("Runtime cleanup warning: %v", err))
+		return fmt.Errorf("runtime cleanup must finish before reconnecting: %w", err)
 	}
 
 	engine := normalizeDNSEngine(cfg.Engine)
@@ -380,16 +388,47 @@ func (m *Manager) start(ctx context.Context, cfg storm.LaunchConfig) error {
 		_ = m.stopActive()
 		return err
 	}
-	if err := m.waitForPort(ctx, publicListenIP, publicListenPort, active); err != nil {
+	proxyCtx, proxyCancel := context.WithTimeout(ctx, m.options.StartTimeout)
+	err = m.waitForPort(proxyCtx, publicListenIP, publicListenPort, active)
+	proxyCancel()
+	if err != nil {
 		_ = m.stopActive()
-		return err
+		return fmt.Errorf("local proxy did not become ready: %w", err)
+	}
+	if cfg.SetSystemProxy {
+		m.state(model.RuntimeConnecting, "Applying VPN settings")
+		guard, err := m.captureSystemProxyGuard(ctx, true, cfg.CoreProtocol, publicListenIP, publicListenPort)
+		if err != nil {
+			_ = m.stopActive()
+			return err
+		}
+		active.systemProxyGuard = guard
+		active.systemProxySnapshotFile = filepath.Join(m.options.RuntimeDir, ".wd-"+active.id+".system-proxy.json")
+		// Journal recovery before applying settings, after the listener opens.
+		if err := writeSystemProxySnapshotFile(active.systemProxySnapshotFile, guard); err != nil {
+			_ = m.stopActive()
+			return err
+		}
+		if guard != nil {
+			if err := guard.Apply(ctx); err != nil {
+				_ = m.stopActive()
+				return err
+			}
+		}
 	}
 	if err := m.waitForSystemProxy(ctx, active, publicListenIP, publicListenPort); err != nil {
 		_ = m.stopActive()
 		return err
 	}
+	if err := m.configureTunRoutes(ctx, cfg, active); err != nil {
+		_ = m.stopActive()
+		return err
+	}
 	m.debugLogf(debugLogs, "Debug Desktop public proxy port is ready: %s:%d", publicListenIP, publicListenPort)
-	m.state(model.RuntimeConnected, "Proxy is connected")
+	m.mu.Lock()
+	active.desktopReady = true
+	m.mu.Unlock()
+	m.state(model.RuntimeConnected, "Connected")
 	return nil
 }
 
@@ -681,23 +720,6 @@ func (m *Manager) startXray(ctx context.Context, cfg storm.LaunchConfig, active 
 		return err
 	}
 
-	publicListenIP, publicListenPort := publicListenTarget(cfg)
-	systemProxyGuard, err := m.prepareSystemProxyGuard(ctx, cfg.SetSystemProxy, cfg.CoreProtocol, publicListenIP, publicListenPort)
-	if err != nil {
-		_ = os.Remove(configFile)
-		return err
-	}
-	if err := ctx.Err(); err != nil {
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		_ = os.Remove(configFile)
-		return err
-	}
-	systemProxySnapshotFile := filepath.Join(m.options.RuntimeDir, ".wd-"+active.id+".system-proxy.json")
-	if err := writeSystemProxySnapshotFile(systemProxySnapshotFile, systemProxyGuard); err != nil {
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		_ = os.Remove(configFile)
-		return err
-	}
 	procCtx, cancel := context.WithCancel(context.Background())
 	cmd := exec.CommandContext(procCtx, binaryPath, "run", "-c", configFile)
 	hideConsoleWindow(cmd)
@@ -706,20 +728,22 @@ func (m *Manager) startXray(ctx context.Context, cfg storm.LaunchConfig, active 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		cancel()
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		_ = os.Remove(systemProxySnapshotFile)
 		_ = os.Remove(configFile)
 		return err
 	}
 	cmd.Stderr = cmd.Stdout
 
-	m.state(model.RuntimeConnecting, "Starting xray proxy")
+	message := "Preparing local proxy"
+	if cfg.TunEnabled {
+		message = "Preparing TUN connection"
+	} else if cfg.SetSystemProxy {
+		message = "Preparing VPN connection"
+	}
+	m.state(model.RuntimeConnecting, message)
 	if err := cmd.Start(); err != nil {
 		cancel()
-		restoreSystemProxyGuardWithLog(systemProxyGuard, m.log)
-		_ = os.Remove(systemProxySnapshotFile)
 		_ = os.Remove(configFile)
-		return fmt.Errorf("failed to start xray: %w", err)
+		return fmt.Errorf("failed to start local proxy: %w", err)
 	}
 	pidFile := filepath.Join(m.options.RuntimeDir, ".wd-"+active.id+".xray.pid")
 	if err := writePIDFile(pidFile, cmd.Process.Pid); err != nil {
@@ -732,8 +756,6 @@ func (m *Manager) startXray(ctx context.Context, cfg storm.LaunchConfig, active 
 	active.xrayConfigFile = configFile
 	active.xrayPIDFile = pidFile
 	active.xrayDone = make(chan struct{})
-	active.systemProxyGuard = systemProxyGuard
-	active.systemProxySnapshotFile = systemProxySnapshotFile
 	go m.drainOutput(active, stdout)
 	go m.waitForXrayExit(active)
 	return nil
@@ -995,7 +1017,7 @@ func (m *Manager) drainOutput(active *activeProcess, stdout any) {
 				progress.Rejected,
 			)
 			m.recordProgress(active, progress)
-			m.progress(progress)
+			m.progress(m.desktopProgress(active, progress))
 		}
 		if resolvers, ok := storm.ParseResolverState(line); ok {
 			m.debugLogf(active.debugLogs,
@@ -1277,6 +1299,17 @@ func (m *Manager) recordProgress(active *activeProcess, progress model.Connectio
 	m.mu.Unlock()
 }
 
+// Engine readiness precedes desktop listener readiness and OS routing.
+func (m *Manager) desktopProgress(active *activeProcess, progress model.ConnectionProgress) model.ConnectionProgress {
+	m.mu.Lock()
+	ready := active.desktopReady
+	m.mu.Unlock()
+	if !ready && (progress.Phase == "connected" || progress.Percent >= 100) {
+		progress.Phase, progress.Percent = "Preparing connection", 95
+	}
+	return progress
+}
+
 func (m *Manager) waitForTunnelReady(ctx context.Context, active *activeProcess) error {
 	// Max retries authentication and transfer verification on lossy paths. A
 	// fixed GUI deadline used to kill a recovering helper during its next
@@ -1507,6 +1540,7 @@ func (m *Manager) isActive(active *activeProcess) bool {
 }
 
 func (m *Manager) cleanup(active *activeProcess) {
+	m.restoreTunRoutes(active)
 	m.stopMTUResolverStateMonitor(active)
 	m.stopTrafficMonitor(active)
 	m.restoreSystemProxyGuard(active)
@@ -1519,7 +1553,6 @@ func (m *Manager) cleanup(active *activeProcess) {
 	_ = os.Remove(active.masterPIDFile)
 	_ = os.Remove(active.xrayConfigFile)
 	_ = os.Remove(active.xrayPIDFile)
-	_ = os.Remove(active.systemProxySnapshotFile)
 }
 
 func (m *Manager) stopMTUResolverStateMonitor(active *activeProcess) {
@@ -1982,10 +2015,24 @@ func cleanupStaleLaunchFiles(runtimeDir string, stopTimeout time.Duration, log f
 		}
 	}
 	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), ".wd-") || !strings.HasSuffix(entry.Name(), ".tun-routes.json") {
+			continue
+		}
+		restoreCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		err := restoreTunSnapshot(restoreCtx, filepath.Join(runtimeDir, entry.Name()), runner)
+		cancel()
+		if err != nil {
+			return fmt.Errorf("restore stale TUN routes: %w", err)
+		}
+	}
+	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasPrefix(entry.Name(), ".wd-") {
 			continue
 		}
 		if !isLaunchFile(entry.Name()) {
+			continue
+		}
+		if strings.HasSuffix(entry.Name(), ".tun-routes.json") {
 			continue
 		}
 		_ = os.Remove(filepath.Join(runtimeDir, entry.Name()))

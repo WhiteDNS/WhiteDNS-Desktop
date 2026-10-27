@@ -3,11 +3,73 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestWindowsProxyRefreshesBrowsersAndRestoresPACAndExclusions(t *testing.T) {
+	values := map[string]string{"ProxyEnable": "0", "ProxyServer": "old:8080", "ProxyOverride": "*.example.com", "AutoConfigURL": "https://pac.example.org/config"}
+	original := map[string]string{}
+	for k, v := range values {
+		original[k] = v
+	}
+	refreshes := 0
+	runner := func(_ context.Context, name string, args ...string) (string, error) {
+		if name == "powershell.exe" {
+			if !strings.Contains(args[len(args)-1], "InternetSetOption") {
+				t.Fatal("unexpected Windows side effect")
+			}
+			refreshes++
+			return "", nil
+		}
+		if name != "reg" || len(args) < 4 {
+			t.Fatal("unexpected command")
+		}
+		key := args[3]
+		switch args[0] {
+		case "query":
+			v, ok := values[key]
+			if !ok {
+				return "", errors.New("not found")
+			}
+			kind := "REG_SZ"
+			if key == "ProxyEnable" {
+				kind = "REG_DWORD"
+			}
+			return fmt.Sprintf("%s %s %s", key, kind, v), nil
+		case "add":
+			values[key] = args[7]
+		case "delete":
+			delete(values, key)
+		default:
+			t.Fatal("unexpected registry action")
+		}
+		return "", nil
+	}
+	guard, err := newWindowsSystemProxyGuard(context.Background(), runner, "127.0.0.1", 10886, "http")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(values, original) {
+		t.Fatal("capturing settings modified them")
+	}
+	if err := guard.Apply(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if values["AutoConfigURL"] != "" || values["ProxyOverride"] == original["ProxyOverride"] || refreshes != 1 {
+		t.Fatal("old PAC or exclusions still override the VPN")
+	}
+	if err := guard.Restore(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(values, original) || refreshes != 2 {
+		t.Fatalf("Windows settings not fully restored: %v", values)
+	}
+}
 
 func TestLinuxSystemProxyGuardGNOMERestoresSnapshot(t *testing.T) {
 	t.Setenv("XDG_CURRENT_DESKTOP", "GNOME")

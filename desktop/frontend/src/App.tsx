@@ -1,5 +1,9 @@
 import { SoarFields, defaultSoarSettings } from "./SoarFields";
 import { APP_VERSION } from "./version";
+import { QuickSetup } from "./QuickSetup";
+import { SocialLinks } from "./SocialLinks";
+import { TunnelLatency } from "./TunnelLatency";
+import "./dashboard.css";
 import {
   Activity,
   AlertCircle,
@@ -16,6 +20,7 @@ import {
   FileText,
   Gauge,
   Globe2,
+  Info,
   LayoutDashboard,
   ListChecks,
   Monitor,
@@ -204,8 +209,6 @@ const maxValidatorWorkers = 2048;
 const errorToastTTLMS = 6000;
 const dashboardNativeSelectThreshold = 500;
 const whiteDnsTelegramUrl = "https://t.me/whitedns";
-const whiteVpnDesktopReleasesUrl = "https://github.com/WhiteDNS/WhiteVPN-Desktop/releases";
-const whiteVpnNoticeDismissedKey = "whitedns.desktop.vpnMovedNotice.dismissed";
 const importTypeOptions: Array<[ImportType, string]> = [
   ["masterdns", "MasterDNS"],
   ["stormdns", "StormDNS"],
@@ -1190,7 +1193,7 @@ function App() {
     if (!state) {
       return undefined;
     }
-    const connectionResolverID = selectedConnection?.resolverProfileId || "";
+    const connectionResolverID = state.globalResolverProfileId || selectedConnection?.resolverProfileId || "";
     const connectionResolver = connectionResolverID
       ? state.resolverProfiles.find((profile) => profile.id === connectionResolverID)
       : undefined;
@@ -1277,7 +1280,7 @@ function App() {
         <AppSidebar page={activePage} runtime={state.runtime} onPage={setPage} />
         <SidebarInset className="min-w-0 overflow-x-hidden">
           <main className="min-h-svh min-w-0 overflow-x-hidden bg-muted/30 p-4 md:p-6">
-            <div className="mx-auto flex w-full min-w-0 max-w-7xl flex-col gap-4">
+            <div className={cn("mx-auto flex w-full min-w-0 flex-col gap-4", activePage !== "dashboard" && "max-w-7xl")}>
               <div className="flex items-center justify-between gap-2 md:hidden">
                 <div className="flex min-w-0 items-center gap-2">
                   <SidebarTrigger />
@@ -1581,20 +1584,6 @@ function AppSidebar({
             className="ml-auto group-data-[collapsible=icon]:hidden"
           />
         </div>
-        <a
-          href={whiteDnsTelegramUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          aria-label="Open WhiteDNS Telegram channel"
-          onClick={(event) => {
-            event.preventDefault();
-            openExternalUrl(whiteDnsTelegramUrl);
-          }}
-          className="mx-2 flex h-8 items-center justify-between gap-2 rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 focus-visible:outline-hidden group-data-[collapsible=icon]:hidden"
-        >
-          <span className="truncate">Source: WhiteDNS Telegram</span>
-          <ExternalLink className="size-3.5 shrink-0" aria-hidden="true" />
-        </a>
       </SidebarHeader>
       <SidebarContent>
         <SidebarGroup>
@@ -1607,7 +1596,7 @@ function AppSidebar({
                   {index > 0 && (
                     <Separator className="mx-2 my-1 w-auto bg-sidebar-border group-data-[collapsible=icon]:hidden" />
                   )}
-                  <SidebarGroupLabel
+                  {index > 0 && <SidebarGroupLabel
                     asChild
                     className="h-7 cursor-pointer justify-between text-sm font-semibold text-sidebar-foreground"
                   >
@@ -1619,7 +1608,7 @@ function AppSidebar({
                         <ChevronRight className="ml-auto size-3.5 shrink-0" aria-hidden="true" />
                       )}
                     </button>
-                  </SidebarGroupLabel>
+                  </SidebarGroupLabel>}
 
                   {isOpen && (
                     <SidebarMenu className="mt-1">
@@ -1643,8 +1632,9 @@ function AppSidebar({
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarSeparator />
       <SidebarFooter>
+        <SocialLinks />
+        <SidebarSeparator />
         <Item className="border-transparent bg-muted/50">
           <ItemMedia>
             <StatusDot status={runtime.status} />
@@ -1732,6 +1722,7 @@ function DashboardPage({
   const [resolverCopyStatus, setResolverCopyStatus] = useState("");
   const [cloudflarePing, setCloudflarePing] = useState<CloudflarePingResult | null>(null);
   const [cloudflarePingRunning, setCloudflarePingRunning] = useState(false);
+  const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false);
   const [proxyCountryLookup, setProxyCountryLookup] = useState<ProxyCountryLookupResult | null>(null);
   const [proxyCountryLookupRunning, setProxyCountryLookupRunning] = useState(false);
   const [proxyCountryRetry, setProxyCountryRetry] = useState(0);
@@ -1769,36 +1760,18 @@ function DashboardPage({
     proxyCountryLookup,
     proxyCountryLookupRunning
   );
-  const [vpnNoticeDismissed, setVpnNoticeDismissed] = useState(() => {
-    try {
-      return window.localStorage?.getItem(whiteVpnNoticeDismissedKey) === "1";
-    } catch {
-      return false;
-    }
-  });
-  const showVpnMovedNotice = !vpnNoticeDismissed;
-
-  function dismissVpnMovedNotice() {
-    setVpnNoticeDismissed(true);
-    try {
-      window.localStorage?.setItem(whiteVpnNoticeDismissedKey, "1");
-    } catch {
-      // A blocked storage quota only means the notice comes back next launch.
-    }
-  }
-
   const dashboardStatus = parallelRunning ? "parallel-testing" : parallelFailed ? "failed" : masterRuntimeActive ? runtime.status : "disconnected";
   const dashboardTitle = parallelRunning
     ? "Testing"
     : parallelFailed
       ? "Parallel test failed"
-      : runtime.message || "Ready";
+      : isConnected ? "Connected" : runtime.message || "Ready";
   const dashboardDescription = parallelRunning
     ? parallelTest.message || "Parallel Testing"
     : parallelFailed
       ? parallelTest.error || parallelTest.message || "Parallel test failed"
     : isConnected
-      ? `Proxy listening on ${statusEndpoint}`
+      ? "Tunnel is active"
       : masterRuntimeActive && runtime.status === "failed"
         ? "Connection failed"
         : !masterRuntimeActive || runtime.status === "disconnected"
@@ -1915,6 +1888,7 @@ function DashboardPage({
 
   useEffect(() => {
     if (!isConnected) {
+      setConnectionDetailsOpen(false);
       setResolverCopyDialog(null);
       setResolverCopyStatus("");
       setCloudflarePing(null);
@@ -1925,6 +1899,7 @@ function DashboardPage({
     <PageShell
       eyebrow="Dashboard"
       title="Command Center"
+      className="dashboard-page"
       actions={
         <>
           <Button disabled={selectedConnection?.importType === "soar"}
@@ -1946,31 +1921,32 @@ function DashboardPage({
         </>
       }
     >
-      <Card className={cn("relative overflow-hidden transition-all duration-500 border-2", statusCardTone(dashboardStatus))}>
-        {isConnected && (
-          <div aria-hidden="true" className="connected-ambient" />
-        )}
-        <CardContent className="relative z-10 flex flex-col gap-3 p-6">
+      <Card data-state={dashboardStatus} className={cn("dashboard-status relative gap-0 overflow-hidden py-0 border", statusCardTone(dashboardStatus))}>
+        <CardContent className="relative z-10 flex flex-col gap-4 p-4 sm:p-5">
           <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div className="flex min-w-0 items-start gap-4">
                 {/* Large status indicator with glow */}
                 <div className={cn(
-                  "flex items-center justify-center shrink-0 rounded-full w-14 h-14 transition-all duration-300",
-                  isConnected && "ring-4 ring-emerald-500/20 shadow-[0_0_20px_rgba(16,185,129,0.3)]"
+                  "dashboard-status-indicator flex items-center justify-center shrink-0 rounded-full w-10 h-10"
                 )}>
                   <StatusDot status={dashboardStatus} className="size-4" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2 mb-3">
+                  {!isConnected && <div className="flex flex-wrap items-center gap-2 mb-2">
                     <Badge variant={statusBadgeVariant(dashboardStatus)} className="h-6 px-3 font-medium">
                       {statusLabel(dashboardStatus)}
                     </Badge>
                     {runtime.activeConnectionId && <Badge variant="outline" className="h-6 px-3">Active route</Badge>}
-                  </div>
+                  </div>}
+                  <div className="connection-heading">
                   <h2 className="text-2xl font-bold tracking-tight animate-in">
                     {dashboardTitle}
                   </h2>
-                  <p className="mt-2 text-sm text-muted-foreground">{dashboardDescription}</p>
+                  {isConnected && <Button type="button" variant="outline" size="sm" className="connection-details-toggle" aria-expanded={connectionDetailsOpen} aria-controls="connection-details-panel" onClick={() => setConnectionDetailsOpen(open => !open)}>
+                    <Info className="size-3.5" />Connection details<ChevronDown className={cn("size-3.5", connectionDetailsOpen && "rotate-180")} />
+                  </Button>}
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">{dashboardDescription}</p>
                   {isConnected && autoProfileName && (
                     <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
                       <span className="text-muted-foreground">Connected to auto profile</span>
@@ -2004,30 +1980,28 @@ function DashboardPage({
                     onCancelParallelTest={() => onRun(async () => { await backend.cancelParallelTest(); })}
                   />
                 ) : (
-                  <Button
+                  <><Button
                     size="lg"
                     variant="outline"
                     className={cn(
-                      "h-11 min-w-36 px-6 font-semibold transition-all duration-300",
+                      "dashboard-disconnect h-11 min-w-36 px-6 font-semibold",
                       statusButtonTone(runtime.status)
                     )}
                     disabled={connectDisabled}
                     onClick={() => onRun(() => backend.stopConnection())}
                   >
-                    {isConnected ? <Square className="size-5" /> : isConnecting ? <X className="size-5" /> : <Power className="size-5" />}
+                    {isConnecting ? <X className="size-5" /> : <Power className="size-5" />}
                     {connectionActionLabel}
                   </Button>
+                  {isConnected && selectedConnection?.importType !== "soar" && <Button size="lg" variant="secondary" disabled className="h-11 px-6" title="Disconnect before testing connections"><Activity className="size-5" />Parallel test</Button>}</>
                 )}
               </div>
           </div>
 
           <div className="grid gap-3 md:grid-cols-3">
-            <div className="rounded-lg border-2 bg-card p-4">
-              <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Connection
-              </label>
+            <div className="min-w-0 rounded-lg border bg-background/40 p-3">
               <DashboardSelector
-                label=""
+                label="Connection"
                 value={selectedConnection?.id || state.selectedConnectionProfileId}
                 detail=""
                 disabled={isLocked}
@@ -2042,12 +2016,9 @@ function DashboardPage({
               </p>
             </div>
 
-            <div className="rounded-lg border-2 bg-card p-4">
-              <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Resolver
-              </label>
+            <div className="min-w-0 rounded-lg border bg-background/40 p-3">
               <DashboardSelector
-                label=""
+                label={state.globalResolverProfileId ? "Resolver · all connections" : "Resolver"}
                 value={selectedResolver?.id || state.selectedResolverProfileId}
                 detail=""
                 disabled={isLocked}
@@ -2062,12 +2033,9 @@ function DashboardPage({
               </p>
             </div>
 
-            <div className="rounded-lg border-2 bg-card p-4">
-              <label className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-                Settings
-              </label>
+            <div className="min-w-0 rounded-lg border bg-background/40 p-3">
               <DashboardSelector
-                label=""
+                label="Settings"
                 value={state.selectedSettingsProfileId}
                 detail=""
                 disabled={isLocked}
@@ -2098,7 +2066,8 @@ function DashboardPage({
             </Alert>
           )}
 
-          <div className="rounded-lg border bg-background/60 p-3">
+          {runtime.status !== "disconnected" && <div id="connection-details-panel" className="dashboard-details" hidden={isConnected && !connectionDetailsOpen}>
+            <div className="rounded-lg border bg-background/60 p-3">
             {showStartupProgress ? (
               <StartupProgressMini progress={progress} />
             ) : runtime.status === "failed" ? (
@@ -2110,11 +2079,6 @@ function DashboardPage({
                     {runtime.message || "Connection failed before the proxy became ready."}
                   </p>
                 </div>
-              </div>
-            ) : runtime.status === "disconnected" ? (
-              <div>
-                <h3 className="text-sm font-medium">Runtime idle</h3>
-                <p className="mt-1 text-xs text-muted-foreground">Proxy is not running.</p>
               </div>
             ) : (
               <ConnectionInfoBar
@@ -2130,31 +2094,11 @@ function DashboardPage({
                 onPing={pingCloudflare}
               />
             )}
-          </div>
+          </div></div>}
         </CardContent>
       </Card>
 
-      {showVpnMovedNotice && (
-        <Alert>
-          <Power />
-          <AlertTitle>VPN and V2Ray moved to WhiteVPN Desktop</AlertTitle>
-          <AlertDescription>
-            They ship as their own app now. Your saved profiles are still here: export a Full Backup
-            and import it in WhiteVPN Desktop, or let it pick them up on first launch.
-          </AlertDescription>
-          <AlertAction>
-            <div className="flex flex-wrap gap-2">
-              <Button variant="outline" size="sm" onClick={() => openExternalUrl(whiteVpnDesktopReleasesUrl)}>
-                <ExternalLink />
-                Get WhiteVPN
-              </Button>
-              <Button variant="ghost" size="sm" onClick={dismissVpnMovedNotice}>
-                Dismiss
-              </Button>
-            </div>
-          </AlertAction>
-        </Alert>
-      )}
+      <QuickSetup state={state} settings={selectedSettings} resolver={selectedResolver} locked={isLocked} onRun={onRun} />
 
       {(missingConnection || missingResolvers) && (
         <Alert className="border-amber-200 bg-amber-50 text-amber-950">
@@ -2173,8 +2117,8 @@ function DashboardPage({
         </Alert>
       )}
 
-      <Card className="overflow-hidden border-2">
-        <CardContent className="p-6">
+      <Card className="dashboard-health gap-0 overflow-hidden py-0">
+        <CardContent className="p-4 sm:p-5">
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-semibold">Resolver Health</h3>
@@ -2182,32 +2126,29 @@ function DashboardPage({
                 {isConnecting ? progressSummary(progress) : resolverHealthLive ? "Live pool" : "Idle"}
               </p>
             </div>
-            {/* Mini chart showing distribution */}
-            <div className="flex gap-1">
-              {[
-                { count: activeResolverCount, color: "rgb(16, 185, 129)" },
-                { count: validResolverCount, color: "rgb(14, 165, 233)" },
-                { count: standbyResolverCount, color: "rgb(245, 158, 11)" },
-                { count: rejectedResolverCount, color: "rgb(239, 68, 68)" },
-              ].map((item, i) => {
-                const maxCount = Math.max(activeResolverCount, validResolverCount, standbyResolverCount, rejectedResolverCount, 1);
-                const height = (item.count / maxCount) * 32;
-                return (
-                  <div
-                    key={i}
-                    className="w-1.5 rounded-full transition-all duration-500"
-                    style={{
-                      height: `${Math.max(height, 4)}px`,
-                      backgroundColor: item.color,
-                      opacity: item.count > 0 ? 1 : 0.3
-                    }}
-                  />
-                );
-              })}
-            </div>
+            {isConnected && validResolverSource.length > 0 && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                disabled={!validResolversComplete}
+                onClick={() =>
+                  onRun(() =>
+                    backend.saveResolverProfileSnapshot({
+                      id: "",
+                      name: `${selectedResolver?.name || "Resolvers"} valid`,
+                      resolverText: validResolverSource.join("\n"),
+                    })
+                  )
+                }
+              >
+                <ListChecks />
+                Save Valids
+              </Button>
+            )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="dashboard-metrics grid grid-cols-2 gap-3 lg:grid-cols-4">
             {/* Active */}
             <button
               onClick={
@@ -2229,7 +2170,7 @@ function DashboardPage({
             >
               <div className="flex items-center gap-3">
                 <div className="relative shrink-0">
-                  <svg className="size-10 -rotate-90">
+                  <svg viewBox="0 0 40 40" aria-hidden="true" className="size-10 -rotate-90">
                     <circle
                       cx="20"
                       cy="20"
@@ -2280,7 +2221,7 @@ function DashboardPage({
             >
               <div className="flex items-center gap-3">
                 <div className="relative shrink-0">
-                  <svg className="size-10 -rotate-90">
+                  <svg viewBox="0 0 40 40" aria-hidden="true" className="size-10 -rotate-90">
                     <circle
                       cx="20"
                       cy="20"
@@ -2320,7 +2261,7 @@ function DashboardPage({
             <div className="group relative overflow-hidden rounded-lg border-2 border-amber-500/30 bg-amber-500/5 p-4 transition-all duration-300">
               <div className="flex items-center gap-3">
                 <div className="relative shrink-0">
-                  <svg className="size-10 -rotate-90">
+                  <svg viewBox="0 0 40 40" aria-hidden="true" className="size-10 -rotate-90">
                     <circle
                       cx="20"
                       cy="20"
@@ -2360,7 +2301,7 @@ function DashboardPage({
             <div className="group relative overflow-hidden rounded-lg border-2 border-red-500/30 bg-red-500/5 p-4 transition-all duration-300">
               <div className="flex items-center gap-3">
                 <div className="relative shrink-0">
-                  <svg className="size-10 -rotate-90">
+                  <svg viewBox="0 0 40 40" aria-hidden="true" className="size-10 -rotate-90">
                     <circle
                       cx="20"
                       cy="20"
@@ -2413,31 +2354,10 @@ function DashboardPage({
             </div>
           )}
 
-          {/* Save Valids Button */}
-          {isConnected && validResolverSource.length > 0 && (
-            <div className="flex justify-end mt-4">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!validResolversComplete}
-                onClick={() =>
-                  onRun(() =>
-                    backend.saveResolverProfileSnapshot({
-                      id: "",
-                      name: `${selectedResolver?.name || "Resolvers"} valid`,
-                      resolverText: validResolverSource.join("\n"),
-                    })
-                  )
-                }
-              >
-                <ListChecks />
-                Save Valids
-              </Button>
-            </div>
-          )}
         </CardContent>
       </Card>
+
+      <TunnelLatency connected={isConnected} sessionKey={proxyCountryLookupKey} />
 
       {upgradeScannerVisible && (
         <ConnectionUpgradeScannerPanel
@@ -4397,6 +4317,11 @@ function SettingsPage({
           </>
         }
       >
+        {state.tunnelMode && <Alert>
+          <Network />
+          <AlertTitle>Tunnel mode is managed from Quick setup</AlertTitle>
+          <AlertDescription>The dashboard's {state.tunnelMode === "vpn" ? "VPN (system proxy)" : state.tunnelMode === "tun" ? "TUN" : "Proxy"} mode applies to every settings profile and takes priority over its system proxy switch.</AlertDescription>
+        </Alert>}
         <div className="overflow-hidden rounded-lg border bg-card">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b bg-muted/30 px-3 py-2.5">
             <div className="min-w-0">
@@ -6527,14 +6452,16 @@ function PageShell({
   title,
   actions,
   children,
+  className,
 }: {
   eyebrow: string;
   title: string;
   actions?: ReactNode;
   children: ReactNode;
+  className?: string;
 }) {
   return (
-    <section className="flex min-w-0 flex-col gap-4">
+    <section className={cn("flex min-w-0 flex-col gap-4", className)}>
       <header className="flex min-w-0 flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <p className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">{eyebrow}</p>
@@ -6566,11 +6493,12 @@ function DashboardSelector({
   return (
     <Field className="min-w-0 gap-1" data-disabled={disabled || undefined}>
       <div className="flex min-w-0 items-center justify-between gap-3">
-        <FieldLabel className="text-xs font-medium">{label}</FieldLabel>
-        <span className="min-w-0 truncate text-right text-xs text-muted-foreground">{detail}</span>
+        <FieldLabel className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</FieldLabel>
+        {detail && <span className="min-w-0 truncate text-right text-xs text-muted-foreground">{detail}</span>}
       </div>
       {useNativeSelect ? (
         <select
+          aria-label={label}
           value={value || ""}
           disabled={disabled}
           className="h-8 w-full rounded-md border border-input bg-background px-3 text-sm outline-none transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-ring"
@@ -6584,7 +6512,7 @@ function DashboardSelector({
         </select>
       ) : (
         <Select value={value || ""} disabled={disabled} onValueChange={(id) => onChange(String(id))}>
-          <SelectTrigger className="h-8 w-full">
+          <SelectTrigger aria-label={label} className="h-8 w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

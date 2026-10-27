@@ -923,6 +923,26 @@ func TestWaitForPortHasNoStartupTimeout(t *testing.T) {
 	}
 }
 
+func TestDesktopDoesNotReportConnectedBeforeLocalRoutingIsReady(t *testing.T) {
+	m := NewManager(Options{}, Callbacks{})
+	active := &activeProcess{tunnelReady: make(chan struct{})}
+	m.active = active
+	engine := model.ConnectionProgress{Phase: "connected", Percent: 100, Valid: 2}
+	m.recordProgress(active, engine)
+	select {
+	case <-active.tunnelReady:
+	default:
+		t.Fatal("engine readiness was lost")
+	}
+	if display := m.desktopProgress(active, engine); display.Percent >= 100 || display.Phase == "connected" || display.Valid != 2 {
+		t.Fatalf("premature desktop completion: %+v", display)
+	}
+	active.desktopReady = true
+	if display := m.desktopProgress(active, engine); display != engine {
+		t.Fatal("completed connection progress was changed")
+	}
+}
+
 func TestStartupReadinessStopsAfterCompletedUnavailableMTUScan(t *testing.T) {
 	manager := NewManager(
 		Options{StartTimeout: 5 * time.Second},

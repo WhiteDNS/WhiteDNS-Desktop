@@ -37,6 +37,12 @@ type WailsNotificationOptions = {
 };
 
 type AppApi = {
+  ProbeTunnelLatency(): Promise<CloudflarePingResult>;
+  ImportGlobalResolverFile(): Promise<ResolverImportResult>;
+  GetTunModeSupported(): Promise<boolean>;
+  SetTunnelMode(mode: string): Promise<AppState>;
+  SetGlobalResolverProfile(id: string): Promise<AppState>;
+  SaveGlobalResolvers(rawText: string): Promise<AppState>;
   GetAppState(): Promise<AppState>;
   ImportSubscription(url: string, allowHTTP: boolean): Promise<AppState>;
   RefreshSubscriptions(onlyDue: boolean): Promise<AppState>;
@@ -139,6 +145,12 @@ function app(): AppApi {
 }
 
 export const backend = {
+  probeTunnelLatency: () => app().ProbeTunnelLatency(),
+  importGlobalResolverFile: () => app().ImportGlobalResolverFile(),
+  getTunModeSupported: () => app().GetTunModeSupported(),
+  setTunnelMode: (mode: string) => app().SetTunnelMode(mode),
+  setGlobalResolverProfile: (id: string) => app().SetGlobalResolverProfile(id),
+  saveGlobalResolvers: (rawText: string) => app().SaveGlobalResolvers(rawText),
   getAppState: () => app().GetAppState(),
   checkFirewallStatus: () => app().CheckFirewallStatus(),
   getSystemLANIP: () => app().GetSystemLANIP(),

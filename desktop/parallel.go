@@ -1040,6 +1040,9 @@ func buildParallelLaunchConfig(baseState model.AppState, preset parallelTestPres
 		return storm.LaunchConfig{}, err
 	}
 	state := profiles.NormalizeState(baseState)
+	// Candidate runtimes share the machine: none may capture device routes or
+	// overwrite the system proxy. The winner applies the user's mode afterward.
+	state.TunnelMode = "proxy"
 	if len(resolvers) > 0 {
 		state = stateWithParallelResolvers(state, resolvers)
 	}
@@ -1091,6 +1094,7 @@ func stateWithParallelResolvers(state model.AppState, resolvers []string) model.
 	state.ResolverProfiles = append([]model.ResolverProfile(nil), state.ResolverProfiles...)
 	state.ResolverProfiles = append(state.ResolverProfiles, resolverProfile)
 	state.SelectedResolverProfileID = resolverProfile.ID
+	state.GlobalResolverProfileID = ""
 	for idx := range state.ConnectionProfiles {
 		if state.ConnectionProfiles[idx].ID == state.SelectedConnectionProfileID {
 			state.ConnectionProfiles[idx].ResolverProfileID = resolverProfile.ID

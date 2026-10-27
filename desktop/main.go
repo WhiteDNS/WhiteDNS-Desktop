@@ -2,6 +2,7 @@ package main
 
 import (
 	"embed"
+	"os"
 
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
@@ -21,11 +22,22 @@ var coreAssets embed.FS
 var defaultIPv4RangeAssets embed.FS
 
 func main() {
-	app, err := NewApp()
+	resume, resumeDir, err := prepareTunResume(os.Args[1:])
 	if err != nil {
 		println("Startup error:", err.Error())
 		return
 	}
+	var app *App
+	if resume != nil {
+		app, err = newAppInConfigDir(resumeDir)
+	} else {
+		app, err = NewApp()
+	}
+	if err != nil {
+		println("Startup error:", err.Error())
+		return
+	}
+	app.tunResume = resume
 
 	err = wails.Run(&options.App{
 		Title:                    "WhiteDNS Desktop",
@@ -40,6 +52,7 @@ func main() {
 		},
 		BackgroundColour: &options.RGBA{R: 252, G: 252, B: 252, A: 1},
 		OnStartup:        app.startup,
+		OnDomReady:       app.domReady,
 		OnShutdown:       app.shutdown,
 		Bind: []interface{}{
 			app,

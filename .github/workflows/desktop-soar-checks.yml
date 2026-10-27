@@ -48,6 +48,9 @@ jobs:
           go -C desktop test -tags webkit2_41 -run '^TestWriteSoarUIFixture$' -count=1
           node desktop/frontend/scripts/soar-ui-test.cjs
           DESKTOP_SCREENSHOTS="$DESKTOP_SCREENSHOTS/profiles" node desktop/frontend/scripts/profile-ui-test.cjs
+          node desktop/frontend/scripts/latency-test.cjs
+          DESKTOP_SCREENSHOTS="$DESKTOP_SCREENSHOTS/dashboard" node desktop/frontend/scripts/dashboard-ui-test.cjs
+          DESKTOP_SCREENSHOTS="$DESKTOP_SCREENSHOTS/responsive-dashboard" node desktop/frontend/scripts/approved-design-ui-test.cjs
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -56,7 +59,7 @@ jobs:
 
   windows-udp-recovery:
     runs-on: windows-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-go@v6
@@ -67,3 +70,33 @@ jobs:
         run: go -C Soar test ./... -count=1 -timeout=180s
       - name: Repeat Windows UDP path-loss regression
         run: go -C Soar test -run '^TestConservativeHTTPSRecoversAfterOneDNSPathIsBlocked$' -count=12 -timeout=180s
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: desktop/frontend/package-lock.json
+      - name: Build desktop frontend
+        run: npm ci --prefix desktop/frontend && npm run build --prefix desktop/frontend
+      - name: Test Windows desktop runtime, TUN recovery and elevation handling
+        run: go -C desktop test -race ./... -count=1 -timeout=480s
+      - name: Verify native elevated-instance handoff without an interactive prompt
+        shell: pwsh
+        run: |
+          $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+          if (-not ([Security.Principal.WindowsPrincipal]$identity).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
+            Write-Output 'Native elevated handoff requires an already elevated runner; unit coverage completed above.'
+            exit 0
+          }
+          $env:WHITEDNS_NATIVE_ELEVATION_TEST_DIR = Join-Path $env:RUNNER_TEMP 'native-handoff/WhiteDNS Desktop'
+          $env:WHITEDNS_TEST_ALREADY_ELEVATED_HANDOFF = '1'
+          $binary = Join-Path $env:RUNNER_TEMP 'desktop-elevation.test.exe'
+          go -C desktop test -c -o $binary
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & $binary '-test.run=^TestNativeTunElevationHandoffParent$' '-test.v' '-test.timeout=60s'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $resultFile = Join-Path $env:WHITEDNS_NATIVE_ELEVATION_TEST_DIR 'native-elevation-result.json'
+          $deadline = [DateTime]::UtcNow.AddSeconds(20)
+          while (-not (Test-Path -LiteralPath $resultFile) -and [DateTime]::UtcNow -lt $deadline) { Start-Sleep -Milliseconds 100 }
+          $result = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
+          if (-not ($result.elevated -and $result.savedSelectionsPreserved -and $result.autoResumeReached -and $result.parentExitedBeforeResume)) { throw 'Native elevated handoff failed' }
+          $result | ConvertTo-Json -Compress

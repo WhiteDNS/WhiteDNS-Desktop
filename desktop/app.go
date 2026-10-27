@@ -84,14 +84,22 @@ type App struct {
 
 	proxyCountryMu    sync.Mutex
 	proxyCountryCache map[string]proxyCountryCacheEntry
+	tunnelProbe       tunnelProbePool
+	tunElevation      *tunElevationHooks
+	tunResume         *tunResumeRequest
+	tunResumeOnce     sync.Once
 }
 
 func NewApp() (*App, error) {
-	_ = raiseProcessFileDescriptorLimit()
 	configDir, err := appConfigDir()
 	if err != nil {
 		return nil, err
 	}
+	return newAppInConfigDir(configDir)
+}
+
+func newAppInConfigDir(configDir string) (*App, error) {
+	_ = raiseProcessFileDescriptorLimit()
 	if err := ensureAppDataWritable(context.Background(), configDir); err != nil {
 		return nil, err
 	}
@@ -162,6 +170,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	a.tunnelProbe.reset()
 	_ = a.manager.Stop()
 	_, _ = a.CancelParallelTest()
 	_, _ = a.CancelValidatorScan()
@@ -537,6 +546,9 @@ func (a *App) DeleteResolverProfile(id string) (model.AppState, error) {
 	if id == model.DefaultResolverProfileID {
 		return a.state, fmt.Errorf("default resolver profile cannot be deleted")
 	}
+	if id == a.state.GlobalResolverProfileID {
+		return a.state, fmt.Errorf("turn off Use for all connections in Quick setup before deleting the shared resolver")
+	}
 	if a.resolverSelectionLockedLocked() && a.resolverProfileIsEffectiveLocked(id) {
 		return a.state, fmt.Errorf("active resolver profile cannot be deleted while connected")
 	}
@@ -567,7 +579,11 @@ func (a *App) SelectResolverProfile(id string) (model.AppState, error) {
 		return a.state, fmt.Errorf("resolver profile cannot be changed while connected")
 	}
 	a.state.SelectedResolverProfileID = id
-	a.applyResolverToSelectedConnectionLocked(id)
+	if a.state.GlobalResolverProfileID != "" {
+		a.state.GlobalResolverProfileID = id
+	} else {
+		a.applyResolverToSelectedConnectionLocked(id)
+	}
 	return a.saveLocked()
 }
 
@@ -851,6 +867,9 @@ func (a *App) startConnectionWithSettingsOptions(ctx context.Context, overrideSe
 	a.clearProxyCountryCache()
 	a.emit("runtime:state", next.Runtime)
 	a.emit("runtime:progress", next.Runtime.Progress)
+	if cfg.TunEnabled && a.needsTunElevation() {
+		return a.requestTunElevation(ctx, overrideSettings, autoProfilePresetID, autoProfileName, resolvers)
+	}
 	a.notifyFirewallIfEnabled(ctx)
 	if err := a.manager.Start(ctx, cfg); err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -1016,6 +1035,9 @@ func (a *App) resolverProfileIsEffectiveLocked(id string) bool {
 }
 
 func (a *App) effectiveResolverIDForConnectionLocked(connectionID string) string {
+	if a.state.GlobalResolverProfileID != "" {
+		return a.state.GlobalResolverProfileID
+	}
 	connectionID = strings.TrimSpace(connectionID)
 	if connectionID == "" {
 		return ""
@@ -1143,6 +1165,7 @@ func (a *App) handleRuntimeState(status, message string) {
 	a.mu.Unlock()
 	if clearProxyCountryCache {
 		a.clearProxyCountryCache()
+		a.tunnelProbe.reset()
 	}
 	a.emit("runtime:state", runtimeState)
 }

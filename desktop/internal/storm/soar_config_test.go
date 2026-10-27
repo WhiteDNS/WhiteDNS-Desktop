@@ -81,6 +81,37 @@ func TestSoarRejectsInvalidKeysMultipleDomainsAndWrongWindowBounds(t *testing.T)
 	}
 }
 
+func TestSoarTunRestrictsDiscoveryWithoutChangingSavedProfile(t *testing.T) {
+	state := model.DefaultAppState()
+	p := &state.ConnectionProfiles[0]
+	p.ImportType = model.ImportTypeSoar
+	p.Domain = "user.soar.example.org"
+	p.Domains = []string{p.Domain}
+	p.EncryptionKey = base64.StdEncoding.EncodeToString(make([]byte, 32))
+	options := model.DefaultSoarSettings()
+	p.SoarSettings = &options
+	settings := model.DefaultSoarSettingsProfile()
+	state.SettingsProfiles = []model.SettingsProfile{settings}
+	state.SelectedSettingsProfileID = settings.ID
+	for _, mode := range []string{"tun", "vpn", "proxy"} {
+		state.TunnelMode = mode
+		cfg, err := BuildLaunchConfig(state)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var raw struct{ Soar model.SoarSettings }
+		if err := json.Unmarshal([]byte(cfg.ClientTOML), &raw); err != nil {
+			t.Fatal(err)
+		}
+		if raw.Soar.Discovery != (mode != "tun") {
+			t.Fatalf("unsafe discovery setting for %s", mode)
+		}
+		if !p.SoarSettings.Discovery || !options.Discovery {
+			t.Fatal("launch changed the saved Soar profile")
+		}
+	}
+}
+
 func TestSoarScannerUsesProfileTransportAndBoundedWorkersWithoutDiscovery(t *testing.T) {
 	options := model.DefaultSoarSettings()
 	options.Transport = "only"

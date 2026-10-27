@@ -116,6 +116,7 @@ func (s *Store) ImportResolverFile(sourcePath string) (model.ResolverProfile, er
 	return model.ResolverProfile{
 		ID:                   id,
 		Name:                 name,
+		SourceFileName:       filepath.Base(sourcePath),
 		ResolverSource:       "file",
 		ResolverFile:         dest,
 		ResolverCount:        summary.Count,
@@ -290,6 +291,17 @@ func NormalizeState(state model.AppState) model.AppState {
 	resolverIDs := map[string]struct{}{}
 	for _, profile := range state.ResolverProfiles {
 		resolverIDs[profile.ID] = struct{}{}
+	}
+	if _, ok := resolverIDs[state.GlobalResolverProfileID]; !ok {
+		state.GlobalResolverProfileID = ""
+	}
+	if state.GlobalResolverProfileID != "" {
+		state.SelectedResolverProfileID = state.GlobalResolverProfileID
+	}
+	switch state.TunnelMode {
+	case "proxy", "vpn", "tun":
+	default:
+		state.TunnelMode = ""
 	}
 	for idx := range state.ConnectionProfiles {
 		if _, ok := resolverIDs[state.ConnectionProfiles[idx].ResolverProfileID]; !ok {

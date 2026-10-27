@@ -1,0 +1,28 @@
+/* Dashboard additions use the application's existing light and dark tokens. */
+:root {
+  --space-control: 0.75rem;
+  --space-panel: 1.25rem;
+  --dashboard-green: #09ce72;
+  --dashboard-green-ink: #007c45;
+  --dashboard-active-bg: rgb(9 206 114 / 7%);
+  --dashboard-active-rule: rgb(9 206 114 / 38%);
+  --dashboard-red: #e64045;
+  --dashboard-youtube: #f00012;
+  --dashboard-youtube-hover: #d9000f;
+  --dashboard-telegram: #009dee;
+  --dashboard-telegram-hover: #008ad3;
+  --dashboard-on-brand: #ffffff;
+  --dashboard-link: #0879c9;
+  --dashboard-plot-grid: rgb(115 115 115 / 12%);
+  --dashboard-focus: #169d68;
+  --dashboard-control-radius: 0.5rem;
+  --dashboard-ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+}
+.dark {
+  --dashboard-green-ink: #17e28b;
+  --dashboard-active-bg: rgb(9 206 114 / 8%);
+  --dashboard-active-rule: rgb(9 206 114 / 42%);
+  --dashboard-link: #40a9ff;
+  --dashboard-plot-grid: rgb(255 255 255 / 5%);
+  --dashboard-focus: #17e28b;
+}

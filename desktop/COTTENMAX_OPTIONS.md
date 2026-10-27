@@ -14,6 +14,27 @@ existing delegated `DOMAINS` and `ENCRYPTION_KEY`. In an existing client profile
 TUNNEL_MODE = "cottenmax"
 ```
 
+In Settings, choose **CottenDNS**, then **CottenMax**, and select **Full** or
+**Low** in the traffic profile selector. Save and reconnect to apply a change.
+The selected profile is preserved in app settings and TOML imports/exports:
+
+```toml
+COTTENMAX_TRAFFIC_PROFILE = "low" # or "full" (default)
+COTTENMAX_LOW_REDUCTION_PERCENT = 35 # 10..90, used only in Low
+```
+
+Low exposes a **Speed reduction target** slider from 10% to 90%, default 35%.
+This is an approximate target relative to Full; measured speed depends on the
+network and resolver. Switching to Full retains the percentage for later and
+ignores it.
+
+Full retains the existing Max behavior. Low reduces DNS query starts, new
+connection attempts, resolver discovery and pending query windows. Both use the
+same authenticated protocol, key and Max server; no per-mode server setting is
+needed. Existing profiles without this option continue to use Full. The rate
+limits apply to one client, so a provider's total load also depends on how many
+clients share a server. Performance depends on the resolver and network.
+
 The updated server accepts normal and Max clients on the same listener and
 configuration. Keep `encrypt_key.txt`; no additional Max key, config file,
 service or DNS delegation is required. The core adds `cottenmax-v1.` internally;

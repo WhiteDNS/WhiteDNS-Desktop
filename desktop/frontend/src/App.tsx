@@ -299,7 +299,10 @@ function settingsEngineLabel(profile?: SettingsProfile, engine?: string): string
   if (importType !== "cottendns") {
     return importTypeLabel(importType);
   }
-  return profile?.cottenDnsOptions?.TUNNEL_MODE === "cottenmax" ? "CottenDNS / Max beta" : "CottenDNS / Normal";
+  if (profile?.cottenDnsOptions?.TUNNEL_MODE === "cottenmax") {
+    return profile.cottenDnsOptions.COTTENMAX_TRAFFIC_PROFILE === "low" ? "CottenDNS / Max Low" : "CottenDNS / Max Full";
+  }
+  return "CottenDNS / Normal";
 }
 
 function normalizeConnectionProfile(profile: ConnectionProfile): ConnectionProfile {
@@ -4995,8 +4998,10 @@ function CottenDNSSettingsFields({
   );
   const presetName = String(overrides.CONFIG_PRESET || defaultPresetName);
   const modeOption = schema.find((option) => option.key === "TUNNEL_MODE");
+  const trafficProfileOption = schema.find((option) => option.key === "COTTENMAX_TRAFFIC_PROFILE");
+  const lowReductionOption = schema.find((option) => option.key === "COTTENMAX_LOW_REDUCTION_PERCENT");
   const groups = schema
-    .filter((option) => option.key !== "TUNNEL_MODE")
+    .filter((option) => !["TUNNEL_MODE", "COTTENMAX_TRAFFIC_PROFILE", "COTTENMAX_LOW_REDUCTION_PERCENT"].includes(option.key))
     .reduce<Array<{ name: string; options: CottenDNSOptionDefinition[] }>>((result, option) => {
       const existing = result.find((group) => group.name === option.group);
       if (existing) {
@@ -5116,6 +5121,32 @@ function CottenDNSSettingsFields({
                   Use default mode
                 </Button>
               )}
+              {effectiveValue(modeOption) === "cottenmax" && trafficProfileOption && (
+                <SelectField
+                  label={trafficProfileOption.label}
+                  value={String(effectiveValue(trafficProfileOption))}
+                  options={(trafficProfileOption.choices || []).map((choice) => [String(choice.value), choice.label])}
+                  onChange={(next) => updateOption(trafficProfileOption.key, next)}
+                  description="Full keeps current Max behavior. Low reduces traffic and connection rates. Save and reconnect after changing."
+                />
+              )}
+              {effectiveValue(modeOption) === "cottenmax" && trafficProfileOption && effectiveValue(trafficProfileOption) === "low" && lowReductionOption && (
+                <Field>
+                  <FieldLabel htmlFor="cottenmax-low-reduction">Speed reduction target: {Number(effectiveValue(lowReductionOption))}%</FieldLabel>
+                  <input
+                    id="cottenmax-low-reduction"
+                    type="range"
+                    min={10}
+                    max={90}
+                    step={1}
+                    value={Number(effectiveValue(lowReductionOption))}
+                    aria-valuetext={`${Number(effectiveValue(lowReductionOption))} percent reduction target`}
+                    className="w-full accent-primary"
+                    onChange={(event) => updateOption(lowReductionOption.key, Number(event.target.value))}
+                  />
+                  <FieldDescription>10–90%, default 35%. Approximate target relative to Full; actual speed depends on the network and resolver. Save and reconnect to apply.</FieldDescription>
+                </Field>
+              )}
             </div>
             <div className="space-y-2 text-xs leading-relaxed text-muted-foreground">
               <p className="font-medium text-foreground">One domain and key for Normal and Max</p>
@@ -5123,6 +5154,7 @@ function CottenDNSSettingsFields({
               <p>Max requires the updated CottenDNS server. That server accepts both modes on the same listener; an older server supports Normal only.</p>
               <p>Save settings, then reconnect to apply a mode change. If Max cannot connect, select Normal CottenDNS, save and reconnect. Switching is manual.</p>
               <p>Start with the default Max options. HTTP/3, DoQ, discovery and query shaping are optional in the categories below.</p>
+              <p>Max Low and Full use the same server and encryption. Low reduces load for restrictive hosting providers; its speed depends on the resolver and network.</p>
               <p>Download FEC is optional under Delivery and failover. It adds recovery traffic and requires a server with CottenMax FEC support. Leave it off for older Max servers.</p>
             </div>
           </div>

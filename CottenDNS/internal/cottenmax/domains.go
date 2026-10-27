@@ -98,8 +98,12 @@ type domainFailover struct {
 	after              time.Duration
 	cfg                soar.Config
 	discoveryForDomain func(string) Discovery
-	ctx                context.Context
-	cancel             context.CancelFunc
+	// Experimental parallel mode partitions one global budget across domains.
+	// Nil retains the original failover engine configuration unchanged.
+	budgets   []int
+	ctx       context.Context
+	cancel    context.CancelFunc
+	admission *dialAdmission
 }
 
 func newDomainFailover(domains []string, after time.Duration, cfg soar.Config, primary *soar.Client, discoveryForDomain func(string) Discovery) *domainFailover {
@@ -147,6 +151,9 @@ func (f *domainFailover) engineFor(ctx context.Context, index int) (*soar.Client
 	opening := &domainOpening{ready: make(chan struct{})}
 	slot.opening = opening
 	cfg := f.cfg
+	if len(f.budgets) > 0 {
+		cfg.MaxInflight = f.budgets[index]
+	}
 	domain := slot.domain
 	cfg.Zone = Zone(domain)
 	// Engine.NewClient uses a background context to open its packet socket.
@@ -191,6 +198,9 @@ func (f *domainFailover) dial(ctx context.Context, signed string, confirmed bool
 			return nil, err
 		}
 		index := (first + step) % count
+		if err := f.admission.wait(ctx); err != nil {
+			return nil, err
+		}
 		attempt, cancel := context.WithTimeout(ctx, f.after)
 		stop := context.AfterFunc(f.ctx, cancel)
 		engine, err := f.engineFor(attempt, index)

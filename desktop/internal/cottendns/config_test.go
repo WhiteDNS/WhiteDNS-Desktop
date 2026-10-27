@@ -36,6 +36,55 @@ func TestMaxRuntimeFitsPanelDomainsWithoutChangingSavedOptions(t *testing.T) {
 	}
 }
 
+func TestCottenMaxTrafficProfilesRoundTripToNativeRuntime(t *testing.T) {
+	if got := EffectiveOptions(nil)["COTTENMAX_TRAFFIC_PROFILE"]; got != "full" {
+		t.Fatalf("old profiles must retain Full behavior, got %v", got)
+	}
+	if got := EffectiveOptions(nil)["COTTENMAX_LOW_REDUCTION_PERCENT"]; got != 35 {
+		t.Fatalf("Low must default to a 35%% reduction target, got %v", got)
+	}
+	if strings.Contains(RenderSettingsTOML(nil), "COTTENMAX_TRAFFIC_PROFILE") {
+		t.Fatal("untouched profiles must keep a sparse export")
+	}
+	for _, profileName := range []string{"full", "low"} {
+		t.Run(profileName, func(t *testing.T) {
+			options := map[string]any{"TUNNEL_MODE": "cottenmax", "COTTENMAX_TRAFFIC_PROFILE": profileName, "COTTENMAX_LOW_REDUCTION_PERCENT": 70}
+			encoded, err := json.Marshal(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var restored map[string]any
+			if err := json.Unmarshal(encoded, &restored); err != nil {
+				t.Fatal(err)
+			}
+			imported, err := ParseOptions(RenderSettingsTOML(restored))
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, raw := range []string{RenderClientTOML(model.ConnectionProfile{Domain: "max.example"}, imported), RenderScannerClientTOML(model.ConnectionProfile{Domain: "max.example"}, imported, 4)} {
+				if !strings.Contains(raw, `COTTENMAX_TRAFFIC_PROFILE = "`+profileName+`"`) || !strings.Contains(raw, `TUNNEL_MODE = "cottenmax"`) || !strings.Contains(raw, "COTTENMAX_LOW_REDUCTION_PERCENT = 70") {
+					t.Fatalf("profile did not reach native TOML: %s", raw)
+				}
+			}
+		})
+	}
+	if got := NormalizeOverrides(map[string]any{"COTTENMAX_TRAFFIC_PROFILE": "invalid"}); len(got) != 0 {
+		t.Fatalf("invalid profile survived validation: %#v", got)
+	}
+	for _, n := range []int{10, 35, 90} {
+		got := NormalizeOverrides(map[string]any{"COTTENMAX_LOW_REDUCTION_PERCENT": n})
+		if got["COTTENMAX_LOW_REDUCTION_PERCENT"] != n {
+			t.Errorf("valid Low reduction target %d was lost: %#v", n, got)
+		}
+	}
+	for _, n := range []int{0, 9, 91, 100} {
+		got := NormalizeOverrides(map[string]any{"COTTENMAX_LOW_REDUCTION_PERCENT": n})
+		if len(got) != 0 {
+			t.Errorf("invalid Low reduction target %d survived validation: %#v", n, got)
+		}
+	}
+}
+
 func TestSchemaCoversEveryShippedClientOption(t *testing.T) {
 	parsed, err := parseTemplate(defaultTemplate)
 	if err != nil {

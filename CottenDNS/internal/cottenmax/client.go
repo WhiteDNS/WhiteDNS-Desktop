@@ -19,6 +19,13 @@ type Discovery = soar.Discovery
 const MaxStreamsLimit = soar.MaxStreamsLimit
 
 type ClientConfig struct {
+	// TrafficProfile is "full" (default), or "low" for reduced query traffic.
+	// Full preserves the existing unpaced behavior; low shares percentage pacing
+	// across every domain and resolver created by this client.
+	TrafficProfile string
+	// LowReductionPercent is an approximate speed reduction target, 10..90;
+	// zero selects 35. Full retains the value without applying it.
+	LowReductionPercent            int
 	FECDownloadEnabled             bool
 	FECDataShards, FECParityShards int
 	Discovery                      Discovery
@@ -29,7 +36,10 @@ type ClientConfig struct {
 	Resolvers                      []string
 	// Domains adds optional standby domains to Domain. The primary fast path is
 	// unchanged; each standby gets its own authenticated session only on demand.
-	Domains                        []string
+	Domains []string
+	// DomainStrategy is "failover" (default), or experimental "parallel".
+	// Parallel balances independent streams; it does not stripe one stream.
+	DomainStrategy                 string
 	FailoverAfter                  time.Duration
 	QNameLabelLength               int
 	QNameLabelJitter               bool
@@ -45,12 +55,23 @@ type ClientConfig struct {
 }
 
 type Client struct {
-	engine   *soar.Client
-	secret   string
-	failover *domainFailover
+	engine              *soar.Client
+	secret              string
+	failover            *domainFailover
+	parallel            *domainParallel
+	domain              string
+	maxInflight         int
+	trafficProfile      string
+	lowReductionPercent int
+	admission           *dialAdmission
+	transportAdmission  *dialAdmission
 }
 
 func NewClient(cfg ClientConfig) (*Client, error) {
+	profile, limiter, err := applyTrafficProfile(&cfg)
+	if err != nil {
+		return nil, err
+	}
 	safeQName, maxQName := cfg.SafeQName, cfg.MaxQName
 	if safeQName <= 0 {
 		safeQName = 101
@@ -82,20 +103,11 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.Hold == 0 {
 		cfg.Hold = time.Nanosecond
 	} // explicitly disable held polls
-	if cfg.ListenPacket == nil {
+	defaultListener := cfg.ListenPacket == nil
+	if defaultListener {
 		cfg.ListenPacket = func(ctx context.Context, network, address string) (net.PacketConn, error) {
 			var lc net.ListenConfig
-			pc, err := lc.ListenPacket(ctx, network, address)
-			if err != nil {
-				return nil, err
-			}
-			if udp, ok := pc.(*net.UDPConn); ok {
-				// A full flight can exceed the small Windows UDP default. Without
-				// this, delayed paths deliver bursts that look like network loss.
-				_ = udp.SetReadBuffer(256 << 10)
-				_ = udp.SetWriteBuffer(256 << 10)
-			}
-			return pc, nil
+			return lc.ListenPacket(ctx, network, address)
 		}
 	}
 	if cfg.MaxPathWindow <= 0 {
@@ -104,11 +116,29 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 	if cfg.MaxInflight <= 0 {
 		cfg.MaxInflight = 256
 	}
+	if defaultListener {
+		cfg.ListenPacket = sizedPacketListener(cfg.ListenPacket, cfg.MaxInflight, cfg.MaxAnswer)
+	}
+	strategy := strings.ToLower(strings.TrimSpace(cfg.DomainStrategy))
+	if strategy == "" {
+		strategy = "failover"
+	}
+	if strategy != "failover" && strategy != "parallel" {
+		return nil, fmt.Errorf("cottenmax: unknown domain strategy %q", cfg.DomainStrategy)
+	}
+	var domainBudgets []int
+	if strategy == "parallel" && len(domains) > 1 {
+		domainBudgets, err = splitDomainBudget(min(cfg.MaxInflight, 4096), len(domains))
+		if err != nil {
+			return nil, err
+		}
+	}
 	discovery := cfg.Discovery
 	if cfg.DiscoveryForDomain != nil {
 		discovery = cfg.DiscoveryForDomain(domains[0])
 	}
 	engineCfg := soar.Config{
+		PercentagePacer: limiter, DisableTailDuplication: profile == TrafficProfileLow,
 		FECDownloadEnabled: cfg.FECDownloadEnabled, FECDataShards: cfg.FECDataShards, FECParityShards: cfg.FECParityShards,
 		Zone: Zone(domains[0]), ServerKey: ed25519.PublicKey(key), Resolvers: cfg.Resolvers,
 		TCP: cfg.TCP, Hold: cfg.Hold, MaxStreams: cfg.MaxStreams, Discovery: discovery,
@@ -121,16 +151,43 @@ func NewClient(cfg ClientConfig) (*Client, error) {
 		QNameLabelLength: cfg.QNameLabelLength, QNameLabelJitter: cfg.QNameLabelJitter, QNameLossGuard: cfg.QNameLossGuard,
 		DNSPaddingBlockSize: cfg.EncryptedDNSPaddingBlockSize,
 	}
+	var admission, transportAdmission *dialAdmission
+	if profile == TrafficProfileLow {
+		engineCfg.LowReductionPercent = cfg.LowReductionPercent
+		admission = newLowDialAdmission()
+		transportAdmission = newDialAdmission(LowTrafficStreamsPerSecond, LowTrafficTransportBurst)
+		engineCfg.DialTCP = transportAdmission.wrapDial(cfg.DialTCP)
+		engineCfg.InitialResolverLimit = 2
+	}
+	if len(domainBudgets) > 0 {
+		engineCfg.MaxInflight = domainBudgets[0]
+	}
 	engine, err := soar.NewClient(engineCfg)
 	if err != nil {
+		if admission != nil {
+			admission.cancel()
+			transportAdmission.cancel()
+		}
 		return nil, err
 	}
-	client := &Client{engine: engine, secret: cfg.Secret}
+	client := &Client{engine: engine, secret: cfg.Secret, domain: domains[0], maxInflight: min(cfg.MaxInflight, 4096), trafficProfile: profile, lowReductionPercent: cfg.LowReductionPercent}
+	client.admission, client.transportAdmission = admission, transportAdmission
 	if len(domains) > 1 {
 		client.failover = newDomainFailover(domains, cfg.FailoverAfter, engineCfg, engine, cfg.DiscoveryForDomain)
+		client.failover.admission = client.admission
+		if strategy == "parallel" {
+			client.failover.budgets = domainBudgets
+			client.parallel = newDomainParallel(client.failover)
+		}
 	}
 	return client, nil
 }
+
+// TrafficProfile returns the normalized profile selected at construction.
+func (c *Client) TrafficProfile() string { return c.trafficProfile }
+
+// LowReductionPercent returns the retained target, including when Full ignores it.
+func (c *Client) LowReductionPercent() int { return c.lowReductionPercent }
 
 // Dial waits for the server to confirm the destination before a SOCKS/HTTP
 // success is sent.
@@ -150,22 +207,39 @@ func (c *Client) dial(ctx context.Context, target string, confirmed bool) (net.C
 	if len(signed) > 255 {
 		return nil, fmt.Errorf("cottenmax: destination descriptor exceeds 255 bytes")
 	}
+	if c.parallel != nil {
+		return c.parallel.dial(ctx, signed, confirmed)
+	}
 	if c.failover != nil {
 		return c.failover.dial(ctx, signed, confirmed)
+	}
+	if err := c.admission.wait(ctx); err != nil {
+		return nil, err
 	}
 	return dialEngine(ctx, c.engine, signed, confirmed)
 }
 
 func (c *Client) Close() error {
+	if c.admission != nil {
+		c.admission.cancel()
+		c.transportAdmission.cancel()
+	}
 	if c.failover != nil {
 		return c.failover.close()
 	}
 	return c.engine.Close()
 }
 
-// PathStats describes the preferred domain's resolver paths. Domains have
-// independent sessions; a successful failover changes this preferred domain.
+// PathStats describes the preferred failover domain, or every started domain
+// in parallel mode. DomainStats retains the per-domain association.
 func (c *Client) PathStats() []soar.PathStat {
+	if c.parallel != nil {
+		var paths []soar.PathStat
+		for _, domain := range c.DomainStats() {
+			paths = append(paths, domain.Paths...)
+		}
+		return paths
+	}
 	if c.failover != nil {
 		return c.failover.preferredEngine().PathStats()
 	}
@@ -173,6 +247,14 @@ func (c *Client) PathStats() []soar.PathStat {
 }
 
 func (c *Client) Established() bool {
+	if c.parallel != nil {
+		for _, domain := range c.DomainStats() {
+			if domain.Established {
+				return true
+			}
+		}
+		return false
+	}
 	if c.failover != nil {
 		return c.failover.preferredEngine().Established()
 	}

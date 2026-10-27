@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "7db7b73658c791cce62300d29647e4d369d6e1e4",
+  "commit": "77bf87db28af6b64a4b6c404074982235272ed9b",
   "directory": "CottenDNS",
-  "update": "Use the released CottenMax large-resolver-pool startup fixes, expanded active resolver support, and optional client-requested Reed-Solomon download FEC; Normal mode stays available.",
-  "base_commit": "7db7b73658c791cce62300d29647e4d369d6e1e4",
+  "update": "Selectable CottenMax Full and lower-load Low profiles; both retain the existing Max server protocol, resolver recovery, and optional client-requested download FEC.",
+  "base_commit": "77bf87db28af6b64a4b6c404074982235272ed9b",
   "source_snapshot": "CottenDNS/COTTEN_CORE_SNAPSHOT.json"
 }

@@ -200,7 +200,8 @@ LOCAL_DNS_PORT = 53
 # Must be >= 1.
 LOCAL_DNS_CACHE_MAX_RECORDS = 10000
 
-# TTL used by the local DNS cache in seconds.
+# Maximum local DNS cache lifetime in seconds. DNS record TTLs (and negative
+# SOA lifetimes) can expire answers sooner; cache hits never renew an answer.
 # If <= 0, code falls back to a default.
 LOCAL_DNS_CACHE_TTL_SECONDS = 14400.0
 
@@ -213,7 +214,8 @@ LOCAL_DNS_PENDING_TIMEOUT_SECONDS = 60.0
 # Clamped in code to [1s, 600s].
 DNS_RESPONSE_FRAGMENT_TIMEOUT_SECONDS = 60.0
 
-# Persist local DNS cache to disk.
+# Persist absolute DNS expiry to disk. Old sliding-expiry cache files are
+# discarded once on upgrade and rebuilt from fresh DNS answers.
 LOCAL_DNS_CACHE_PERSIST_TO_FILE = true
 
 # Flush interval for persisted local DNS cache.

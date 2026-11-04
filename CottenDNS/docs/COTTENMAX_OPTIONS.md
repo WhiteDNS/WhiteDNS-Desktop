@@ -340,9 +340,10 @@ automatic remote profile/list updates are not implemented here.
 
 Choose `COTTENMAX_TRAFFIC_PROFILE = "low"` on clients that need lower DNS query
 load. The default `"full"` preserves existing Max behavior and adds no query-rate
-ceiling. Low paces all Max queries to an aggregate 100 queries/second with burst
-4 per client, including discovery, retries and duplicate traffic, and lowers
-concurrency. It applies across domains and resolver transports. It does not
+ceiling. Low uses `COTTENMAX_LOW_REDUCTION_PERCENT` (10..90, default 35) as an
+approximate bulk-speed reduction target relative to Full. It also paces new
+stream and resolver connection attempts and reduces discovery concurrency.
+These protections remain active when a smaller reduction is selected. It does not
 guarantee acceptance by a VPS host, and several clients add their traffic
 together. See [traffic profiles](COTTENMAX_TRAFFIC_PROFILES.md) for the limits,
 tradeoffs and the provider information needed to choose an appropriate setting.
@@ -350,6 +351,7 @@ tradeoffs and the provider information needed to choose an appropriate setting.
 | Setting | Default | Accepted range / behavior |
 | --- | --- | --- |
 | `COTTENMAX_TRAFFIC_PROFILE` | `"full"` | `full` retains current behavior; `low` adds query pacing and lower concurrency. Reconnect to apply. |
+| `COTTENMAX_LOW_REDUCTION_PERCENT` | 35 | 10..90% bulk-speed reduction target relative to Full; approximate and network-dependent; ignored by Full. |
 | `COTTENMAX_QNAME_LOSS_GUARD` | false | Experimental authenticated near-cap loss guard; see below. |
 | `COTTENMAX_SAFE_QNAME` | 101 | 64..253; must fit the domain and handshake. |
 | `COTTENMAX_MAX_QNAME` | 253 | At least the safe size, at most 253. |

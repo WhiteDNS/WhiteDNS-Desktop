@@ -1,0 +1,41 @@
+{
+  "started_utc": "2026-10-25T17:59:10.014345+00:00",
+  "platform": "Windows-11-10.0.26300-SP0",
+  "processor": "AMD64 Family 25 Model 68 Stepping 1, AuthenticAMD",
+  "logical_cpus": 16,
+  "godebug": "",
+  "sequential": true,
+  "debug_only": false,
+  "runs": 3,
+  "source_commit": "6990ba8ae86faa4f33398b9261d263e75ccabeee",
+  "tracked_source_diff_sha256": "3dc2dd0ce15f970c821000e50a80ff618d5d91ad679afebb31fc55bc2c957b8f",
+  "source_is_dirty": true,
+  "options": {
+    "binary": ".bench/normalmax/normalmaxbench.exe",
+    "client": ".bench/normalmax/client-percentage.exe",
+    "server": ".bench/normalmax/server.exe",
+    "output": "experiment-results/normal-max-percentage-narrow",
+    "runs": 3,
+    "timeout": 120,
+    "modes": [
+      "max-full",
+      "max-low-10",
+      "max-low-35",
+      "max-low-90"
+    ],
+    "profiles": [
+      "healthy-narrow-download",
+      "healthy-narrow-upload"
+    ],
+    "desktop_template": null,
+    "android_template": null,
+    "debug": false
+  },
+  "binaries_sha256": {
+    "harness": "7dbe5b41315f7c924bce6df7e2027aa9be7c923a5ec62a7d8e6cf91abf14cce2",
+    "client": "813c96da9782fe38422203475681a39b76c8cdcdeff413723c38b03161f5126b",
+    "server": "a39844c8103448f112a547cba41cb5b639c516004bb82b8e1bab1552b5f41be1"
+  },
+  "normal_template_sha256": {},
+  "source_context_note": "source_commit and tracked_source_diff_sha256 describe the worktree at measurement time, not provenance of a prebuilt executable; executable identity is the recorded SHA-256. The prior Full comparison deliberately uses an older client executable."
+}

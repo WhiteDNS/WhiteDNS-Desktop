@@ -1,8 +1,8 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "77bf87db28af6b64a4b6c404074982235272ed9b",
+  "commit": "750670318c21ee90ae9fc50e67f44c620053f7ba",
   "directory": "CottenDNS",
-  "update": "Selectable CottenMax Full and lower-load Low profiles; both retain the existing Max server protocol, resolver recovery, and optional client-requested download FEC.",
-  "base_commit": "77bf87db28af6b64a4b6c404074982235272ed9b",
+  "update": "DNS TTL/persistence and request-policy isolation corrections with bounded pending replies, retaining CottenMax Full/Low profiles and the existing server protocol.",
+  "base_commit": "750670318c21ee90ae9fc50e67f44c620053f7ba",
   "source_snapshot": "CottenDNS/COTTEN_CORE_SNAPSHOT.json"
 }

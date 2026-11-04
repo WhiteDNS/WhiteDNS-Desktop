@@ -1,16 +1,20 @@
 {
   "repository": "https://github.com/WhiteDNS/CottenDNS",
-  "commit": "77bf87db28af6b64a4b6c404074982235272ed9b",
-  "base_commit": "77bf87db28af6b64a4b6c404074982235272ed9b",
-  "git_tree": "e17ef0e0368dc24ab6966dab5b74f1c37ba6a211",
+  "commit": "750670318c21ee90ae9fc50e67f44c620053f7ba",
+  "base_commit": "750670318c21ee90ae9fc50e67f44c620053f7ba",
+  "git_tree": "71a8772cf296f2c2658c699cbf87c1e239eaa9b7",
   "source": "Exact Git-tracked upstream snapshot; local untracked diagnostics and caches excluded. No Desktop-specific core patches.",
-  "source_tree_sha256_lf": "2425828c5688e89d970978697de5105ebf0dff27e628f15c9e85cbd5ca9dc17e",
+  "source_tree_sha256_lf": "a3d7ad318f0f8f5352f986c618393f8316e9b32f6fd65d64bd5b39882bf1b600",
   "source_tree_hash_format": "SHA256 of path-sorted UTF-8 lines: sha256_lf + two spaces + path + LF. File hashes normalize CRLF to LF.",
   "soar_base": "v0.2.3",
   "files": [
     {
       "path": ".dockerignore",
       "sha256_lf": "f45b0b9d1afead41408a050d1222002cdbd32596dd0fcadbf3618c05f3e6a1e2"
+    },
+    {
+      "path": ".gitattributes",
+      "sha256_lf": "1ddbedcb8615483efdec30a642dcc4f929958a385ab15a35f4187b7658e0d4c8"
     },
     {
       "path": ".github/workflows/build-go.yml",
@@ -26,7 +30,7 @@
     },
     {
       "path": ".github/workflows/go-test.yml",
-      "sha256_lf": "9111bb11ef8d7ea6671b3ac99ecd1d20763e9802f4b44c68d7ed06be7bf25d74"
+      "sha256_lf": "0fd178961e445ac5624f8dc21405ea9a94e416a3c17f8e5d481a453d8dd92238"
     },
     {
       "path": ".github/workflows/verify-embedded-server.yml",
@@ -34,7 +38,7 @@
     },
     {
       "path": ".gitignore",
-      "sha256_lf": "7e73ec6c4297038960fe4be163a73c5018173d10b95cea5018720ec2e2e483f0"
+      "sha256_lf": "159a4d9c1079342cb815d8313277d8971397198ebc807d3cf9ec3b72896a0baf"
     },
     {
       "path": "AGENTS.md",
@@ -118,7 +122,7 @@
     },
     {
       "path": "client_config.toml.simple",
-      "sha256_lf": "589ff076c082cc43a5f5a2824c95d6a71500f8ddfb6da9fd9c41e0730d047250"
+      "sha256_lf": "0506098f39a3e5b93dafcd0395f4b0112c87d8748de4f238a0da2bb7670328b4"
     },
     {
       "path": "client_linux_install.sh",
@@ -198,11 +202,11 @@
     },
     {
       "path": "docs/COTTENMAX_OPTIONS.md",
-      "sha256_lf": "21fd6c5c9334640614903ec8434e0f856b4af3ca4595cf603abac7613cdabfcc"
+      "sha256_lf": "86805eb1edfea41fcc014b21145d76015c9c4af2f1359585f4fba1c0e3cb31d3"
     },
     {
       "path": "docs/COTTENMAX_TRAFFIC_PROFILES.md",
-      "sha256_lf": "6605e3207beab7ab3a4e14faa07eb1df7f0a59bcd68a0aabd3610839eadedc3b"
+      "sha256_lf": "20157316353a170d7643c40329234abbde9313abdb98d3c5c6facf7bb33169b2"
     },
     {
       "path": "docs/DNS_CARRIER_BENCHMARKS.md",
@@ -231,6 +235,30 @@
     {
       "path": "docs/VENDORED_CLIENT_INTEGRATION.md",
       "sha256_lf": "ae2d3d0f00d0385ab3de5abdb997ba032c67cd28ca1e54191fa3beb463546fef"
+    },
+    {
+      "path": "docs/benchmarks/cottenmax-adjustable-low-targets.png",
+      "sha256_lf": "16b5ab41430bb080c2cda39921558f20438d32fbfc84c4e6e48528fa86e0c7c9"
+    },
+    {
+      "path": "docs/benchmarks/cottenmax-adjustable-low-targets.svg",
+      "sha256_lf": "170254a8c845a47a3173905fa62d5830c0e5ee85fb08f3bbbdccc220c47506be"
+    },
+    {
+      "path": "docs/benchmarks/cottenmax-adjustable-low.png",
+      "sha256_lf": "c76c71f094712024fccfbc22a06507af20d438b4be24e60b251a60a66184ffa4"
+    },
+    {
+      "path": "docs/benchmarks/cottenmax-adjustable-low.svg",
+      "sha256_lf": "576635cad31743fb00e42c0aa288cd3965b49e5d51f7ff979a2f888c6fb6f41f"
+    },
+    {
+      "path": "docs/benchmarks/cottenmax-low-100-comparison.png",
+      "sha256_lf": "ac862a34661c37e5d4ff6ac0dad908551b7e8aa77d413fd776657441a99d8cc4"
+    },
+    {
+      "path": "docs/benchmarks/cottenmax-low-100-comparison.svg",
+      "sha256_lf": "1d29784e8cb309c06f4fcd6dc8315aeb5af2fc7a4e958dfffc03af7dc0a960a2"
     },
     {
       "path": "experiment-results/ci-artifact-manifest.json",
@@ -307,6 +335,158 @@
     {
       "path": "experiment-results/linux-crypto-notes.md",
       "sha256_lf": "005e179d9c3ce91523d775410ad29d007e9a35a1694757ae138e1763e0053289"
+    },
+    {
+      "path": "experiment-results/normal-max-comparison.csv",
+      "sha256_lf": "db1f1cd29d077dda474720113f7d5fda21dfc4f630467946f70ab841526f937e"
+    },
+    {
+      "path": "experiment-results/normal-max-final-narrow/metadata.json",
+      "sha256_lf": "d8a82c01158f60427bb19ac4bdbe5db67106554f19dafc691a09b6159515c663"
+    },
+    {
+      "path": "experiment-results/normal-max-final-narrow/runs.jsonl",
+      "sha256_lf": "7db7a75f3f1dd22ad7af5726979bb643299d582c2a9c2c911813c24b6eb7e598"
+    },
+    {
+      "path": "experiment-results/normal-max-final-narrow/summary.json",
+      "sha256_lf": "41c6249e2171d8e5aa48ea52c8e62c0fcd4b155f3be4a05299998cf1433c0960"
+    },
+    {
+      "path": "experiment-results/normal-max-final-wide/metadata.json",
+      "sha256_lf": "3a71832a130e497477ccc1444105976ec418ec330607c71c587fa9e20c6bf886"
+    },
+    {
+      "path": "experiment-results/normal-max-final-wide/runs.jsonl",
+      "sha256_lf": "3b0a45575539460323ba40664ad5970c6eed1480a59274f723927660b6716b52"
+    },
+    {
+      "path": "experiment-results/normal-max-final-wide/summary.json",
+      "sha256_lf": "17fb4ecf4766fde715b173aa8b4c5cf866a9b0550d1d56507b98e6f562ef348a"
+    },
+    {
+      "path": "experiment-results/normal-max-final/build-identity.json",
+      "sha256_lf": "32820c66a661e9c533fce90ba588fb96135862c1d1a971618b8914f31fc8b863"
+    },
+    {
+      "path": "experiment-results/normal-max-final/comparison.csv",
+      "sha256_lf": "42c289fbee0d995bd5ea76c61a04cb00459b42bd94a9888470d6da80f589b2cf"
+    },
+    {
+      "path": "experiment-results/normal-max-final/metadata.json",
+      "sha256_lf": "8ba0c0d6a179a9ba8e455561633c59f0dabcb94732404be52df723e8d79b8fe4"
+    },
+    {
+      "path": "experiment-results/normal-max-final/runs.jsonl",
+      "sha256_lf": "30487696f2193e808bf6699145f7987b91df5ca114a7607807b18538aa04e55b"
+    },
+    {
+      "path": "experiment-results/normal-max-final/summary.csv",
+      "sha256_lf": "fe6fb15735755fdade5a3a8c54ad731ad2eb3baa04dfee09a7da67458cd7bb19"
+    },
+    {
+      "path": "experiment-results/normal-max-final/summary.json",
+      "sha256_lf": "ce14dcefe129f3cd501d82a90f5ad8105f8d2413e51d029c6cdc03ad6167c693"
+    },
+    {
+      "path": "experiment-results/normal-max-full-prior-binary/metadata.json",
+      "sha256_lf": "62fedccbb35bbe748514b6c0e4faa054f93d47a61c063bd4aa686447a7ffa8f9"
+    },
+    {
+      "path": "experiment-results/normal-max-full-prior-binary/runs.jsonl",
+      "sha256_lf": "9cf8be854c7bc73d82ee3283b66421a796d016ff215392ec559a91a8012bf9a3"
+    },
+    {
+      "path": "experiment-results/normal-max-full-prior-binary/summary.json",
+      "sha256_lf": "127503a32b30894513b64dc455092e17250526b959bc852680e8227e12217b64"
+    },
+    {
+      "path": "experiment-results/normal-max-notes.md",
+      "sha256_lf": "65d7bdee8a50af68ee71be1d6c6973d121142a8b69fe9481bb73b9abbe78cc22"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-narrow/metadata.json",
+      "sha256_lf": "d3be0b8540456be635e9a8487132cbc80354962e8081b7e6b2646b18fe213351"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-narrow/runs.jsonl",
+      "sha256_lf": "9b90905372488052508d3f407297c673e0260cc9cfd1b96389980cd398c06eb0"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-narrow/summary.json",
+      "sha256_lf": "bb2eca383533f7fe635cc2a06346a6c98b9a0e0de8692e671104b2ee988aff6d"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-smoke/metadata.json",
+      "sha256_lf": "ef75fe7c1ac36fbd95534ba0e949cef1dfc2cf5107c188ad64b0bd022dc7b3f3"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-smoke/runs.jsonl",
+      "sha256_lf": "80ab5d2c35d3a8a7b19e3537a1400b6b83cbba8e0f6b37672c163798c7fb0cbe"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-smoke/summary.json",
+      "sha256_lf": "ab8a0bc0659bbcdf6907d0530f166e77bf1ed2f1ffff4735752683b58a47570e"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-buffers-check/metadata.json",
+      "sha256_lf": "68a198747c83b66022a2606495d61a2e8423e61b67441ca9dfe8e4f09b5bf7d9"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-buffers-check/runs.jsonl",
+      "sha256_lf": "dd3c8f9d4c42c334d03902a4fbdc267b7d2a49a7d28590a4714cbbf8087e7232"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-buffers-check/summary.json",
+      "sha256_lf": "9317415a64828ef3ba62f05502b208b0cc96e18183fbb4d18410dbc29a767118"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-jitter-smoke/metadata.json",
+      "sha256_lf": "9ae40600970634950ad9f4100ffc27dc9933b1d68b7336bee4b5c16c60304791"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-jitter-smoke/runs.jsonl",
+      "sha256_lf": "240375367ff37d9f35a85c6f2868604b4aab4d3d909c560831fd4ad63461d58f"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-jitter-smoke/summary.json",
+      "sha256_lf": "d0591d560158145e755930c14360c18496677a5515929b8bee02636d15322776"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-ordered-check/metadata.json",
+      "sha256_lf": "6e2b59c7ca8978a10e16b614faa2f90372e97b231deac926f17239a0c7ab7bf0"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-ordered-check/runs.jsonl",
+      "sha256_lf": "1b2b05385413f5056d41235071e5836e890de723add6ee08a1fe07fc618712e1"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-ordered-check/summary.json",
+      "sha256_lf": "d487ad3a594beb2f7a9f652af533070260d20ea9224d5d4b9f9050f698873da7"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-smoke/metadata.json",
+      "sha256_lf": "3cc99631fee6b652f1a0dfaa35545db1577e2bb84ac2b01ecfb391320f0c4063"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-smoke/runs.jsonl",
+      "sha256_lf": "103666701746e36c02f38b4b0c6bcf688f8a294e03e1f0bb9bd2c5c8a24647bb"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-v2-smoke/summary.json",
+      "sha256_lf": "010fe39547a2bf7f9abedef8dde75e450e185353e20c234394e6256aac2f1199"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-wide/metadata.json",
+      "sha256_lf": "03c11896e18caf0874b54dbf5f377016bfa89348fe5fd73ae9e44f73b326d3a4"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-wide/runs.jsonl",
+      "sha256_lf": "ea2d6f1cac9ce2bc74b0b808df09c17a4ca1edbe8c6d473115d874e6aa05b81f"
+    },
+    {
+      "path": "experiment-results/normal-max-percentage-wide/summary.json",
+      "sha256_lf": "a3f369c9053b1d7caa4bb4c17ff7f15b5243edd4a7091375c30d9d5763c5e135"
     },
     {
       "path": "experiment-results/traffic-profiles-windows-amd64/metadata.json",
@@ -454,7 +634,7 @@
     },
     {
       "path": "internal/client/cottenmax_dns.go",
-      "sha256_lf": "5e1608600b4b6408830e026cc2a7aace35c7cf7745e49f84f9b6410094bbd9da"
+      "sha256_lf": "52b2ef47fd7c6d0e952aafa0a3999af6fa38d2f55980f79b5a0e59d22198cf1e"
     },
     {
       "path": "internal/client/cottenmax_resolver_transport.go",
@@ -489,8 +669,20 @@
       "sha256_lf": "a731330d3cbdc3219a703f453aea9080914c5c37a023ed2e711b95394bd433f4"
     },
     {
+      "path": "internal/client/dns_cache_validity_test.go",
+      "sha256_lf": "e84b95d380b7b319bb7f7dd403754c9b62c47643a34f1c8913de29332d939f89"
+    },
+    {
+      "path": "internal/client/dns_connection_regression_test.go",
+      "sha256_lf": "36c895bbdb8c5af13524006c2671904a3b5a43f683557a60777fb1ff8c449b87"
+    },
+    {
+      "path": "internal/client/dns_id_pool_test.go",
+      "sha256_lf": "0539e47e5d4693d06784dc5a11a7714e9f7a8345837090b94e01a00dbe1b84e9"
+    },
+    {
       "path": "internal/client/dns_listener.go",
-      "sha256_lf": "4b82ac5824b5bdd16bc631a4b845b6d803e52f11693c9840d88deb6bf08eb836"
+      "sha256_lf": "3d4869c86be774b53d8aba67d35ae5208d01798ffe0c53d901f7cc9c89f9ef49"
     },
     {
       "path": "internal/client/dns_listener_test.go",
@@ -498,11 +690,15 @@
     },
     {
       "path": "internal/client/dns_pending.go",
-      "sha256_lf": "93b0aec8c17f23b1f6772ec271f073350e0b2a5fb8103285a216968b888fdf20"
+      "sha256_lf": "41a7604335ddf33db118456a5d32c334dbd8abb8cbebf0deace1d208cc2bd2ee"
+    },
+    {
+      "path": "internal/client/dns_policy_test.go",
+      "sha256_lf": "4ea5bc86e70cf1cca72c6ffa98698a5c97f1fba1632ddf8c89ab8af2bacddf93"
     },
     {
       "path": "internal/client/dns_reply_test.go",
-      "sha256_lf": "21389a5f55d6988df835b2e99e906a04e4f8e2bfea0f6218ca9018cdf7bdaa25"
+      "sha256_lf": "a90abff06cdd13d65489e54b62305afbaf2b1d0fd3718e5e5081cb6487a43a51"
     },
     {
       "path": "internal/client/doh_transport.go",
@@ -1133,12 +1329,28 @@
       "sha256_lf": "9f0750a1821c487db00d0cc47f604f86ddc02a8deb7365201b3730b90cde1328"
     },
     {
+      "path": "internal/dnscache/connection_regression_test.go",
+      "sha256_lf": "1f57d54b8316e1d826e01feba86d5499e9932077598b28c2add1e7734bfc32ae"
+    },
+    {
+      "path": "internal/dnscache/query_key_test.go",
+      "sha256_lf": "20bff8953d3092e81e3eae847f6bf1ff560bea7c38f00d7c37b747c7922128f3"
+    },
+    {
+      "path": "internal/dnscache/response.go",
+      "sha256_lf": "cfd79911283cbf19214e0e87685bf1db854976cf7ca928810f4ceabfd6e6e2c5"
+    },
+    {
+      "path": "internal/dnscache/response_test.go",
+      "sha256_lf": "bfe904ff81f93bba6e7f85a87ef4bae17fd1fb769aadb59e459475ab0b7e7aa0"
+    },
+    {
       "path": "internal/dnscache/store.go",
-      "sha256_lf": "1abbbc8549dfd353a0558e296d1b2774959f535445377ff067d3916162bf17c7"
+      "sha256_lf": "bc79a1b63e0efb098004581af304020621621788cc4ad4a53a307ab6e17d3840"
     },
     {
       "path": "internal/dnscache/store_test.go",
-      "sha256_lf": "f51577130c44fa9d6481a98cdd9d5f3ca2ba46ac5d2bdfda226a696634c02566"
+      "sha256_lf": "2fdf8030d75474e572c21f2b9c6cb37f3bf9ce46ca0573546edaff87358db47d"
     },
     {
       "path": "internal/dnsparser/encrypted_padding.go",
@@ -1421,8 +1633,12 @@
       "sha256_lf": "1a8b030a0bdfc8d90e7a9d4cca7e1100efabb84e9212f964530ab1606db4d94c"
     },
     {
+      "path": "internal/udpserver/dns_policy_test.go",
+      "sha256_lf": "6782dd730a87200e10ae6c4d2de712ecc9c2deea8ecd6289b24385c603a15f5e"
+    },
+    {
       "path": "internal/udpserver/dns_tunnel.go",
-      "sha256_lf": "296f2338d4f9fc6ce8cce51f3e495833e8e7a986f3c7022b219b3607b26f87cc"
+      "sha256_lf": "9cc3ae2f3ee0886c7457419a9fd036ea4780fcf8a139dc7b0d3e460c9be6e04c"
     },
     {
       "path": "internal/udpserver/dns_tunnel_cap_test.go",
@@ -1458,7 +1674,7 @@
     },
     {
       "path": "internal/udpserver/embedded_dns.go",
-      "sha256_lf": "afc17365c45034bc7d7adeb8021cd290c3ba2d96a5d9500d44c502ba4497206c"
+      "sha256_lf": "dede5cb804018825d364ad5265154b1322b535c5f7af89589acf8a576eb946cf"
     },
     {
       "path": "internal/udpserver/embedded_dns_test.go",
@@ -1674,7 +1890,11 @@
     },
     {
       "path": "internal/udpserver/udp_association.go",
-      "sha256_lf": "8b211a9243d5db2401b0ceea9954c12cea6bf865325c4036f0c7ec322281903d"
+      "sha256_lf": "b6ead8822a8b648c40d2f3fd0fd13b6b76a6023848fe9c99461e9f5f61821b5a"
+    },
+    {
+      "path": "internal/udpserver/udp_association_cleanup_test.go",
+      "sha256_lf": "5339bd455c1d07ac26026c315730da0898041c034665d1132325721878897224"
     },
     {
       "path": "internal/udpserver/udp_association_socks5.go",
@@ -1683,6 +1903,10 @@
     {
       "path": "internal/udpserver/udp_association_test.go",
       "sha256_lf": "54c3ae6718bc6079b1e9022d4f086b7b157328e41a06504e1309d5a1ea015819"
+    },
+    {
+      "path": "internal/udpserver/udp_connection_regression_test.go",
+      "sha256_lf": "ed449b63968def92d381ea805d25830cb4dba9fcd4b49ec93b70855e020bd6c4"
     },
     {
       "path": "internal/udpserver/zone_ns_test.go",
@@ -1785,6 +2009,10 @@
       "sha256_lf": "4865d41f6507579f284e63f76d065a282f14f27b682018a78e3817b749c74ed1"
     },
     {
+      "path": "scripts/diagnostics/collect-slowdown.sh",
+      "sha256_lf": "36cd8eb82ac89ae9ea9c297d896ab5bce995de614027e3e1704852a6512e0f38"
+    },
+    {
       "path": "scripts/experiments/max_matrix.py",
       "sha256_lf": "94face76686c77b9e968412e19fe56f8877b00ed2cf23d3ff58d552c3c04acbc"
     },
@@ -1794,15 +2022,19 @@
     },
     {
       "path": "scripts/experiments/normal_max_README.md",
-      "sha256_lf": "ca19c07ef90f29c395623867f099db91977b9a06394d0d9ed764413cb4ec90e7"
+      "sha256_lf": "e481573043d53294536debf4782ac3b86333ed43612cc510396bd805b66ddd2b"
     },
     {
       "path": "scripts/experiments/normal_max_android.toml",
       "sha256_lf": "78fd5ef48e69380c21eb6ac8e6dfedef69d896cd9240b007b986f8a019ee15aa"
     },
     {
+      "path": "scripts/experiments/normal_max_combine.py",
+      "sha256_lf": "b7f61fdab5a37bc3cc6fbfe27ad0f184e6cca65dc1272ee49217f8531f710611"
+    },
+    {
       "path": "scripts/experiments/normal_max_desktop.toml",
-      "sha256_lf": "3238e831d07d62ee86160a6aa0d72e8c5c047b8ce5bb282e47fc02edd434c4f0"
+      "sha256_lf": "22bcf51458f82897207ce1eca1e6a0ed1d87efc3c40789c2c8d236364fdea5bd"
     },
     {
       "path": "scripts/experiments/normal_max_matrix.py",
@@ -1811,6 +2043,14 @@
     {
       "path": "scripts/experiments/normal_max_summarize.py",
       "sha256_lf": "2650fc28a6a08adad04028b8638bffa3e9ba49d2bc2aaa3eaa686bd906ef540a"
+    },
+    {
+      "path": "scripts/experiments/plot_low_percentages.py",
+      "sha256_lf": "e42e3ec5c16ed5d56c9721900e59dbf616929db721c1c4f5a9b6ff34bfc8ee60"
+    },
+    {
+      "path": "scripts/experiments/plot_traffic_profiles.py",
+      "sha256_lf": "2fe9e596b6ab3b05466ce0274e61267feacd91a46f7101d99fe64f0ad1eca854"
     },
     {
       "path": "server/embedded.go",
@@ -1834,7 +2074,7 @@
     },
     {
       "path": "server_config.toml.simple",
-      "sha256_lf": "5684fdc58babf2a09ee55483959f3b42c7f6f910a0a45e7f57caddda8918f9b6"
+      "sha256_lf": "cbf932ba627236059ebf6ad8ec7ce98b89810eb2181df6243410980594657815"
     },
     {
       "path": "server_docker_install.sh",
@@ -1845,8 +2085,12 @@
       "sha256_lf": "31ceda88fc61a352fc67f479d38dfcf572ea5e71dd39246caba791c6f965819a"
     },
     {
+      "path": "test/e2e/harness_test.go",
+      "sha256_lf": "e82de1870074fc14d714e7c7832c8e5d6d2ce025a8e1bb75d66d950eacb3b95d"
+    },
+    {
       "path": "test/e2e/tunnel_e2e_test.go",
-      "sha256_lf": "2027a8e0dcf78f6889ee5d075fad47d8cddeaec3c46f1a4fac66117d31988f80"
+      "sha256_lf": "dc55755f1a7d04f010f7140b66ffe173aa02d59f980e7c9c1c1e79c94368d83e"
     }
   ]
 }

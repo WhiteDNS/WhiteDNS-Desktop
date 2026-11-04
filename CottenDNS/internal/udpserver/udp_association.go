@@ -14,13 +14,26 @@ import (
 
 const (
 	maxUDPAssociationTargets = 32
+	maxUDPAssociationAliases = 4 * maxUDPAssociationTargets
 	udpEndpointIdleTimeout   = 2 * time.Minute
+	udpEndpointSweepInterval = 30 * time.Second
 	udpResolveTimeout        = 5 * time.Second
 )
 
 type udpAssociationEndpoint struct {
 	conn     net.Conn
 	lastUsed time.Time
+	done     chan struct{}
+	once     sync.Once
+}
+
+func (e *udpAssociationEndpoint) close() {
+	e.once.Do(func() {
+		if e.done != nil {
+			close(e.done)
+		}
+		_ = e.conn.Close()
+	})
 }
 
 // udpAssociationConn adapts addressed UDP datagrams to the byte-stream
@@ -53,7 +66,61 @@ func newUDPAssociationConn(monitors ...*Server) *udpAssociationConn {
 		c.monitor.genericUDPActive.Add(1)
 		c.monitor.genericUDPTotal.Add(1)
 	}
+	go c.cleanupEndpoints(udpEndpointSweepInterval)
 	return c
+}
+
+// Independent of cache misses: a long-lived association can keep using one
+// known target while every other socket and alias becomes idle.
+func (c *udpAssociationConn) cleanupEndpoints(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case now := <-ticker.C:
+			c.expireEndpoints(now)
+		case <-c.closed:
+			return
+		}
+	}
+}
+
+func (c *udpAssociationConn) expireEndpoints(now time.Time) {
+	var expired []*udpAssociationEndpoint
+	c.mu.Lock()
+	for key, endpoint := range c.endpoints {
+		if now.Sub(endpoint.lastUsed) >= udpEndpointIdleTimeout {
+			expired = append(expired, c.detachEndpointLocked(key))
+		}
+	}
+	c.mu.Unlock()
+	for _, endpoint := range expired {
+		endpoint.close()
+	}
+}
+
+func (c *udpAssociationConn) rememberAliasLocked(alias, key string) {
+	if _, exists := c.aliases[alias]; !exists && len(c.aliases) >= maxUDPAssociationAliases {
+		// Dropping an alias does not disturb its canonical destination socket.
+		// A later request can resolve the name and find that same socket again.
+		for oldest := range c.aliases {
+			delete(c.aliases, oldest)
+			break
+		}
+	}
+	c.aliases[alias] = key
+}
+
+func (c *udpAssociationConn) detachEndpointLocked(key string) *udpAssociationEndpoint {
+	endpoint := c.endpoints[key]
+	if endpoint != nil {
+		delete(c.endpoints, key)
+		c.removeAliasesLocked(key)
+		if c.monitor != nil {
+			c.monitor.genericUDPEndpoints.Add(^uint64(0))
+		}
+	}
+	return endpoint
 }
 
 func (c *udpAssociationConn) Write(p []byte) (int, error) {
@@ -119,6 +186,12 @@ func (c *udpAssociationConn) endpointFor(host string, port uint16) (*udpAssociat
 	requestKey := net.JoinHostPort(strings.ToLower(host), strconv.Itoa(int(port)))
 	now := time.Now()
 	c.mu.Lock()
+	select {
+	case <-c.closed:
+		c.mu.Unlock()
+		return nil, net.ErrClosed
+	default:
+	}
 	if endpointKey := c.aliases[requestKey]; endpointKey != "" {
 		if endpoint := c.endpoints[endpointKey]; endpoint != nil {
 			endpoint.lastUsed = now
@@ -138,34 +211,9 @@ func (c *udpAssociationConn) endpointFor(host string, port uint16) (*udpAssociat
 	c.mu.Lock()
 	if endpoint := c.endpoints[key]; endpoint != nil {
 		endpoint.lastUsed = now
-		c.aliases[requestKey] = key
+		c.rememberAliasLocked(requestKey, key)
 		c.mu.Unlock()
 		return endpoint, nil
-	}
-	for endpointKey, endpoint := range c.endpoints {
-		if now.Sub(endpoint.lastUsed) >= udpEndpointIdleTimeout {
-			delete(c.endpoints, endpointKey)
-			c.removeAliasesLocked(endpointKey)
-			_ = endpoint.conn.Close()
-		}
-	}
-	if len(c.endpoints) >= maxUDPAssociationTargets {
-		var oldestKey string
-		var oldestTime time.Time
-		for endpointKey, endpoint := range c.endpoints {
-			if oldestKey == "" || endpoint.lastUsed.Before(oldestTime) {
-				oldestKey, oldestTime = endpointKey, endpoint.lastUsed
-			}
-		}
-		oldest := c.endpoints[oldestKey]
-		delete(c.endpoints, oldestKey)
-		c.removeAliasesLocked(oldestKey)
-		if oldest != nil {
-			_ = oldest.conn.Close()
-			if c.monitor != nil {
-				c.monitor.genericUDPEndpoints.Add(^uint64(0))
-			}
-		}
 	}
 	c.mu.Unlock()
 
@@ -175,6 +223,9 @@ func (c *udpAssociationConn) endpointFor(host string, port uint16) (*udpAssociat
 	}
 	var conn net.Conn
 	if c.monitor != nil && c.monitor.embeddedDialContext != nil {
+		// The embedded wrapper already bounds upstream setup to 15 seconds and
+		// cancels it with the account. DNS lookup's shorter budget must not cut
+		// off a slow but valid proxy handshake.
 		conn, err = c.monitor.embeddedDialContext(context.Background(), network, addr.String())
 	} else {
 		conn, err = net.DialUDP(network, nil, addr)
@@ -182,21 +233,43 @@ func (c *udpAssociationConn) endpointFor(host string, port uint16) (*udpAssociat
 	if err != nil {
 		return nil, err
 	}
-	endpoint := &udpAssociationEndpoint{conn: conn, lastUsed: now}
+	endpoint := &udpAssociationEndpoint{conn: conn, lastUsed: time.Now(), done: make(chan struct{})}
 
 	c.mu.Lock()
+	select {
+	case <-c.closed:
+		c.mu.Unlock()
+		endpoint.close()
+		return nil, net.ErrClosed
+	default:
+	}
 	if existing := c.endpoints[key]; existing != nil {
-		c.aliases[requestKey] = key
+		existing.lastUsed = time.Now()
+		c.rememberAliasLocked(requestKey, key)
 		c.mu.Unlock()
 		_ = conn.Close()
 		return existing, nil
 	}
+	// Enforce the cap at insertion, after concurrent dials have finished.
+	var evicted *udpAssociationEndpoint
+	if len(c.endpoints) >= maxUDPAssociationTargets {
+		var oldestKey string
+		for candidate, current := range c.endpoints {
+			if oldestKey == "" || current.lastUsed.Before(c.endpoints[oldestKey].lastUsed) {
+				oldestKey = candidate
+			}
+		}
+		evicted = c.detachEndpointLocked(oldestKey)
+	}
 	c.endpoints[key] = endpoint
-	c.aliases[requestKey] = key
+	c.rememberAliasLocked(requestKey, key)
 	if c.monitor != nil {
 		c.monitor.genericUDPEndpoints.Add(1)
 	}
 	c.mu.Unlock()
+	if evicted != nil {
+		evicted.close()
+	}
 	go c.readEndpoint(endpoint)
 	return endpoint, nil
 }
@@ -214,20 +287,14 @@ func (c *udpAssociationConn) removeEndpoint(target *udpAssociationEndpoint) {
 		return
 	}
 	c.mu.Lock()
-	removed := false
 	for endpointKey, endpoint := range c.endpoints {
 		if endpoint == target {
-			delete(c.endpoints, endpointKey)
-			c.removeAliasesLocked(endpointKey)
-			removed = true
+			c.detachEndpointLocked(endpointKey)
 			break
 		}
 	}
 	c.mu.Unlock()
-	if removed && c.monitor != nil {
-		c.monitor.genericUDPEndpoints.Add(^uint64(0))
-	}
-	_ = target.conn.Close()
+	target.close()
 }
 
 func resolvePublicUDPAddr(host string, port uint16) (*net.UDPAddr, error) {
@@ -259,6 +326,11 @@ func (c *udpAssociationConn) readEndpoint(endpoint *udpAssociationEndpoint) {
 			c.removeEndpoint(endpoint)
 			return
 		}
+		if n > 0 {
+			c.mu.Lock()
+			endpoint.lastUsed = time.Now()
+			c.mu.Unlock()
+		}
 		remote, ok := endpoint.conn.RemoteAddr().(*net.UDPAddr)
 		if !ok || remote == nil || n == 0 {
 			continue
@@ -278,6 +350,8 @@ func (c *udpAssociationConn) readEndpoint(endpoint *udpAssociationEndpoint) {
 		select {
 		case c.rx <- frame:
 		case <-c.closed:
+			return
+		case <-endpoint.done:
 			return
 		}
 	}
@@ -335,16 +409,18 @@ func (c *udpAssociationConn) SetReadDeadline(deadline time.Time) error {
 func (c *udpAssociationConn) Close() error {
 	c.closeOnce.Do(func() {
 		close(c.closed)
+		var endpoints []*udpAssociationEndpoint
 		c.mu.Lock()
-		for key, endpoint := range c.endpoints {
-			_ = endpoint.conn.Close()
-			delete(c.endpoints, key)
-			if c.monitor != nil {
-				c.monitor.genericUDPEndpoints.Add(^uint64(0))
-			}
+		for key := range c.endpoints {
+			endpoints = append(endpoints, c.detachEndpointLocked(key))
 		}
 		clear(c.aliases)
+		c.writeBuffer = nil
+		c.readPending = nil
 		c.mu.Unlock()
+		for _, endpoint := range endpoints {
+			endpoint.close()
+		}
 		if c.monitor != nil {
 			c.monitor.genericUDPActive.Add(^uint64(0))
 		}

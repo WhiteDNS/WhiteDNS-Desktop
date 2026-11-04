@@ -1,6 +1,7 @@
 package dnscache
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -21,8 +22,8 @@ func TestStore_BinaryPersistence(t *testing.T) {
 		BuildKey("github.com", 1, 1),
 	}
 
-	s.SetReady(keys[0], "example.com", 1, 1, []byte("\x00\x00answer1"), now)
-	s.SetReady(keys[1], "google.com", 28, 1, []byte("\x00\x00answer2"), now)
+	s.SetReady(keys[0], "example.com", 1, 1, cacheAnswer(t, "example.com", 1, 3600), now)
+	s.SetReady(keys[1], "google.com", 28, 1, cacheAnswer(t, "google.com", 28, 3600), now)
 	s.LookupOrCreatePending(keys[2], "github.com", 1, 1, now)
 
 	// Save to file
@@ -76,9 +77,9 @@ func TestStore_Sharding(t *testing.T) {
 	s = New(100, time.Hour, time.Minute) // 100/32 = 3 per shard
 
 	for i := 0; i < 200; i++ {
-		domain := "domain" + string(rune(i))
+		domain := fmt.Sprintf("domain%d.example", i)
 		key := BuildKey(domain, 1, 1)
-		s.SetReady(key, domain, 1, 1, []byte("\x00\x00resp"), now)
+		s.SetReady(key, domain, 1, 1, cacheAnswer(t, domain, 1, 3600), now)
 	}
 
 	// Verify we didn't exceed a reasonable total (accounting for shard distribution)
@@ -102,7 +103,7 @@ func TestStoreLoadFromFileFailsOnCorruptEntry(t *testing.T) {
 	s := New(100, time.Hour, time.Minute)
 	now := time.Now()
 	key := BuildKey("example.com", 1, 1)
-	s.SetReady(key, "example.com", 1, 1, []byte("\x00\x00answer1"), now)
+	s.SetReady(key, "example.com", 1, 1, cacheAnswer(t, "example.com", 1, 3600), now)
 
 	if _, err := s.SaveToFile(cachePath, now); err != nil {
 		t.Fatalf("SaveToFile failed: %v", err)
@@ -112,7 +113,7 @@ func TestStoreLoadFromFileFailsOnCorruptEntry(t *testing.T) {
 	if err != nil {
 		t.Fatalf("OpenFile failed: %v", err)
 	}
-	if _, err := file.Write([]byte{0x44, 0x4E, 0x53, 0x43, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0xAA}); err != nil {
+	if _, err := file.Write([]byte{0x44, 0x4E, 0x53, 0x43, 0x00, 0x02, 0x00, 0x00, 0x00, 0x01, 0xAA}); err != nil {
 		_ = file.Close()
 		t.Fatalf("Write failed: %v", err)
 	}

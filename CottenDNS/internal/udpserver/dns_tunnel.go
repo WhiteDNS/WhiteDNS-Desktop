@@ -146,10 +146,7 @@ func (s *Server) buildDNSQueryResponsePayloadContext(ctx context.Context, rawQue
 		return response
 	}
 
-	cacheKey := dnscache.BuildKey(parsed.FirstQuestion.Name, parsed.FirstQuestion.Type, parsed.FirstQuestion.Class)
-	if s.embeddedDNSExchange != nil {
-		cacheKey = embeddedDNSQueryKey(rawQuery, cacheKey)
-	}
+	cacheKey := dnscache.BuildQueryKey(rawQuery, dnscache.BuildKey(parsed.FirstQuestion.Name, parsed.FirstQuestion.Type, parsed.FirstQuestion.Class))
 	now := time.Now()
 	if cached, ok := s.cachedDNSResponse(cacheKey, rawQuery, now); ok {
 		if s.log != nil {

@@ -50,7 +50,9 @@ jobs:
       # a payload through the live tunnel, asserting byte-for-byte delivery.
       # Gated behind the `e2e` build tag so it stays out of the unit-test job.
       - name: Run E2E tunnel test
-        run: go test -tags e2e -timeout 180s ./test/e2e/
+        # Domain rotation and IPv4/IPv6 fallback deliberately wait for failed
+        # scans; leave time for native builds, failure logs and child cleanup.
+        run: go test -tags e2e -timeout 300s ./test/e2e/
 
   race:
     runs-on: ubuntu-latest

@@ -1,0 +1,14 @@
+{
+  "core_source_pin": "77bf87db28af6b64a4b6c404074982235272ed9b",
+  "production_source_verified_clean": true,
+  "buildvcs": false,
+  "client_build_command": "go build -buildvcs=false -trimpath -o .bench/normalmax/client-final-77bf87db.exe ./cmd/client",
+  "harness_build_command": "go build -buildvcs=false -trimpath -o .bench/normalmax/normalmaxbench-final-77bf87db.exe ./cmd/normalmaxbench",
+  "binary_sha256": {
+    "client": "1d11c965aa0ac47bf423399004199297a3ee0b985a5160302f2f744ddb0fd221",
+    "harness": "3da8edcd4c168980bda4bf370381bc71b4817110d975dde78e9f1d22cdd4205f",
+    "server": "a39844c8103448f112a547cba41cb5b639c516004bb82b8e1bab1552b5f41be1"
+  },
+  "engine_source_directory": "D:\\GitHub\\cottenDNS\\.cache\\cottenmax-parity-multidomain-crypto\\internal\\cottenmax",
+  "server_note": "Retained unchanged from before percentage pacing; no server restart/config protocol upgrade required between profile cases."
+}

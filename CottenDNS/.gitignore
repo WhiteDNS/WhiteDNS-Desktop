@@ -74,3 +74,6 @@ reports/cottendns-network-engineering-audit.html
 /docs/COTTENMAX_PERFORMANCE_2026-10-19.md
 /docs/DNS_COUNTERMEASURE_AUDIT_2026-10-19.md
 /docs/IRAN_DNS_RESILIENCE.md
+
+# Generated per-case processes/configs; top-level benchmark evidence is tracked.
+/experiment-results/normal-max-*/r*/

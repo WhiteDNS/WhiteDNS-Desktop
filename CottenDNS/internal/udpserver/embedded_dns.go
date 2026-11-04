@@ -1,10 +1,10 @@
 package udpserver
 
 import (
-	"crypto/sha256"
 	"encoding/binary"
 	"time"
 
+	"cottendns-go/internal/dnscache"
 	DnsParser "cottendns-go/internal/dnsparser"
 )
 
@@ -23,29 +23,7 @@ func (s *Server) dnsAccountAllowed() bool {
 // Include all policy-bearing request bytes (CD, DO, EDNS options and size),
 // excluding only the transaction ID and the case of an uncompressed QNAME.
 func embeddedDNSQueryKey(query []byte, base string) string {
-	canonical := append([]byte(nil), query...)
-	if len(canonical) >= 2 {
-		canonical[0], canonical[1] = 0, 0
-	}
-	if len(canonical) < 12 || binary.BigEndian.Uint16(canonical[4:6]) != 1 {
-		hash := sha256.Sum256(canonical)
-		return base + string(hash[:])
-	}
-	for offset := 12; offset < len(canonical); {
-		n := int(canonical[offset])
-		offset++
-		if n == 0 || n > 63 || offset+n > len(canonical) {
-			break
-		}
-		for i := offset; i < offset+n; i++ {
-			if canonical[i] >= 'A' && canonical[i] <= 'Z' {
-				canonical[i] += 'a' - 'A'
-			}
-		}
-		offset += n
-	}
-	hash := sha256.Sum256(canonical)
-	return base + string(hash[:])
+	return dnscache.BuildQueryKey(query, base)
 }
 
 func patchEmbeddedDNSQuestion(response, query []byte) []byte {
@@ -76,12 +54,8 @@ func (s *Server) cachedDNSResponse(key string, query []byte, now time.Time) ([]b
 		delete(s.embeddedDNSCache, key)
 		return nil, false
 	}
-	age := uint32(max(now.Sub(entry.storedAt)/time.Second, 0))
-	remaining := uint32(max(entry.expiresAt.Sub(now)/time.Second, 0))
-	for _, offset := range entry.ttlFields {
-		ttl := binary.BigEndian.Uint32(response[offset : offset+4])
-		binary.BigEndian.PutUint32(response[offset:offset+4], min(ttl-min(ttl, age), remaining))
-	}
+	// The shared cache now ages DNS TTLs for standalone and embedded users.
+	// Applying the embedded age again would subtract elapsed time twice.
 	return patchEmbeddedDNSQuestion(response, query), true
 }
 

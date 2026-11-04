@@ -1,0 +1,24 @@
+{
+  "combined_utc": "2026-10-26T06:59:33.461702+00:00",
+  "verified_cases": 60,
+  "binaries_sha256": {
+    "client": "1d11c965aa0ac47bf423399004199297a3ee0b985a5160302f2f744ddb0fd221",
+    "harness": "3da8edcd4c168980bda4bf370381bc71b4817110d975dde78e9f1d22cdd4205f",
+    "server": "a39844c8103448f112a547cba41cb5b639c516004bb82b8e1bab1552b5f41be1"
+  },
+  "sources": [
+    {
+      "path": "experiment-results\\normal-max-final-wide",
+      "metadata_sha256": "270a99f9f77a26e12d4423dc9e5113916f5c1d98794a6fba91154c5136e3a34e",
+      "runs_sha256": "3b0a45575539460323ba40664ad5970c6eed1480a59274f723927660b6716b52"
+    },
+    {
+      "path": "experiment-results\\normal-max-final-narrow",
+      "metadata_sha256": "719f0e14b91c71449ac6e123ce658497bacf2d3d1c1bc2e1e09176a2e1fee581",
+      "runs_sha256": "7db7a75f3f1dd22ad7af5726979bb643299d582c2a9c2c911813c24b6eb7e598"
+    }
+  ],
+  "validated_core_pin": "77bf87db28af6b64a4b6c404074982235272ed9b",
+  "measurement_scope": "Production default UDP socket factory, original unchanged server, ordered per-direction DNS relay.",
+  "source_provenance_note": "Executable identity is the captured SHA256. The final client and harness were rebuilt from the production-clean validated core pin with -buildvcs=false; build-identity.json records the commands, verified source directory and binary hashes. The server executable was retained unchanged from before percentage pacing."
+}

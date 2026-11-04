@@ -1,4 +1,4 @@
-﻿// ==============================================================================
+// ==============================================================================
 // CottenDNS
 // Author: tajirax
 // Github: https://github.com/TaJirax/CottenDns
@@ -19,6 +19,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	dnsParser "cottendns-go/internal/dnsparser"
 )
 
 type Status uint8
@@ -39,9 +41,11 @@ type Entry struct {
 	QuestionClass  uint16
 	Status         Status
 	CreatedAt      time.Time
+	ExpiresAt      time.Time
 	LastUsedAt     time.Time
 	LastDispatchAt time.Time
 	Response       []byte
+	ttlFields      []int
 }
 
 type LookupResult struct {
@@ -68,6 +72,7 @@ type Store struct {
 	shards         [shardCount]shard
 	pendingTotal   atomic.Uint64
 	dirty          atomic.Uint64 // used as a flag/counter
+	persistMu      sync.Mutex
 }
 
 func New(maxRecords int, cacheTTL time.Duration, pendingTimeout time.Duration) *Store {
@@ -107,21 +112,23 @@ func getShardIndex(key string) int {
 }
 
 func PatchResponseForQuery(rawResponse []byte, rawQuery []byte) []byte {
-	if len(rawResponse) < 2 {
-		return rawResponse
+	patched := append([]byte(nil), rawResponse...)
+	if len(rawResponse) < 2 || len(rawQuery) < 2 {
+		return patched
 	}
-	if len(rawQuery) < 2 {
-		return rawResponse
-	}
-
-	patched := make([]byte, len(rawResponse))
-	copy(patched, rawResponse)
 	copy(patched[:2], rawQuery[:2])
 	if len(rawQuery) >= 4 && len(patched) >= 4 {
 		queryFlags := binary.BigEndian.Uint16(rawQuery[2:4])
 		responseFlags := binary.BigEndian.Uint16(patched[2:4])
 		responseFlags = (responseFlags &^ 0x0110) | (queryFlags & 0x0110)
 		binary.BigEndian.PutUint16(patched[2:4], responseFlags)
+	}
+	// Coalesced/cache-hit requests can differ in QNAME case. Return the
+	// caller's question spelling without altering compression offsets.
+	r, responseErr := dnsParser.ParsePacketLite(patched)
+	q, queryErr := dnsParser.ParseDNSRequestLite(rawQuery)
+	if responseErr == nil && queryErr == nil && r.Header.QDCount == 1 && q.Header.QDCount == 1 && r.FirstQuestion == q.FirstQuestion && r.QuestionEndOffset == q.QuestionEndOffset {
+		copy(patched[12:r.QuestionEndOffset], rawQuery[12:q.QuestionEndOffset])
 	}
 	return patched
 }
@@ -145,7 +152,7 @@ func (s *Store) LookupOrCreatePending(key string, domain string, qType uint16, q
 				shard.order.MoveToBack(element)
 				return LookupResult{
 					Status:   StatusReady,
-					Response: PatchResponseForQuery(node.entry.Response, nil),
+					Response: responseForQuery(&node.entry, nil, now),
 				}
 			}
 			if now.Sub(node.entry.LastDispatchAt) >= s.pendingTimeout {
@@ -213,7 +220,7 @@ func (s *Store) GetReady(key string, rawQuery []byte, now time.Time) ([]byte, bo
 
 	s.touchEntryLocked(shard, &node.entry, now)
 	shard.order.MoveToBack(element)
-	return PatchResponseForQuery(node.entry.Response, rawQuery), true
+	return responseForQuery(&node.entry, rawQuery, now), true
 }
 
 func (s *Store) SetReady(key string, domain string, qType uint16, qClass uint16, rawResponse []byte, now time.Time) {
@@ -226,6 +233,16 @@ func (s *Store) SetReady(key string, domain string, qType uint16, qClass uint16,
 
 	shard.mu.Lock()
 	defer shard.mu.Unlock()
+	fields, lifetime, cacheable := responseLifetime(rawResponse, domain, qType, qClass)
+	if !cacheable {
+		// Complete pending work without retaining a transient failure. Existing
+		// waiters are notified by the caller independently of cache admission.
+		if element := shard.items[key]; element != nil {
+			s.removeElementLocked(shard, element)
+		}
+		return
+	}
+	lifetime = min(lifetime, s.cacheTTL)
 
 	normalized := make([]byte, len(rawResponse))
 	copy(normalized, rawResponse)
@@ -242,9 +259,9 @@ func (s *Store) SetReady(key string, domain string, qType uint16, qClass uint16,
 		node.entry.QuestionType = qType
 		node.entry.QuestionClass = qClass
 		node.entry.Status = StatusReady
-		if node.entry.CreatedAt.IsZero() {
-			node.entry.CreatedAt = now
-		}
+		node.entry.CreatedAt = now
+		node.entry.ExpiresAt = now.Add(lifetime)
+		node.entry.ttlFields = fields
 		node.entry.LastUsedAt = now
 		node.entry.Response = normalized
 		s.dirty.Add(1)
@@ -258,8 +275,10 @@ func (s *Store) SetReady(key string, domain string, qType uint16, qClass uint16,
 		QuestionClass: qClass,
 		Status:        StatusReady,
 		CreatedAt:     now,
+		ExpiresAt:     now.Add(lifetime),
 		LastUsedAt:    now,
 		Response:      normalized,
+		ttlFields:     fields,
 	}
 	element := shard.order.PushBack(&cacheNode{key: key, entry: entry})
 	shard.items[key] = element
@@ -324,7 +343,7 @@ func (s *Store) isExpired(entry *Entry, now time.Time) bool {
 	if entry.Status == StatusPending {
 		return false
 	}
-	return now.Sub(entry.LastUsedAt) >= s.cacheTTL
+	return entry.ExpiresAt.IsZero() || !now.Before(entry.ExpiresAt)
 }
 
 func (s *Store) evictIfNeededLocked(shard *shard) {
@@ -358,13 +377,15 @@ func (s *Store) removeElementLocked(shard *shard, element *list.Element) {
 
 const (
 	binaryMagic   uint32 = 0x444E5343 // "DNSC"
-	binaryVersion uint16 = 1
+	binaryVersion uint16 = 2
 )
 
 func (s *Store) LoadFromFile(path string, now time.Time) (int, error) {
 	if s == nil || path == "" {
 		return 0, nil
 	}
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
 
 	file, err := os.Open(path)
 	if err != nil {
@@ -396,44 +417,48 @@ func (s *Store) LoadFromFile(path string, now time.Time) (int, error) {
 		return 0, err
 	}
 
-	s.pendingTotal.Store(0)
-	for i := 0; i < shardCount; i++ {
-		s.shards[i].mu.Lock()
-		s.shards[i].items = make(map[string]*list.Element, s.maxRecords/shardCount+1)
-		s.shards[i].order.Init()
-		s.shards[i].mu.Unlock()
-	}
-
-	loaded := 0
+	// Version 1 used a sliding last-access timestamp and cannot establish
+	// whether an answer is still valid. Reject it rather than revive stale DNS.
+	staged := New(s.maxRecords, s.cacheTTL, s.pendingTimeout)
 	br := bufio.NewReader(file)
 	for i := 0; i < int(count); i++ {
 		entry, key, err := readBinaryEntry(br)
 		if err != nil {
-			if err == io.EOF {
-				break
-			}
 			return 0, fmt.Errorf("read cache entry %d failed: %w", i, err)
 		}
-
+		fields, lifetime, valid := responseLifetime(entry.Response, entry.Domain, entry.QuestionType, entry.QuestionClass)
+		if !valid || entry.CreatedAt.After(now) || !entry.ExpiresAt.After(entry.CreatedAt) {
+			continue
+		}
+		// A shorter administrator limit also applies to files written before
+		// the limit changed. Loading never extends the original expiration.
+		if ceiling := entry.CreatedAt.Add(min(lifetime, s.cacheTTL)); ceiling.Before(entry.ExpiresAt) {
+			entry.ExpiresAt = ceiling
+		}
 		if s.isExpired(&entry, now) {
 			continue
 		}
+		entry.ttlFields = fields
 
 		shardIdx := getShardIndex(key)
-		shard := &s.shards[shardIdx]
-		shard.mu.Lock()
+		shard := &staged.shards[shardIdx]
+		if previous := shard.items[key]; previous != nil {
+			staged.removeElementLocked(shard, previous)
+		}
 		element := shard.order.PushBack(&cacheNode{key: key, entry: entry})
 		shard.items[key] = element
-		shard.mu.Unlock()
-		loaded++
+		staged.evictIfNeededLocked(shard)
 	}
 
+	loaded := 0
 	for i := 0; i < shardCount; i++ {
 		s.shards[i].mu.Lock()
-		s.evictIfNeededLocked(&s.shards[i])
+		s.shards[i].items = staged.shards[i].items
+		s.shards[i].order = staged.shards[i].order
+		loaded += len(s.shards[i].items)
 		s.shards[i].mu.Unlock()
 	}
-
+	s.pendingTotal.Store(0)
 	s.dirty.Store(0)
 	return loaded, nil
 }
@@ -442,21 +467,41 @@ func (s *Store) SaveToFile(path string, now time.Time) (int, error) {
 	if s == nil || path == "" {
 		return 0, nil
 	}
-
-	if s.dirty.Load() == 0 {
+	s.persistMu.Lock()
+	defer s.persistMu.Unlock()
+	revision := s.dirty.Load()
+	if revision == 0 {
 		return 0, nil
 	}
-
-	tempPath := path + ".tmp"
-	file, err := os.Create(tempPath)
+	// Snapshot once: two separately counted passes race with cache inserts and
+	// expiration. No cache shard stays locked while writing to a slow disk.
+	type savedEntry struct {
+		key   string
+		entry Entry
+	}
+	var snapshot []savedEntry
+	for i := range s.shards {
+		shard := &s.shards[i]
+		shard.mu.RLock()
+		for element := shard.order.Front(); element != nil; element = element.Next() {
+			node := element.Value.(*cacheNode)
+			if node.entry.Status == StatusReady && !s.isExpired(&node.entry, now) {
+				snapshot = append(snapshot, savedEntry{node.key, node.entry})
+			}
+		}
+		shard.mu.RUnlock()
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return 0, err
+	}
+	file, err := os.CreateTemp(filepath.Dir(path), filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return 0, err
 	}
+	tempPath := file.Name()
 	defer func() {
 		_ = file.Close()
-		if err != nil {
-			_ = os.Remove(tempPath)
-		}
+		_ = os.Remove(tempPath)
 	}()
 
 	bw := bufio.NewWriter(file)
@@ -467,38 +512,16 @@ func (s *Store) SaveToFile(path string, now time.Time) (int, error) {
 		return 0, err
 	}
 
-	var total uint32
-	for i := 0; i < shardCount; i++ {
-		shard := &s.shards[i]
-		shard.mu.RLock()
-		for element := shard.order.Front(); element != nil; element = element.Next() {
-			node := element.Value.(*cacheNode)
-			if node.entry.Status == StatusReady && !s.isExpired(&node.entry, now) {
-				total++
-			}
-		}
-		shard.mu.RUnlock()
-	}
-
-	if err = binary.Write(bw, binary.BigEndian, total); err != nil {
+	if err = binary.Write(bw, binary.BigEndian, uint32(len(snapshot))); err != nil {
 		return 0, err
 	}
 
 	saved := 0
-	for i := 0; i < shardCount; i++ {
-		shard := &s.shards[i]
-		shard.mu.RLock()
-		for element := shard.order.Front(); element != nil; element = element.Next() {
-			node := element.Value.(*cacheNode)
-			if node.entry.Status == StatusReady && !s.isExpired(&node.entry, now) {
-				if err = writeBinaryEntry(bw, node.key, &node.entry); err != nil {
-					shard.mu.RUnlock()
-					return saved, err
-				}
-				saved++
-			}
+	for _, node := range snapshot {
+		if err = writeBinaryEntry(bw, node.key, &node.entry); err != nil {
+			return saved, err
 		}
-		shard.mu.RUnlock()
+		saved++
 	}
 
 	if err = bw.Flush(); err != nil {
@@ -509,15 +532,11 @@ func (s *Store) SaveToFile(path string, now time.Time) (int, error) {
 		return saved, err
 	}
 
-	if err = os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return saved, err
-	}
-
 	if err = os.Rename(tempPath, path); err != nil {
 		return saved, err
 	}
 
-	s.dirty.Store(0)
+	s.dirty.CompareAndSwap(revision, 0)
 	return saved, nil
 }
 
@@ -569,11 +588,14 @@ func readBinaryEntry(r io.Reader) (Entry, string, error) {
 		return Entry{}, "", err
 	}
 
-	var createdAt, lastUsedAt int64
+	var createdAt, lastUsedAt, expiresAt int64
 	if err := binary.Read(r, binary.BigEndian, &createdAt); err != nil {
 		return Entry{}, "", err
 	}
 	if err := binary.Read(r, binary.BigEndian, &lastUsedAt); err != nil {
+		return Entry{}, "", err
+	}
+	if err := binary.Read(r, binary.BigEndian, &expiresAt); err != nil {
 		return Entry{}, "", err
 	}
 
@@ -582,8 +604,9 @@ func readBinaryEntry(r io.Reader) (Entry, string, error) {
 		QuestionType:  qType,
 		QuestionClass: qClass,
 		Status:        StatusReady,
-		CreatedAt:     time.Unix(createdAt, 0),
-		LastUsedAt:    time.Unix(lastUsedAt, 0),
+		CreatedAt:     time.Unix(0, createdAt),
+		LastUsedAt:    time.Unix(0, lastUsedAt),
+		ExpiresAt:     time.Unix(0, expiresAt),
 		Response:      resBuf,
 	}, string(keyBuf), nil
 }
@@ -617,10 +640,13 @@ func writeBinaryEntry(w io.Writer, key string, entry *Entry) error {
 		return err
 	}
 
-	if err := binary.Write(w, binary.BigEndian, entry.CreatedAt.Unix()); err != nil {
+	if err := binary.Write(w, binary.BigEndian, entry.CreatedAt.UnixNano()); err != nil {
 		return err
 	}
-	if err := binary.Write(w, binary.BigEndian, entry.LastUsedAt.Unix()); err != nil {
+	if err := binary.Write(w, binary.BigEndian, entry.LastUsedAt.UnixNano()); err != nil {
+		return err
+	}
+	if err := binary.Write(w, binary.BigEndian, entry.ExpiresAt.UnixNano()); err != nil {
 		return err
 	}
 

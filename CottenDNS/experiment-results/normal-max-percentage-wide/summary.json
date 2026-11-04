@@ -1,0 +1,434 @@
+[
+  {
+    "profile": "healthy-wide-download",
+    "mode": "max-full",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 8.361818406190247,
+      "min": 7.301189307822916,
+      "max": 8.389324448307885
+    },
+    "query_starts_per_second": {
+      "median": 1523.1202274154064,
+      "min": 1434.3690847506723,
+      "max": 1528.1305023449004
+    },
+    "transfer_seconds": {
+      "median": 0.5016019,
+      "min": 0.4999573,
+      "max": 0.5744686
+    },
+    "cold_start_seconds": {
+      "median": 0.5774674,
+      "min": 0.577419,
+      "max": 0.6831529
+    },
+    "stream_open_seconds": {
+      "median": 0.1625147,
+      "min": 0.0831254,
+      "max": 0.1625378
+    },
+    "target_connection_starts_per_second": {
+      "median": 6.153289517809773,
+      "min": 6.152415007462879,
+      "max": 12.030017299164875
+    }
+  },
+  {
+    "profile": "healthy-wide-download",
+    "mode": "max-low-10",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 5.425446968676846,
+      "min": 5.338396593754172,
+      "max": 5.638333696065833
+    },
+    "query_starts_per_second": {
+      "median": 801.9869615029443,
+      "min": 791.6647628104913,
+      "max": 903.3585175886726
+    },
+    "transfer_seconds": {
+      "median": 0.7730799,
+      "min": 0.7438907,
+      "max": 0.7856861
+    },
+    "cold_start_seconds": {
+      "median": 0.5768665,
+      "min": 0.5218752,
+      "max": 0.5776389
+    },
+    "stream_open_seconds": {
+      "median": 0.086644,
+      "min": 0.0859702,
+      "max": 0.0868661
+    },
+    "target_connection_starts_per_second": {
+      "median": 11.541480079405384,
+      "min": 11.511970722756057,
+      "max": 11.631937578370179
+    }
+  },
+  {
+    "profile": "healthy-wide-download",
+    "mode": "max-low-35",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 4.895864205060444,
+      "min": 4.716664181432444,
+      "max": 4.923590105263751
+    },
+    "query_starts_per_second": {
+      "median": 727.8027213248076,
+      "min": 721.9549189757416,
+      "max": 735.3769419641685
+    },
+    "transfer_seconds": {
+      "median": 0.8567035,
+      "min": 0.8518792,
+      "max": 0.8892522
+    },
+    "cold_start_seconds": {
+      "median": 0.5771633,
+      "min": 0.5210996,
+      "max": 0.5805046
+    },
+    "stream_open_seconds": {
+      "median": 0.0890221,
+      "min": 0.0882835,
+      "max": 0.1627811
+    },
+    "target_connection_starts_per_second": {
+      "median": 11.233165697057247,
+      "min": 6.143219329516755,
+      "max": 11.327144936483034
+    }
+  },
+  {
+    "profile": "healthy-wide-download",
+    "mode": "max-low-90",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 1.0262516653054035,
+      "min": 1.0251198733851195,
+      "max": 1.0266747433725592
+    },
+    "query_starts_per_second": {
+      "median": 143.6848817729216,
+      "min": 143.38099381183778,
+      "max": 143.71168268929725
+    },
+    "transfer_seconds": {
+      "median": 4.0870131,
+      "min": 4.0853289,
+      "max": 4.0915254
+    },
+    "cold_start_seconds": {
+      "median": 2.5071213,
+      "min": 2.5071092,
+      "max": 2.5082316000000002
+    },
+    "stream_open_seconds": {
+      "median": 0.7431069,
+      "min": 0.7427657,
+      "max": 0.7435851
+    },
+    "target_connection_starts_per_second": {
+      "median": 1.3457014058138876,
+      "min": 1.3448359844757514,
+      "max": 1.3463195729151198
+    }
+  },
+  {
+    "profile": "healthy-wide-download",
+    "mode": "normal-android",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 0.5119005818083915,
+      "min": 0.5106283470424794,
+      "max": 0.567975242840906
+    },
+    "query_starts_per_second": {
+      "median": 74.57047831652812,
+      "min": 73.89817396516443,
+      "max": 82.46825287106316
+    },
+    "transfer_seconds": {
+      "median": 8.193591,
+      "min": 7.3846599,
+      "max": 8.2140054
+    },
+    "cold_start_seconds": {
+      "median": 46.7169087,
+      "min": 46.7127886,
+      "max": 48.2549238
+    },
+    "stream_open_seconds": {
+      "median": 0.7260836,
+      "min": 0.4442583,
+      "max": 0.7270639
+    },
+    "target_connection_starts_per_second": {
+      "median": 1.3772518756793295,
+      "min": 1.3753949274609838,
+      "max": 2.2509427510977287
+    }
+  },
+  {
+    "profile": "healthy-wide-download",
+    "mode": "normal-desktop",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 0.570367932589083,
+      "min": 0.550910668533918,
+      "max": 0.5968359032959702
+    },
+    "query_starts_per_second": {
+      "median": 85.53539028132754,
+      "min": 82.61747610755788,
+      "max": 89.36237031695111
+    },
+    "transfer_seconds": {
+      "median": 7.3536813,
+      "min": 7.0275665,
+      "max": 7.6134013
+    },
+    "cold_start_seconds": {
+      "median": 24.1824002,
+      "min": 23.8971611,
+      "max": 24.4550055
+    },
+    "stream_open_seconds": {
+      "median": 0.7247529,
+      "min": 0.4434218,
+      "max": 0.725923
+    },
+    "target_connection_starts_per_second": {
+      "median": 1.379780612123111,
+      "min": 1.3775565728045536,
+      "max": 2.255189077307431
+    }
+  },
+  {
+    "profile": "healthy-wide-upload",
+    "mode": "max-full",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 1.2800543773099735,
+      "min": 1.2583155609892607,
+      "max": 1.2855394951389656
+    },
+    "query_starts_per_second": {
+      "median": 1333.0644417023575,
+      "min": 1317.6255092298586,
+      "max": 1338.7767111699584
+    },
+    "transfer_seconds": {
+      "median": 0.4095826,
+      "min": 0.407835,
+      "max": 0.4166586
+    },
+    "cold_start_seconds": {
+      "median": 0.6814557,
+      "min": 0.5747922,
+      "max": 0.6849234
+    },
+    "stream_open_seconds": {
+      "median": 0.0819435,
+      "min": 0.0816599,
+      "max": 0.1627641
+    },
+    "target_connection_starts_per_second": {
+      "median": 12.20353048136826,
+      "min": 6.143860961968887,
+      "max": 12.245912620515089
+    }
+  },
+  {
+    "profile": "healthy-wide-upload",
+    "mode": "max-low-10",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 0.9249418038983228,
+      "min": 0.9176741826771775,
+      "max": 0.9348930099857347
+    },
+    "query_starts_per_second": {
+      "median": 961.4816343776436,
+      "min": 953.9269057446703,
+      "max": 971.8259629101284
+    },
+    "transfer_seconds": {
+      "median": 0.5668335,
+      "min": 0.5608,
+      "max": 0.5713226
+    },
+    "cold_start_seconds": {
+      "median": 0.5822617,
+      "min": 0.5741579,
+      "max": 0.5823362
+    },
+    "stream_open_seconds": {
+      "median": 0.087134,
+      "min": 0.0867595,
+      "max": 0.1636246
+    },
+    "target_connection_starts_per_second": {
+      "median": 11.47657630775587,
+      "min": 6.111550463683334,
+      "max": 11.526115295731303
+    }
+  },
+  {
+    "profile": "healthy-wide-upload",
+    "mode": "max-low-35",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 0.6774723590636583,
+      "min": 0.6772749233317057,
+      "max": 0.6810485555997359
+    },
+    "query_starts_per_second": {
+      "median": 708.1124358499236,
+      "min": 705.322471883986,
+      "max": 709.2523791455379
+    },
+    "transfer_seconds": {
+      "median": 0.7738884,
+      "min": 0.7698247,
+      "max": 0.774114
+    },
+    "cold_start_seconds": {
+      "median": 0.5800165,
+      "min": 0.5796607,
+      "max": 0.5852981
+    },
+    "stream_open_seconds": {
+      "median": 0.0909233,
+      "min": 0.0893898,
+      "max": 0.1633345
+    },
+    "target_connection_starts_per_second": {
+      "median": 10.998280968684595,
+      "min": 6.122405248125779,
+      "max": 11.186958691036336
+    }
+  },
+  {
+    "profile": "healthy-wide-upload",
+    "mode": "max-low-90",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 0.12901080405935403,
+      "min": 0.12900405849216764,
+      "max": 0.1290126135785451
+    },
+    "query_starts_per_second": {
+      "median": 134.10737650365436,
+      "min": 134.10036445280335,
+      "max": 134.10925750790994
+    },
+    "transfer_seconds": {
+      "median": 4.0639077,
+      "min": 4.0638507,
+      "max": 4.0641202
+    },
+    "cold_start_seconds": {
+      "median": 2.5138534,
+      "min": 2.5088549,
+      "max": 2.5181258
+    },
+    "stream_open_seconds": {
+      "median": 0.7442518,
+      "min": 0.7423536,
+      "max": 0.7443452
+    },
+    "target_connection_starts_per_second": {
+      "median": 1.3436312817785594,
+      "min": 1.3434626837118047,
+      "max": 1.3470669503050838
+    }
+  },
+  {
+    "profile": "healthy-wide-upload",
+    "mode": "normal-android",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 0.9291529061282432,
+      "min": 0.9288396519969357,
+      "max": 0.9301511960513709
+    },
+    "query_starts_per_second": {
+      "median": 838.2593624089412,
+      "min": 837.9767520800602,
+      "max": 840.9341181342121
+    },
+    "transfer_seconds": {
+      "median": 0.5642645,
+      "min": 0.5636589,
+      "max": 0.5644548
+    },
+    "cold_start_seconds": {
+      "median": 47.0022018,
+      "min": 46.7368551,
+      "max": 47.0063706
+    },
+    "stream_open_seconds": {
+      "median": 0.4437798,
+      "min": 0.443644,
+      "max": 0.7260753
+    },
+    "target_connection_starts_per_second": {
+      "median": 2.253369801870207,
+      "min": 1.3772676194879512,
+      "max": 2.2540595612698473
+    }
+  },
+  {
+    "profile": "healthy-wide-upload",
+    "mode": "normal-desktop",
+    "successes": 3,
+    "failures": 0,
+    "goodput_mbps": {
+      "median": 0.9304392455230349,
+      "min": 0.9287990086442466,
+      "max": 0.9309423152353272
+    },
+    "query_starts_per_second": {
+      "median": 1027.5351012379401,
+      "min": 1025.723697671926,
+      "max": 1028.0906687188233
+    },
+    "transfer_seconds": {
+      "median": 0.5634844,
+      "min": 0.5631799,
+      "max": 0.5644795
+    },
+    "cold_start_seconds": {
+      "median": 24.181186,
+      "min": 23.8965691,
+      "max": 24.190518
+    },
+    "stream_open_seconds": {
+      "median": 0.4447316,
+      "min": 0.4440757,
+      "max": 0.7245028
+    },
+    "target_connection_starts_per_second": {
+      "median": 2.2485472136452636,
+      "min": 1.3802569155012236,
+      "max": 2.2518683188474395
+    }
+  }
+]

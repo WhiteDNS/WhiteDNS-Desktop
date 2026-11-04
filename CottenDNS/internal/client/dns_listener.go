@@ -313,7 +313,7 @@ func (c *Client) ProcessDNSQuery(query []byte, addr net.Addr, respond func([]byt
 		return false
 	}
 	question := lite.FirstQuestion
-	key := dnsCache.BuildKey(question.Name, question.Type, question.Class)
+	key := dnsCache.BuildQueryKey(query, dnsCache.BuildKey(question.Name, question.Type, question.Class))
 	p := &c.pendingDNS
 	p.mu.Lock()
 	dispatch := c.localDNSCache == nil
@@ -331,17 +331,15 @@ func (c *Client) ProcessDNSQuery(query []byte, addr net.Addr, respond func([]byt
 		}
 		dispatch = res.DispatchNeeded
 	}
-	if respond != nil {
-		first, accepted := c.addPendingDNSLocked(key, query, respond)
-		if !accepted {
-			p.mu.Unlock()
-			failPendingDNS(dnsPendingWaiter{query: query, respond: respond})
-			return false
-		}
-		// A prior waiter group may have timed out or been reset while the
-		// cache still marks the question pending. Allow a fresh attempt.
-		dispatch = dispatch || first
+	first, accepted := c.addPendingDNSLocked(key, query, respond)
+	if !accepted {
+		p.mu.Unlock()
+		failPendingDNS(dnsPendingWaiter{query: query, respond: respond})
+		return false
 	}
+	// A prior waiter group may have timed out or been reset while the
+	// cache still marks the question pending. Allow a fresh attempt.
+	dispatch = dispatch || first
 	group := p.groups[key]
 	p.mu.Unlock()
 	if dispatch {
@@ -349,9 +347,9 @@ func (c *Client) ProcessDNSQuery(query []byte, addr net.Addr, respond func([]byt
 			c.log.Infof("DNS Query Request: %s (%d)", question.Name, question.Type)
 		}
 		if engine := c.cottenMax.Load(); engine != nil {
-			c.dispatchCottenMaxDNS(engine, query, key, group)
+			c.dispatchCottenMaxDNS(engine, group.query, key, group)
 		} else {
-			c.dispatchDNSQueryToTunnel(query)
+			c.dispatchDNSQueryToTunnel(group.query)
 		}
 	}
 	return false

@@ -26,7 +26,7 @@ func (c *Client) dispatchCottenMaxDNS(engine *cottenmax.Client, query []byte, ke
 			return
 		}
 		parsed, err := dnsParser.ParsePacketLite(response)
-		if err != nil || !parsed.HasQuestion {
+		if err != nil || parsed.Header.QR != 1 || !parsed.HasQuestion {
 			if group != nil {
 				c.expirePendingDNS(key, group)
 			}
@@ -34,6 +34,6 @@ func (c *Client) dispatchCottenMaxDNS(engine *cottenmax.Client, query []byte, ke
 		}
 		c.txTotalBytes.Add(uint64(len(query)))
 		c.rxTotalBytes.Add(uint64(len(response)))
-		c.completePendingDNS(response, parsed.FirstQuestion)
+		c.completePendingDNSForGroup(response, parsed.FirstQuestion, group)
 	}()
 }

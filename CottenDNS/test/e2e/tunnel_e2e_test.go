@@ -15,7 +15,7 @@
 // This is the safety net for wire-format / protocol changes. It is gated behind
 // the `e2e` build tag so it never runs in the default `go test ./...`:
 //
-//	go test -tags e2e -timeout 120s ./test/e2e/
+//	go test -tags e2e -timeout 300s ./test/e2e/
 //
 // The config blocks below are lifted from scripts/bench/bench.go, which is a
 // known-good runtime configuration for the current client/server.
@@ -25,6 +25,7 @@ package e2e
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"io"
 	"net"
@@ -57,7 +58,10 @@ func binName(base string) string {
 
 func buildBinary(t *testing.T, root, pkg, outPath string) {
 	t.Helper()
-	cmd := exec.Command("go", "build", "-o", outPath, pkg)
+	ctx, cancel := context.WithTimeout(context.Background(), testTimeout(t, 3*time.Minute))
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "go", "build", "-o", outPath, pkg)
+	cmd.WaitDelay = time.Second
 	cmd.Dir = root
 	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
 	out, err := cmd.CombinedOutput()
@@ -66,7 +70,10 @@ func buildBinary(t *testing.T, root, pkg, outPath string) {
 	}
 }
 
-// freeUDPPort grabs an ephemeral UDP port and releases it for the server to bind.
+// The DNS server binds UDP and TCP on the same port. Choose through the TCP
+// allocator first: Windows UDP ephemeral ports can fall inside excluded TCP
+// ranges, making UDP-first selection repeatedly fail with WSAEACCES. Hold the
+// TCP reservation while checking UDP, retrying if that UDP port is unavailable.
 func freeUDPPort(t *testing.T) int {
 	return freeUDPPortForHost(t, "127.0.0.1")
 }
@@ -74,20 +81,65 @@ func freeUDPPort(t *testing.T) int {
 func freeUDPPortForHost(t *testing.T, host string) int {
 	t.Helper()
 	network := "udp4"
+	tcpNetwork := "tcp4"
 	if strings.Contains(host, ":") {
 		network = "udp6"
+		tcpNetwork = "tcp6"
 	}
 	addr, err := net.ResolveUDPAddr(network, net.JoinHostPort(host, "0"))
 	if err != nil {
 		t.Fatalf("resolve udp: %v", err)
 	}
-	c, err := net.ListenUDP(network, addr)
-	if err != nil {
-		t.Fatalf("listen udp: %v", err)
+	for attempt := 0; attempt < 32; attempt++ {
+		ln, listenErr := net.Listen(tcpNetwork, net.JoinHostPort(host, "0"))
+		if listenErr != nil {
+			t.Fatalf("listen tcp: %v", listenErr)
+		}
+		port := ln.Addr().(*net.TCPAddr).Port
+		udpAddr := *addr
+		udpAddr.Port = port
+		c, udpErr := net.ListenUDP(network, &udpAddr)
+		if udpErr != nil {
+			_ = ln.Close()
+			err = udpErr
+			continue
+		}
+		_ = c.Close()
+		_ = ln.Close()
+		return port
 	}
-	port := c.LocalAddr().(*net.UDPAddr).Port
-	_ = c.Close()
-	return port
+	t.Fatalf("no port available for both UDP and TCP on %s: %v", host, err)
+	return 0
+}
+
+const cleanupReserve = 5 * time.Second
+
+func boundedTimeout(requested, remaining time.Duration) time.Duration {
+	return max(0, min(requested, remaining-cleanupReserve))
+}
+
+// Fail with logs before the testing package's global timeout kills the test
+// binary (which bypasses t.Cleanup and can leave native children running).
+func testTimeout(t *testing.T, requested time.Duration) time.Duration {
+	t.Helper()
+	if deadline, ok := t.Deadline(); ok {
+		return boundedTimeout(requested, time.Until(deadline))
+	}
+	return requested
+}
+
+func reapChildOnCleanup(t *testing.T, cmd *exec.Cmd) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	go func() {
+		_ = cmd.Wait()
+		close(done)
+	}()
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		<-done
+	})
+	return done
 }
 
 func freeTCPPort(t *testing.T) int {
@@ -124,7 +176,7 @@ func waitForFile(path string, timeout time.Duration) error {
 		if info, err := os.Stat(path); err == nil && info.Size() > 0 {
 			return nil
 		}
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(min(150*time.Millisecond, time.Until(deadline)))
 	}
 	return fmt.Errorf("timeout waiting for file: %s", path)
 }
@@ -135,7 +187,7 @@ func waitForPattern(buf *safeBuf, pattern string, timeout time.Duration) error {
 		if strings.Contains(buf.String(), pattern) {
 			return nil
 		}
-		time.Sleep(150 * time.Millisecond)
+		time.Sleep(min(150*time.Millisecond, time.Until(deadline)))
 	}
 	return fmt.Errorf("timeout waiting for pattern %q", pattern)
 }
@@ -364,15 +416,16 @@ ARQ_TERMINAL_ACK_WAIT_TIMEOUT_SECONDS = 90.0
 
 	serverLog := &safeBuf{}
 	serverCmd := exec.Command(serverBin, "--config", serverCfg)
+	serverCmd.WaitDelay = time.Second
 	serverCmd.Dir = work
 	serverCmd.Stdout = serverLog
 	serverCmd.Stderr = serverLog
 	if err := serverCmd.Start(); err != nil {
 		t.Fatalf("start server: %v", err)
 	}
-	t.Cleanup(func() { _ = serverCmd.Process.Kill() })
+	reapChildOnCleanup(t, serverCmd)
 
-	if err := waitForFile(keyFile, 20*time.Second); err != nil {
+	if err := waitForFile(keyFile, testTimeout(t, 20*time.Second)); err != nil {
 		t.Fatalf("server did not generate key file: %v\n--- server log ---\n%s", err, serverLog.String())
 	}
 	keyData, _ := os.ReadFile(keyFile)
@@ -460,17 +513,18 @@ ARQ_DATA_NACK_REPEAT_SECONDS = 0.8
 
 	clientLog := &safeBuf{}
 	clientCmd := exec.Command(clientBin, "--config", clientCfg)
+	clientCmd.WaitDelay = time.Second
 	clientCmd.Dir = work
 	clientCmd.Stdout = clientLog
 	clientCmd.Stderr = clientLog
 	if err := clientCmd.Start(); err != nil {
 		t.Fatalf("start client: %v", err)
 	}
-	t.Cleanup(func() { _ = clientCmd.Process.Kill() })
+	reapChildOnCleanup(t, clientCmd)
 
 	// Generous: returns as soon as the client is up, but domain rotation needs
 	// two failed full scans first.
-	if err := waitForPattern(clientLog, "is listening", 150*time.Second); err != nil {
+	if err := waitForPattern(clientLog, "is listening", testTimeout(t, 150*time.Second)); err != nil {
 		t.Fatalf("client did not start listening: %v\n--- client log ---\n%s\n--- server log ---\n%s",
 			err, clientLog.String(), serverLog.String())
 	}
@@ -483,21 +537,21 @@ ARQ_DATA_NACK_REPEAT_SECONDS = 0.8
 	}
 
 	var conn net.Conn
-	var dialErr error
-	deadline := time.Now().Add(20 * time.Second)
+	dialErr := fmt.Errorf("timeout waiting for client listener")
+	deadline := time.Now().Add(testTimeout(t, 20*time.Second))
 	for time.Now().Before(deadline) {
-		conn, dialErr = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", clientPort), 3*time.Second)
+		conn, dialErr = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", clientPort), min(3*time.Second, time.Until(deadline)))
 		if dialErr == nil {
 			break
 		}
-		time.Sleep(250 * time.Millisecond)
+		time.Sleep(min(250*time.Millisecond, time.Until(deadline)))
 	}
 	if dialErr != nil {
 		t.Fatalf("dial client listener: %v\n--- client log ---\n%s", dialErr, clientLog.String())
 	}
 	defer conn.Close()
 
-	_ = conn.SetDeadline(time.Now().Add(60 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(testTimeout(t, 60*time.Second)))
 
 	writeErr := make(chan error, 1)
 	go func() {

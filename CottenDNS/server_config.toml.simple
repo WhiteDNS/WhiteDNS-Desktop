@@ -405,6 +405,8 @@ DNS_FRAGMENT_ASSEMBLY_TIMEOUT = 300.0
 
 # In-memory tunnel DNS cache sizing.
 DNS_CACHE_MAX_RECORDS = 50000
+# Maximum lifetime; authoritative DNS TTLs may expire replies sooner.
+# Cache hits do not extend expiry, and transient failures are not cached.
 DNS_CACHE_TTL_SECONDS = 300.0
 
 # ------------------------------------------------------------------------------

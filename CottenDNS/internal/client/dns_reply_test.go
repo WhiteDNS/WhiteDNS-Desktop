@@ -1,7 +1,7 @@
 package client
 
 import (
-	"bytes"
+	"encoding/binary"
 	"testing"
 	"time"
 
@@ -10,21 +10,22 @@ import (
 )
 
 func TestFirstDNSRequestReceivesDelayedTunnelResponse(t *testing.T) {
-	c := &Client{localDNSCache: dnsCache.New(16, time.Minute, time.Second)}
-	key := dnsCache.BuildKey("example.com", 1, 1)
-	query := []byte{0x12, 0x34, 0, 0}
-	result := make(chan []byte, 1)
-	c.pendingDNS.mu.Lock()
-	_, accepted := c.addPendingDNSLocked(key, query, func(reply []byte) { result <- reply })
-	c.pendingDNS.mu.Unlock()
-	if !accepted {
-		t.Fatal("first waiter was rejected")
+	c := &Client{localDNSCache: dnsCache.New(16, time.Minute, time.Second), sessionReady: true}
+	query, err := dnsParser.BuildTXTQuestionPacket("example.com", 1, 1232)
+	if err != nil {
+		t.Fatal(err)
 	}
+	binary.BigEndian.PutUint16(query, 0x1234)
+	result := make(chan []byte, 1)
+	if c.ProcessDNSQuery(query, nil, func(reply []byte) { result <- reply }) {
+		t.Fatal("first request unexpectedly hit cache")
+	}
+	wireQuery := pendingDNSWireQuery(t, c, query)
 	query[0] = 0xff // the socket read buffer may already be reused
-	c.completePendingDNS([]byte{0, 0, 0x80, 0}, dnsParser.Question{Name: "example.com", Type: 1, Class: 1})
+	c.completePendingDNS(connectionDNSReply(t, wireQuery, 60), dnsParser.Question{Name: "example.com", Type: 1, Class: 1})
 	select {
 	case reply := <-result:
-		if !bytes.Equal(reply, []byte{0x12, 0x34, 0x80, 0}) {
+		if binary.BigEndian.Uint16(reply) != 0x1234 || reply[len(reply)-1] != 8 {
 			t.Fatal("reply lost original transaction ID", reply)
 		}
 	case <-time.After(time.Second):
